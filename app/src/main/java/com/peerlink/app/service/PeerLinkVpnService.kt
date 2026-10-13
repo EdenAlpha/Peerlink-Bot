@@ -411,10 +411,14 @@ class PeerLinkVpnService : VpnService() {
             } catch (_: Exception) {
             }
 
-            // F24: full packet-byte capture is intentionally disabled. Keep the
-            // backend path empty so no PCAPNG file or writer is created.
-            rawCaptureFile = null
-            lastRawCapturePath = ""
+            // Raw byte capture ON: full tunneled IP bytes go to PCAPNG.
+            // Measured 9/26 session is ~10-20 MB; native caps at 128 MB and
+            // counts cap drops, so storage stays bounded. Empty path would
+            // keep the old timing-only behaviour — do not do that here.
+            val pcapDir = java.io.File(getExternalFilesDir(null) ?: filesDir, "pcapng")
+            if (!pcapDir.exists()) pcapDir.mkdirs()
+            rawCaptureFile = java.io.File(pcapDir, "peerlink_capture.pcapng")
+            lastRawCapturePath = rawCaptureFile!!.absolutePath
             val backendConfig = NativeBackendConfig(
                 peerLanIp = peerLanIp,
                 peerPort = AppState.peerPort.get(),

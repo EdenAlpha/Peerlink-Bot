@@ -93,7 +93,13 @@ constexpr bool kPacketDiagnosticsEnabled = false;
 // every packet produced by the TUN while keeping the two SPSC rings small
 // (~4 MiB total). If an OEM violates the MTU, forwarding still wins and an
 // explicit oversized-drop counter exposes that the capture is incomplete.
+//
+// Safety cap: a full 9/26 session was ~77k tunnel packets at <=200 B each
+// (~10-20 MB), so 128 MB never binds in practice but keeps a pathological
+// session from filling phone storage. Packets past the cap are counted in
+// raw_capture_queue_drops, so RawCaptureStats.complete goes false.
 constexpr size_t kRawCaptureMaxPacket = 2048;
+constexpr uint64_t kRawCaptureMaxFileBytes = 128ULL * 1024 * 1024;
 constexpr size_t kRawCaptureRingCapacity = 1024;
 constexpr size_t kRawCaptureStdioBuffer = 1024 * 1024;
 constexpr uint8_t kUdpTraceStageTunRead = 1;
@@ -780,6 +786,12 @@ void enqueue_raw_capture(BackendState *state,
                          uint64_t mono_ns) {
     if (state == nullptr || packet == nullptr || packet_length == 0 ||
         !state->raw_capture_enabled.load(std::memory_order_acquire)) return;
+    if (state->raw_capture_file_bytes.load(std::memory_order_relaxed) > kRawCaptureMaxFileBytes) {
+        // File cap reached: skip the memcpy, keep forwarding untouched, and
+        // mark the capture incomplete via the queue-drop counter.
+        state->raw_capture_queue_drops.fetch_add(1, std::memory_order_relaxed);
+        return;
+    }
     if (packet_length > kRawCaptureMaxPacket) {
         state->raw_capture_oversized_drops.fetch_add(1, std::memory_order_relaxed);
         return;
@@ -2802,6 +2814,8 @@ void handle_peer_packet(JNIEnv *env,
                              meta.valid ? meta.send_attempt_ns : 0,
                              kernel_rx_rt_ns);
         }
+        // Raw bytes in (peer -> phone): the inner IP packet as received.
+        enqueue_raw_capture(state, false, inner_packet, payload_length, rx_now_ns);
         inject_inner_ipv4_to_tun(env, state, inner_packet, payload_length, tunnel_flags, meta.valid ? &meta : nullptr);
     } else if (version == 6) {
         ParsedIpv6 parsed{};
@@ -2824,6 +2838,8 @@ void handle_peer_packet(JNIEnv *env,
                              meta.valid ? meta.send_attempt_ns : 0,
                              kernel_rx_rt_ns);
         }
+        // Raw bytes in (peer -> phone): the inner IP packet as received.
+        enqueue_raw_capture(state, false, inner_packet, payload_length, rx_now_ns);
         inject_inner_ipv6_to_tun(env, state, inner_packet, payload_length, tunnel_flags, meta.valid ? &meta : nullptr);
     } else {
         state->stats.dropped_packets.fetch_add(1, std::memory_order_relaxed);
@@ -2941,6 +2957,8 @@ void handle_tun_ipv4(JNIEnv *env, BackendState *state, const uint8_t *packet, si
                                  0,
                                  0);
             }
+            // Raw bytes out (phone -> peer): the original TUN IP packet.
+            enqueue_raw_capture(state, true, packet, parsed.packet_length, t0_ns);
             if (send_tunnel_frame(env, state, packet, parsed.packet_length, seq, t0_ns, s1_ns,
                                   flow_hash, tunnel_flags, 4, parsed.source_port, parsed.dest_port)) {
                 record_match_packet_signal(state, parsed.udp_payload_length, now_ms);
@@ -3041,6 +3059,8 @@ void handle_tun_ipv6(JNIEnv *env, BackendState *state, const uint8_t *packet, si
                              0,
                              0);
         }
+        // Raw bytes out (phone -> peer): the original TUN IP packet.
+        enqueue_raw_capture(state, true, packet, parsed.packet_length, t0_ns);
         if (send_tunnel_frame(env, state, packet, parsed.packet_length, seq, t0_ns, s1_ns,
                               flow_hash, tunnel_flags, 6, parsed.source_port, parsed.dest_port) &&
             parsed.next_header == kProtocolUdp) {
@@ -3834,9 +3854,10 @@ Java_com_peerlink_app_tunnel_NativePeerLinkBackend_nativeStart(
     }
     state->peer_socket_connected.store(true, std::memory_order_release);
 
-    // F24: deliberately do not start the PCAPNG writer. Packet forwarding and
-    // timing metadata continue, but raw IP/UDP bytes are never written to disk.
-    const bool capture_ok = false;
+    // Raw byte capture: start the PCAPNG writer when the JVM supplied a path.
+    // Empty path keeps the previous timing-only behaviour (writer off, bytes
+    // never touch disk, forwarding and metadata continue as before).
+    const bool capture_ok = start_raw_capture(state, raw_capture_path_str);
 
     jlongArray result = env->NewLongArray(2);
     if (result == nullptr) {
@@ -3871,7 +3892,8 @@ Java_com_peerlink_app_tunnel_NativePeerLinkBackend_nativeStart(
     char trace_msg[256];
     std::snprintf(trace_msg,
                   sizeof(trace_msg),
-                  "[F24-TRACE] rawBytes=off udpTiming=on capacity=%zu textPacketDiagnostics=off",
+                  "[F24-TRACE] rawBytes=%s udpTiming=on capacity=%zu textPacketDiagnostics=off",
+                  capture_ok ? "on" : "off",
                   state->udp_trace_capacity);
     emit_native_log(env, state, kNativeLogInfo, false, trace_msg);
     return result;

@@ -372,6 +372,7 @@ class MainActivity : AppCompatActivity(), NsdDiscovery.NsdCallback {
                                 val udpTrace = runCatching { PeerLinkVpnService.dumpNativeUdpTrace() }
                                     .getOrDefault("")
                                 val passCap = runCatching { PassthroughRecorder.snapshotForExport() }.getOrNull()
+                                val rawCap = runCatching { PeerLinkVpnService.snapshotRawCapture() }.getOrNull()
                                 val shots = com.peerlink.app.service.ScoreCaptureDump.exportedFiles()
 
                                 // Bundle EVERYTHING into a single zip file.
@@ -382,6 +383,9 @@ class MainActivity : AppCompatActivity(), NsdDiscovery.NsdCallback {
                                 }
                                 if (passCap != null) {
                                     entries.add(ZipEntryData(name = "passthrough_capture.csv", file = passCap))
+                                }
+                                if (rawCap?.file != null) {
+                                    entries.add(ZipEntryData(name = "tunnel_capture.pcapng", file = rawCap.file))
                                 }
                                 for (shot in shots) {
                                     entries.add(ZipEntryData(name = "score_shots/${shot.name}", file = shot))
@@ -415,6 +419,9 @@ class MainActivity : AppCompatActivity(), NsdDiscovery.NsdCallback {
                                             if (passCap != null) {
                                                 appendLine("- passthrough_capture.csv : full-byte internet-side (non-game) traffic with event markers")
                                             }
+                                            if (rawCap?.file != null) {
+                                                appendLine("- tunnel_capture.pcapng : full-byte tunneled game traffic (PCAPNG, out+in; packets=${rawCap.stats.packets} bytes=${rawCap.stats.bytes} queueDrops=${rawCap.stats.queueDrops} oversized=${rawCap.stats.oversizedDrops} writeErrors=${rawCap.stats.writeErrors})")
+                                            }
                                             if (shots.isNotEmpty()) {
                                                 appendLine("- score_shots/  : ${shots.size} score capture shot(s)")
                                             }
@@ -439,7 +446,7 @@ class MainActivity : AppCompatActivity(), NsdDiscovery.NsdCallback {
                                 AppState.appendLog(
                                     "[EXPORT ] Single-file export $fileName ok=$ok; " +
                                         "log chars=${fullLog.length}; " +
-                                        "UDP timing trace chars=${udpTrace.length} rawBytes=off; " +
+                                        "UDP timing trace chars=${udpTrace.length} rawBytes=${if (rawCap?.file != null) "on" else "off"}; " +
                                         "passthrough=${passCap?.name ?: "none"} (${com.peerlink.app.tunnel.PassthroughRecorder.statsLine()}); " +
                                         "score shots ${shots.size}"
                                 )
