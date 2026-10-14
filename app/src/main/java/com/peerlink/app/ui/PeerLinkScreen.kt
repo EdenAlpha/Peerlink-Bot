@@ -83,6 +83,8 @@ import com.peerlink.app.godmode.PrimeGraphicsMode
 import com.peerlink.app.godmode.PrimeLinkState
 import com.peerlink.app.godmode.PrimeClient
 import com.peerlink.app.godmode.PrimeMemoryAggression
+import com.peerlink.app.play.PlayRoomController
+import com.peerlink.app.play.RoomState
 import com.peerlink.app.service.CallMonitorService
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -242,6 +244,7 @@ fun PeerLinkScreen(
     var name by rememberSaveable { mutableStateOf(prefs.getString("username", "") ?: "") }
     var adminOpen by remember { mutableStateOf(false) }
     var adminUnlockOpen by remember { mutableStateOf(false) }
+    var showGeneralSettings by remember { mutableStateOf(false) }
 
 
     val primeState by GodModeManager.state.collectAsStateWithLifecycle()
@@ -263,6 +266,7 @@ fun PeerLinkScreen(
 
     val pager = rememberPagerState(pageCount = { 3 })
     BackHandler(adminOpen) { adminOpen = false }
+    BackHandler(showGeneralSettings) { showGeneralSettings = false }
 
     Box(Modifier.fillMaxSize().background(PL.bg)) {
         Column(Modifier.fillMaxSize().statusBarsPadding().imePadding()) {
@@ -277,7 +281,7 @@ fun PeerLinkScreen(
                         color = PL.ink, letterSpacing = (-0.6).sp)
                     Text("Better together", fontSize = 12.sp, color = PL.muted)
                 }
-                if (actions.isAdmin) DarkHeaderBtn(Icons.Rounded.Settings) { adminOpen = true }
+                DarkHeaderBtn(Icons.Rounded.Settings) { adminOpen = true }
                 StatusChip(sessionPhase)
             }
 
@@ -307,14 +311,10 @@ fun PeerLinkScreen(
                     },
                     callBlockOn = actions.callBlockEnabled(),
                     ctx = ctx
-                ) else if (page == 1) CoinPage() else SettingsPage(
+                ) else if (page == 1) CoinPage() else PlayPeerLinkPage(
+                    ctx = ctx,
                     primeReady = primeReady,
                     primeActive = primeActive,
-                    onSetupPrime = actions.onSetupPrimeMode,
-                    onBatterySettings = actions.openBatterySettings,
-                    onExportLogs = actions.exportMatchLogs,
-                    onMatchMarker = actions.setMatchMarker,
-                    ctx = ctx,
                 )
             }
             NavigationBar(containerColor = PL.elevated, tonalElevation = 0.dp) {
@@ -333,7 +333,7 @@ fun PeerLinkScreen(
                 NavigationBarItem(
                     selected = pager.currentPage == 2,
                     onClick = { uiScope.launch { pager.animateScrollToPage(2) } },
-                    icon = { Icon(Icons.Rounded.Tune, null) }, label = { Text("Settings") },
+                    icon = { Icon(Icons.Rounded.SportsSoccer, null) }, label = { Text("Play PeerLink") },
                     colors = peerNavigationColors(),
                 )
             }
@@ -342,7 +342,7 @@ fun PeerLinkScreen(
         if (adminOpen) Box(Modifier.fillMaxSize().background(Color(0xCC000000)).clickable(
             indication = null, interactionSource = null) { adminOpen = false })
 
-        SidePanel(adminOpen, false, { adminOpen = false }) { AdminMenu(ctx, actions) }
+        SidePanel(adminOpen, false, { adminOpen = false }) { AdminMenu(ctx, actions, onOpenGeneralSettings = { adminOpen = false; showGeneralSettings = true }) }
 
         if (adminUnlockOpen) AdminUnlockDialog(onClose = { adminUnlockOpen = false }) { entered ->
             if (actions.tryAdminUnlock(entered)) {
@@ -350,6 +350,18 @@ fun PeerLinkScreen(
             } else false
         }
 
+        if (showGeneralSettings) {
+            GeneralSettingsOverlay(
+                primeReady = primeReady,
+                primeActive = primeActive,
+                onBack = { showGeneralSettings = false },
+                onSetupPrime = actions.onSetupPrimeMode,
+                onBatterySettings = actions.openBatterySettings,
+                onExportLogs = actions.exportMatchLogs,
+                onMatchMarker = actions.setMatchMarker,
+                ctx = ctx,
+            )
+        }
 
     }
 }
@@ -1041,6 +1053,188 @@ private fun statLabel(name: String): String = when (name) {
     }
 }
 /* ─── Settings: a real page now, same rhythm as the Activity page ─── */
+/* ─── Play PeerLink: create a room, copy the code, play the local bot ─── */
+@Composable
+private fun PlayPeerLinkPage(
+    ctx: Context,
+    primeReady: Boolean,
+    primeActive: Boolean,
+) {
+    val room by PlayRoomController.state.collectAsStateWithLifecycle()
+    var codeInput by remember { mutableStateOf(TextFieldValue("")) }
+
+    Column(
+        Modifier.fillMaxSize().padding(horizontal = 20.dp).verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        Spacer(Modifier.height(4.dp))
+        Text("Play PeerLink", color = PL.ink, fontSize = 28.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.5).sp)
+        Text(
+            "Create a room and play on this phone. Your opponent is the PeerLink bot, running locally through the PeerLink VPN — no second phone needed.",
+            color = PL.inkSoft, fontSize = 14.sp, lineHeight = 20.sp,
+        )
+        Spacer(Modifier.height(2.dp))
+
+        // Hero: one phone, two sides.
+        Box(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp))
+                .background(Brush.linearGradient(listOf(Color(0xFF2A3320), Color(0xFF1E241A))))
+                .border(1.dp, PL.gold.copy(alpha = 0.25f), RoundedCornerShape(28.dp))
+                .padding(22.dp)
+        ) {
+            Column {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(44.dp).clip(RoundedCornerShape(14.dp)).background(PL.gold.copy(alpha = 0.16f)), contentAlignment = Alignment.Center) {
+                        Icon(Icons.Rounded.SportsSoccer, null, tint = PL.gold, modifier = Modifier.size(22.dp))
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    Column {
+                        Text("YOUR MATCH", fontSize = 10.sp, color = PL.gold, letterSpacing = 1.4.sp, fontWeight = FontWeight.Bold)
+                        Text("One phone, two sides", fontSize = 17.sp, color = PL.ink, fontWeight = FontWeight.Bold)
+                    }
+                }
+                Spacer(Modifier.height(14.dp))
+                Text(
+                    "PeerLink opens eFootball, holds the room, and lets the bot join as your opponent over the tunnel. The game sees a normal peer-to-peer match.",
+                    fontSize = 12.5.sp, color = PL.inkSoft, lineHeight = 19.sp,
+                )
+                Spacer(Modifier.height(16.dp))
+                GhostBtn("Create room", Icons.Rounded.Add) { PlayRoomController.launchGameToCreateRoom(ctx) }
+            }
+        }
+
+        when (val s = room) {
+            is RoomState.Creating -> DarkCard {
+                Text("Waiting for eFootball…", color = PL.ink, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.height(6.dp))
+                Text(s.note, color = PL.inkSoft, fontSize = 12.5.sp, lineHeight = 19.sp)
+            }
+            is RoomState.Ready -> RoomCodeCard(s.number, ctx)
+            is RoomState.Failed -> DarkCard {
+                Text("Couldn't start the room", color = PL.red, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.height(6.dp))
+                Text(s.reason, color = PL.inkSoft, fontSize = 12.5.sp, lineHeight = 19.sp)
+                Spacer(Modifier.height(10.dp))
+                GhostBtn("Try again", Icons.Rounded.Refresh) { PlayRoomController.launchGameToCreateRoom(ctx) }
+            }
+            is RoomState.Idle -> {}
+        }
+
+        // Manual entry for a room that is already open in the game.
+        SectionTitle("Have a room code?")
+        DarkCard {
+            Para("If the room is already open in eFootball, paste its code here so the bot can join it.")
+            Spacer(Modifier.height(4.dp))
+            Box(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+                    .background(PL.surface).border(1.dp, PL.line, RoundedCornerShape(12.dp))
+                    .padding(12.dp, 9.dp)
+            ) {
+                BasicTextField(
+                    codeInput, { codeInput = it.copy(text = it.text.uppercase()) }, singleLine = true,
+                    textStyle = androidx.compose.ui.text.TextStyle(PL.ink, 15.sp, FontWeight.SemiBold, fontFamily = FontFamily.Monospace),
+                    cursorBrush = SolidColor(PL.gold), modifier = Modifier.fillMaxWidth(),
+                    decorationBox = { inner -> Box { if (codeInput.text.isEmpty()) Text("Room code", color = PL.muted, fontSize = 15.sp); inner() } }
+                )
+            }
+            Spacer(Modifier.height(10.dp))
+            GhostBtn("Use this code", Icons.Rounded.Check) {
+                if (codeInput.text.isNotBlank()) {
+                    PlayRoomController.setRoomNumber(codeInput.text)
+                    codeInput = TextFieldValue("")
+                } else {
+                    Toast.makeText(ctx, "Enter the room code first", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+
+        SectionTitle("How it works")
+        DarkCard {
+            Feat("Local bot", "The opponent runs on this phone, so a match needs no second device.")
+            Feat("PeerLink VPN", "The tunnel fakes open NAT for both sides, keeping the game on a direct peer-to-peer path.")
+            if (!primeReady) {
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    "Prime Mode is optional here, but pairing it keeps the connection steadier. Find it under the gear → General Settings.",
+                    fontSize = 12.sp, color = PL.muted, lineHeight = 17.sp,
+                )
+            } else if (primeActive) {
+                Spacer(Modifier.height(2.dp))
+                Text("Prime Mode is on.", fontSize = 12.sp, color = PL.green, lineHeight = 17.sp)
+            }
+            if (room is RoomState.Ready) {
+                Spacer(Modifier.height(8.dp))
+                GhostBtn("Clear room", Icons.Rounded.Delete) { PlayRoomController.clear() }
+            }
+        }
+        Spacer(Modifier.height(4.dp))
+    }
+}
+
+/** Big, copyable room code — the number Konami shows for the match room. */
+@Composable
+private fun RoomCodeCard(number: String, ctx: Context) {
+    Column(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp))
+            .background(Brush.linearGradient(listOf(Color(0xFF26301E), Color(0xFF1B2117))))
+            .border(1.dp, PL.gold.copy(alpha = 0.35f), RoundedCornerShape(24.dp))
+            .padding(22.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text("ROOM CODE", fontSize = 10.sp, color = PL.gold, letterSpacing = 1.6.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(12.dp))
+        Text(
+            number,
+            fontSize = 32.sp, fontWeight = FontWeight.Bold, color = PL.ink,
+            fontFamily = FontFamily.Monospace, letterSpacing = 3.sp,
+            textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(Modifier.height(6.dp))
+        Text("Share this code — or the bot uses it to join.", fontSize = 12.sp, color = PL.inkSoft)
+        Spacer(Modifier.height(16.dp))
+        GhostBtn("Copy code", Icons.Rounded.ContentCopy) {
+            PlayRoomController.copyNumber(ctx, number)
+            Toast.makeText(ctx, "Room code copied", Toast.LENGTH_SHORT).show()
+        }
+    }
+}
+
+/* ─── General Settings: the settings page, opened from the gear panel ─── */
+@Composable
+private fun GeneralSettingsOverlay(
+    primeReady: Boolean,
+    primeActive: Boolean,
+    onBack: () -> Unit,
+    onSetupPrime: () -> Unit,
+    onBatterySettings: () -> Unit,
+    onExportLogs: () -> Unit,
+    onMatchMarker: (Boolean) -> Unit,
+    ctx: Context,
+) {
+    Box(Modifier.fillMaxSize().background(PL.bg)) {
+        Column(Modifier.fillMaxSize().statusBarsPadding()) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                IconButton(onClick = onBack) { Icon(Icons.Rounded.ArrowBack, "Back", tint = PL.ink) }
+                Text("General Settings", color = PL.ink, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            }
+            Box(Modifier.weight(1f)) {
+                SettingsPage(
+                    primeReady = primeReady,
+                    primeActive = primeActive,
+                    onSetupPrime = onSetupPrime,
+                    onBatterySettings = onBatterySettings,
+                    onExportLogs = onExportLogs,
+                    onMatchMarker = onMatchMarker,
+                    ctx = ctx,
+                )
+            }
+        }
+    }
+}
+
 @Composable
 private fun SettingsPage(
     primeReady: Boolean,
@@ -1299,7 +1493,7 @@ private fun runWhistleProbeChain(ctx: Context): String {
     return "Tap opened but only silence came through \u2014 make sure game sound is on while recording"
 }
 
-@Composable private fun AdminMenu(ctx: Context, actions: PeerLinkActions) {
+@Composable private fun AdminMenu(ctx: Context, actions: PeerLinkActions, onOpenGeneralSettings: () -> Unit = {}) {
     var open by remember { mutableStateOf(0) }
     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 14.dp, start = 4.dp)) {
         Text("Admin", fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, color = PL.ink)
@@ -1367,6 +1561,9 @@ private fun runWhistleProbeChain(ctx: Context): String {
         Para("Match diagnostics are saved automatically while a session is active. Exporting does not pause the tunnel.")
         GhostBtn("Export match logs", Icons.Rounded.FileDownload) { actions.exportMatchLogs(); Toast.makeText(ctx, "Exporting\u2026", Toast.LENGTH_SHORT).show() }
     }
+
+    Spacer(Modifier.height(4.dp))
+    GhostBtn("General Settings", Icons.Rounded.Tune) { onOpenGeneralSettings() }
 }
 
 @Composable private fun AdminUnlockDialog(onClose: () -> Unit, onSubmit: (String) -> Boolean) {
