@@ -19,9 +19,10 @@ import kotlinx.coroutines.flow.asStateFlow
  * while the gate client itself is ported. It is `suspend` because the gate
  * call is network I/O.
  */
+/** The bot's room service: creates the room and returns its number. */
 interface BotRoomBackend {
     /** Create a room as the bot; returns the room number to show the user. */
-    suspend fun createRoom(): String
+    suspend fun createRoom(ctx: Context): String
 }
 
 /**
@@ -52,6 +53,9 @@ sealed interface RoomState {
  */
 object PlayRoomController {
 
+    private val io = kotlinx.coroutines.CoroutineScope(
+        kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO
+    )
     private val _state = MutableStateFlow<RoomState>(RoomState.Idle)
     val state: StateFlow<RoomState> = _state.asStateFlow()
 
@@ -59,14 +63,23 @@ object PlayRoomController {
     @Volatile
     var backend: BotRoomBackend? = null
 
+    @Volatile
+    private var appContext: Context? = null
+
+    /** Attach the bot's room service (called once the UI context exists). */
+    fun attach(b: BotRoomBackend, ctx: Context) {
+        backend = b
+        appContext = ctx.applicationContext
+    }
+
     /**
-     * Ask the bot to create a room. Runs [BotRoomBackend.createRoom] on the
-     * caller's coroutine; safe to call from a UI click (it launches its own
-     * scope-free work via the provided suspend caller).
+     * Ask the bot to create a room: login at the gate, CMD_CREATEJOIN_ROOM,
+     * surface the returned number. Never invents one on failure.
      */
     fun createRoom() {
         val be = backend
-        if (be == null) {
+        val ctx = appContext
+        if (be == null || ctx == null) {
             _state.value = RoomState.Failed(
                 "The bot's room service isn't linked in yet. This needs the bot " +
                     "logged into Konami's gate — the next piece of work."
@@ -74,6 +87,13 @@ object PlayRoomController {
             return
         }
         _state.value = RoomState.Creating("The bot is opening a room at Konami…")
+        io.launch {
+            try {
+                onRoomCreated(be.createRoom(ctx))
+            } catch (t: Throwable) {
+                onRoomFailed(t.message ?: "Room creation failed.")
+            }
+        }
     }
 
     /** Called by the wiring with the room number the bot got back. */

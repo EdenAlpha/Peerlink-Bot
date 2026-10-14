@@ -83,6 +83,7 @@ import com.peerlink.app.godmode.PrimeGraphicsMode
 import com.peerlink.app.godmode.PrimeLinkState
 import com.peerlink.app.godmode.PrimeClient
 import com.peerlink.app.godmode.PrimeMemoryAggression
+import com.peerlink.app.bot.BotRoomService
 import com.peerlink.app.play.PlayRoomController
 import com.peerlink.app.play.RoomState
 import com.peerlink.app.service.CallMonitorService
@@ -1052,7 +1053,6 @@ private fun statLabel(name: String): String = when (name) {
         }
     }
 }
-/* ─── Settings: a real page now, same rhythm as the Activity page ─── */
 /* ─── Play PeerLink: the bot hosts a room; you join it in your own eFootball ─── */
 @Composable
 private fun PlayPeerLinkPage(
@@ -1061,6 +1061,7 @@ private fun PlayPeerLinkPage(
     primeActive: Boolean,
 ) {
     val room by PlayRoomController.state.collectAsStateWithLifecycle()
+    LaunchedEffect(Unit) { PlayRoomController.attach(BotRoomService, ctx) }
 
     Column(
         Modifier.fillMaxSize().padding(horizontal = 20.dp).verticalScroll(rememberScrollState()),

@@ -1,0 +1,226 @@
+package com.peerlink.app.bot
+
+import android.content.Context
+import java.io.ByteArrayOutputStream
+import java.net.HttpURLConnection
+import java.net.URL
+import kotlin.random.Random
+
+/**
+ * Bot identity -- the second Konami account the bot logs in as.
+ *
+ * On a user's phone these values live ONLY in app-private storage
+ * (`bot_identity` prefs file). They must never be hardcoded or committed: the
+ * repo ships the protocol, the phone supplies the account.
+ */
+data class BotIdentity(
+    val userId: Long,
+    val authCode: String,
+    val hash: String = "",
+    val lang: String = "US",
+    val region: String = "REGION_US",
+    val platform: String = "ANDROID",
+    val myPlatform: String = "ANDROID",
+) {
+    val isComplete: Boolean get() = userId != 0L && authCode.isNotBlank()
+
+    companion object {
+        private const val FILE = "bot_identity"
+
+        fun load(ctx: Context): BotIdentity? {
+            val p = ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+            val uid = p.getLong("user_id", 0L)
+            val code = p.getString("auth_code", "").orEmpty()
+            if (uid == 0L || code.isBlank()) return null
+            return BotIdentity(
+                userId = uid,
+                authCode = code,
+                hash = p.getString("hash", "").orEmpty(),
+                lang = p.getString("lang", "US") ?: "US",
+                region = p.getString("region", "REGION_US") ?: "REGION_US",
+                platform = p.getString("platform", "ANDROID") ?: "ANDROID",
+                myPlatform = p.getString("my_platform", "ANDROID") ?: "ANDROID",
+            )
+        }
+
+        /** Device-private write path; also the only place credentials touch disk. */
+        fun save(ctx: Context, id: BotIdentity) {
+            ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE).edit()
+                .putLong("user_id", id.userId)
+                .putString("auth_code", id.authCode)
+                .putString("hash", id.hash)
+                .putString("lang", id.lang)
+                .putString("region", id.region)
+                .putString("platform", id.platform)
+                .putString("my_platform", id.myPlatform)
+                .apply()
+        }
+
+        fun clear(ctx: Context) {
+            ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE).edit().clear().apply()
+        }
+    }
+}
+
+/**
+ * One live gate session -- the Kotlin `Gate` of room1.py.
+ *
+ * The gate caches responses on rqid, so rqid starts at a random per-process
+ * base and increments on every request, and pacing (~0.4 s) avoids
+ * ERR_CONGESTION. Login/acquire:
+ *
+ *   login (bot identity) -> session_id
+ *   CMD_CREATEJOIN_ROOM  -> room_id  (the number the user types into eFootball)
+ */
+class KgsGate(private val identity: BotIdentity) {
+
+    var sid: String = ""
+        private set
+    var uid: Long = 0L
+        private set
+    private var rqid: Long = 1_500_000L + Random.nextInt(0, 4_000_000)
+
+    private fun nextRq(): Long = ++rqid
+
+    private fun envelope(msgid: String): LinkedHashMap<String, Any?> = linkedMapOf(
+        "msgid" to msgid,
+        "rqid" to nextRq(),
+        "user_id" to uid,
+        "session_id" to sid,
+        "my_platform" to identity.myPlatform,
+        "s_keyword" to GateCodec.sKeyword(),
+        "lang" to identity.lang,
+        "region" to identity.region,
+        "platform" to identity.platform,
+        "client_version" to GateCodec.CLIENT_VERSION,
+    )
+
+    /** POST one gate request and decode the response; never throws on server error shapes. */
+    private fun send(msg: LinkedHashMap<String, Any?>, timeoutMs: Int = 25_000): LinkedHashMap<String, Any?> {
+        val body = GateCodec.encode(msg)
+        val sign = GateCodec.makeSign(body)
+        val url = URL("https://${GateCodec.HOST}/pes22/gate/gate_${msg["msgid"]}.php")
+        val conn = (url.openConnection() as HttpURLConnection).apply {
+            requestMethod = "POST"
+            connectTimeout = timeoutMs
+            readTimeout = timeoutMs
+            doOutput = true
+            instanceFollowRedirects = false
+            setRequestProperty("Accept-Language", "jp")
+            setRequestProperty("User-Agent", GateCodec.userAgent())
+            setRequestProperty("pes-custom-encrypt", "AES256")
+            setRequestProperty("Accept-Encoding", "gzip")
+            setRequestProperty("Content-Encoding", "gzip")
+            setRequestProperty("Cookie", "sign=$sign;")
+            setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
+            setRequestProperty("Connection", "close")
+        }
+        val status: String
+        val data: ByteArray
+        try {
+            conn.outputStream.use { it.write(body) }
+            status = try { conn.responseMessage ?: "${conn.responseCode}" } catch (_: Throwable) { "?" }
+            data = try { conn.inputStream.use { it.readBytes() } } catch (_: Throwable) { ByteArray(0) }
+        } catch (t: Throwable) {
+            return linkedMapOf("result" to "_NET_FAIL", "_err" to (t.message ?: t.javaClass.simpleName))
+        } finally {
+            conn.disconnect()
+        }
+        if (data.isEmpty()) return linkedMapOf("result" to "_HTTP_EMPTY", "_status" to status)
+        return try {
+            val out = GateCodec.decode(data)
+            @Suppress("UNCHECKED_CAST")
+            (out as? LinkedHashMap<String, Any?>) ?: linkedMapOf("result" to "_DECODE_FAIL", "_status" to status)
+        } catch (t: Throwable) {
+            linkedMapOf("result" to "_DECODE_FAIL", "_err" to (t.message ?: "?"), "_status" to status, "_len" to data.size)
+        }
+    }
+
+    /**
+     * Shallow diagnostics without leaking identity values -- same discipline as
+     * room1.describe(): only result/error surfaces, never request bodies.
+     */
+    private fun describe(o: Map<*, *>): String {
+        val keep = linkedMapOf<String, Any?>()
+        for (k in listOf("result", "msgid", "msg", "error_code", "error", "errcode",
+                "show_info", "maintenance_end_time", "_status", "_err", "_len", "_rqid_echo")) {
+            if (o.containsKey(k)) keep[k] = o[k]
+        }
+        return if (keep.isEmpty()) "NOERR" else keep.toString()
+    }
+
+    /** CMD_LOGIN as the bot account; returns the gate response. */
+    fun login(): LinkedHashMap<String, Any?> {
+        val m = envelope("CMD_LOGIN")
+        m["user_id"] = identity.userId
+        m["auth_code"] = identity.authCode
+        m["session_id"] = ""
+        if (identity.hash.isNotBlank()) m["hash"] = identity.hash
+        val r = send(m)
+        val result = r["result"]
+        val session = r["session_id"]
+        if (result == "NOERR" && session is String && session.isNotBlank()) {
+            sid = session
+            val pui = r["pes_user_info"]
+            uid = identity.userId
+            if (pui is Map<*, *>) {
+                (pui["user_id"] as? Long)?.let { uid = it }
+            }
+            return r
+        }
+        throw GateException("login failed: ${describe(r)}")
+    }
+
+    /** CMD_SET_GAMERELAY_QUALITY; entries come from real on-device data when available. */
+    fun setRelayQuality(qualityList: List<Map<String, Any?>>, lastUpdate: Long): LinkedHashMap<String, Any?> {
+        val m = envelope("CMD_SET_GAMERELAY_QUALITY")
+        m["quality_list"] = qualityList.map { LinkedHashMap(it).apply { put("last_update", lastUpdate) } }
+        return send(m)
+    }
+
+    /**
+     * CMD_CREATEJOIN_ROOM -- the bot hosts a 1v1 room. Body mirrors room1.create_room
+     * verbatim; returns the gate response (room_id inside on NOERR).
+     */
+    fun createRoom(): LinkedHashMap<String, Any?> {
+        val m = envelope("CMD_CREATEJOIN_ROOM")
+        m["core_settings"] = linkedMapOf<String, Any?>(
+            "mode" to "STRIKE_ARENA", "event_id" to 0, "kind" to "STRIKE_ARENA",
+            "name_tag" to 0, "entry_restriction" to "NONE", "password" to "",
+            "lang" to identity.lang, "capacity" to 2, "observer_capacity" to 0,
+            "guest_num_by_user" to 0, "is_coop_vs_com_single" to "NO",
+        )
+        m["match_settings"] = linkedMapOf(
+            "match_env" to linkedMapOf<String, Any?>(
+                "condition_home" to "CONDITION_RANDOM", "condition_away" to "CONDITION_RANDOM",
+                "cpu_level" to "EASY", "match_time" to 1, "injury" to "NO", "ball_type" to 1,
+                "exTime" to "0", "pk" to "NO", "substitution_times" to 1, "substitution" to 1,
+                "exSubstitution" to "", "limitTime" to "NOSET", "equalization" to "NO",
+                "regulation" to "", "can_use_mobile_controller" to "NO",
+            )
+        )
+        m["event_account_type"] = "GAME_PLAYER"
+        m["address_ipv4"] = linkedMapOf<String, Any?>(
+            "host_address" to "", "host_port" to 1, "reflexive_address" to "",
+            "reflexive_port" to 1, "nat_type" to 1,
+        )
+        m["address_ipv6"] = linkedMapOf<String, Any?>(
+            "host_address" to "", "host_port" to 1, "reflexive_address" to "",
+            "reflexive_port" to 1, "nat_type" to 1,
+        )
+        m["platform_session_id_info"] = linkedMapOf("ps_session_id" to "", "xb_session_id" to "")
+        m["strike_arena_selected_info"] = listOf(linkedMapOf("player_id" to 1, "costume_id" to 0))
+        return send(m)
+    }
+
+    /** Pull the room number out of a NOERR CMD_CREATEJOIN_ROOM response. */
+    fun roomNumberOf(o: Map<*, *>): String {
+        val rid = o["room_id"]
+        return when (rid) {
+            is Map<*, *> -> (rid["id"] ?: "").toString()
+            else -> rid?.toString().orEmpty()
+        }
+    }
+
+    class GateException(message: String) : Exception(message)
+}
