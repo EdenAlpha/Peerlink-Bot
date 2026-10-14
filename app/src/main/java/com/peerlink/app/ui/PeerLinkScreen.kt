@@ -1053,7 +1053,7 @@ private fun statLabel(name: String): String = when (name) {
     }
 }
 /* ─── Settings: a real page now, same rhythm as the Activity page ─── */
-/* ─── Play PeerLink: create a room, copy the code, play the local bot ─── */
+/* ─── Play PeerLink: the bot hosts a room; you join it in your own eFootball ─── */
 @Composable
 private fun PlayPeerLinkPage(
     ctx: Context,
@@ -1061,7 +1061,6 @@ private fun PlayPeerLinkPage(
     primeActive: Boolean,
 ) {
     val room by PlayRoomController.state.collectAsStateWithLifecycle()
-    var codeInput by remember { mutableStateOf(TextFieldValue("")) }
 
     Column(
         Modifier.fillMaxSize().padding(horizontal = 20.dp).verticalScroll(rememberScrollState()),
@@ -1070,12 +1069,12 @@ private fun PlayPeerLinkPage(
         Spacer(Modifier.height(4.dp))
         Text("Play PeerLink", color = PL.ink, fontSize = 28.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.5).sp)
         Text(
-            "Create a room and play on this phone. Your opponent is the PeerLink bot, running locally through the PeerLink VPN — no second phone needed.",
+            "The bot hosts the match on this phone. Create a room, then type its number into your own eFootball to play — no second phone needed.",
             color = PL.inkSoft, fontSize = 14.sp, lineHeight = 20.sp,
         )
         Spacer(Modifier.height(2.dp))
 
-        // Hero: one phone, two sides.
+        // Hero: one phone, two sides — bot hosts, game joins.
         Box(
             Modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp))
                 .background(Brush.linearGradient(listOf(Color(0xFF2A3320), Color(0xFF1E241A))))
@@ -1090,67 +1089,40 @@ private fun PlayPeerLinkPage(
                     Spacer(Modifier.width(12.dp))
                     Column {
                         Text("YOUR MATCH", fontSize = 10.sp, color = PL.gold, letterSpacing = 1.4.sp, fontWeight = FontWeight.Bold)
-                        Text("One phone, two sides", fontSize = 17.sp, color = PL.ink, fontWeight = FontWeight.Bold)
+                        Text("Bot hosts, you join", fontSize = 17.sp, color = PL.ink, fontWeight = FontWeight.Bold)
                     }
                 }
                 Spacer(Modifier.height(14.dp))
                 Text(
-                    "PeerLink opens eFootball, holds the room, and lets the bot join as your opponent over the tunnel. The game sees a normal peer-to-peer match.",
+                    "The bot opens a room at Konami and gets a number. You type that number into eFootball on this phone; the game connects to the bot over the PeerLink VPN as a normal peer-to-peer match.",
                     fontSize = 12.5.sp, color = PL.inkSoft, lineHeight = 19.sp,
                 )
                 Spacer(Modifier.height(16.dp))
-                GhostBtn("Create room", Icons.Rounded.Add) { PlayRoomController.launchGameToCreateRoom(ctx) }
+                GhostBtn("Create room", Icons.Rounded.Add) { PlayRoomController.createRoom() }
             }
         }
 
         when (val s = room) {
             is RoomState.Creating -> DarkCard {
-                Text("Waiting for eFootball…", color = PL.ink, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                Text("Opening a room…", color = PL.ink, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.height(6.dp))
                 Text(s.note, color = PL.inkSoft, fontSize = 12.5.sp, lineHeight = 19.sp)
             }
             is RoomState.Ready -> RoomCodeCard(s.number, ctx)
             is RoomState.Failed -> DarkCard {
-                Text("Couldn't start the room", color = PL.red, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                Text("Couldn't open a room", color = PL.red, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.height(6.dp))
                 Text(s.reason, color = PL.inkSoft, fontSize = 12.5.sp, lineHeight = 19.sp)
                 Spacer(Modifier.height(10.dp))
-                GhostBtn("Try again", Icons.Rounded.Refresh) { PlayRoomController.launchGameToCreateRoom(ctx) }
+                GhostBtn("Try again", Icons.Rounded.Refresh) { PlayRoomController.createRoom() }
             }
             is RoomState.Idle -> {}
         }
 
-        // Manual entry for a room that is already open in the game.
-        SectionTitle("Have a room code?")
-        DarkCard {
-            Para("If the room is already open in eFootball, paste its code here so the bot can join it.")
-            Spacer(Modifier.height(4.dp))
-            Box(
-                Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
-                    .background(PL.surface).border(1.dp, PL.line, RoundedCornerShape(12.dp))
-                    .padding(12.dp, 9.dp)
-            ) {
-                BasicTextField(
-                    codeInput, { codeInput = it.copy(text = it.text.uppercase()) }, singleLine = true,
-                    textStyle = androidx.compose.ui.text.TextStyle(PL.ink, 15.sp, FontWeight.SemiBold, fontFamily = FontFamily.Monospace),
-                    cursorBrush = SolidColor(PL.gold), modifier = Modifier.fillMaxWidth(),
-                    decorationBox = { inner -> Box { if (codeInput.text.isEmpty()) Text("Room code", color = PL.muted, fontSize = 15.sp); inner() } }
-                )
-            }
-            Spacer(Modifier.height(10.dp))
-            GhostBtn("Use this code", Icons.Rounded.Check) {
-                if (codeInput.text.isNotBlank()) {
-                    PlayRoomController.setRoomNumber(codeInput.text)
-                    codeInput = TextFieldValue("")
-                } else {
-                    Toast.makeText(ctx, "Enter the room code first", Toast.LENGTH_SHORT).show()
-                }
-            }
-        }
-
         SectionTitle("How it works")
         DarkCard {
-            Feat("Local bot", "The opponent runs on this phone, so a match needs no second device.")
+            Feat("The bot hosts", "It opens the room at Konami, so the number comes from the bot — not from your game.")
+            Feat("You join in eFootball", "Type the number into your own eFootball to enter the match against the bot.")
             Feat("PeerLink VPN", "The tunnel fakes open NAT for both sides, keeping the game on a direct peer-to-peer path.")
             if (!primeReady) {
                 Spacer(Modifier.height(2.dp))
@@ -1171,7 +1143,7 @@ private fun PlayPeerLinkPage(
     }
 }
 
-/** Big, copyable room code — the number Konami shows for the match room. */
+/** Big, copyable room number — type this into your own eFootball to join the bot. */
 @Composable
 private fun RoomCodeCard(number: String, ctx: Context) {
     Column(
@@ -1181,7 +1153,7 @@ private fun RoomCodeCard(number: String, ctx: Context) {
             .padding(22.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text("ROOM CODE", fontSize = 10.sp, color = PL.gold, letterSpacing = 1.6.sp, fontWeight = FontWeight.Bold)
+        Text("ROOM NUMBER", fontSize = 10.sp, color = PL.gold, letterSpacing = 1.6.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(12.dp))
         Text(
             number,
@@ -1190,11 +1162,11 @@ private fun RoomCodeCard(number: String, ctx: Context) {
             textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth(),
         )
         Spacer(Modifier.height(6.dp))
-        Text("Share this code — or the bot uses it to join.", fontSize = 12.sp, color = PL.inkSoft)
+        Text("Open eFootball on this phone and enter this number to join the bot.", fontSize = 12.sp, color = PL.inkSoft, textAlign = TextAlign.Center)
         Spacer(Modifier.height(16.dp))
-        GhostBtn("Copy code", Icons.Rounded.ContentCopy) {
+        GhostBtn("Copy number", Icons.Rounded.ContentCopy) {
             PlayRoomController.copyNumber(ctx, number)
-            Toast.makeText(ctx, "Room code copied", Toast.LENGTH_SHORT).show()
+            Toast.makeText(ctx, "Room number copied", Toast.LENGTH_SHORT).show()
         }
     }
 }
