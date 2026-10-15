@@ -46,17 +46,38 @@ object BotRoomService : BotRoomBackend {
             minted
         }
 
+        // The bot declares the translated endpoint at the gate (real LAN
+        // host, fabricated .53.2 reflexive -- the address the game punches).
+        var gate = KgsGate(identity, BotMode.declaredProfile())
+        gate.login()
+
+        // SQUAD GUARD (T5 proof, 2026-10-15): a minted account without a
+        // squad row cannot ready (ERR_EMPTY/PNPS-). Older bot accounts that
+        // were minted before the roster bootstrap existed have no squad and
+        // no stored roster -- they cannot be repaired, so replace them with
+        // a freshly minted, squad-bootstrapped account, automatically.
+        if (!BotSquad.ensure(gate, identity.entryInfoJson)) {
+            AppState.appendLog(
+                "[BOT-SQUAD ] bot account has no usable squad -- minting a replacement")
+            BotIdentity.clear(ctx)
+            BotMode.stop()
+            val fresh = BotMinter.mint()
+                ?: throw KgsGate.GateException(
+                    "The old bot account has no squad and its replacement was " +
+                        "refused -- try once more; the log shows the mint lines."
+                )
+            BotIdentity.save(ctx, fresh)
+            BotMode.ensureStarted(ctx, fresh.userId)
+            gate = KgsGate(fresh, BotMode.declaredProfile())
+            gate.login()
+        }
+        val identityInUse = BotIdentity.load(ctx) ?: identity
+
         // Step 1: fixed fabricated pair (game .53.1 / bot .53.2).
         // Step 2: the bot's T7 beats start here and keep running; the mode
         // marker is persisted so a restarted VPN service comes back as a
         // bot-mode session instead of failing the peer-mode requirements.
-        BotMode.ensureStarted(ctx, identity.userId)
-
-        // The bot declares the translated endpoint at the gate (real LAN
-        // host, fabricated .53.2 reflexive -- the address the game punches).
-        val gate = KgsGate(identity, BotMode.declaredProfile())
-
-        gate.login()
+        BotMode.ensureStarted(ctx, identityInUse.userId)
 
         // The capture's login-time quality report (blocks 35 + 38-40): fetch
         // the region list, measure the echo endpoints, SET. The room-time

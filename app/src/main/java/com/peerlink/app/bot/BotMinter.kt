@@ -41,18 +41,22 @@ object BotMinter {
 
         val uid = ((r["pes_user_info"] as? Map<*, *>)?.get("user_id") as? Number)?.toLong() ?: 0L
         val auth = (r["auth_code"] as? String).orEmpty()
+        val entryInfo = r["entry_info"] as? Map<*, *> ?: emptyMap<String, Any?>()
         val candidate = BotIdentity(
             userId = uid,
             authCode = auth,
             hash = (base["hash"] as? String).orEmpty(),
             userCode = (r["user_code"] as? String).orEmpty(),
             firstSessionId = (r["session_id"] as? String).orEmpty(),
+            entryInfoJson = if (entryInfo.isEmpty()) ""
+            else BotSquad.mapToJson(entryInfo),
         )
 
         // Verify with the PROVEN login (captured body + patched credentials)
         // before anything is saved anywhere.
+        val checkGate = KgsGate(candidate, BotMode.declaredProfile())
         val check = try {
-            KgsGate(candidate, BotMode.declaredProfile()).login()
+            checkGate.login()
         } catch (t: Throwable) {
             log("minted account failed login verify: ${t.message}")
             return null
@@ -61,6 +65,20 @@ object BotMinter {
             (check["session_id"] as? String).orEmpty().isNotBlank()
         if (!ok) {
             log("minted account failed login verify (${check["result"]})")
+            return null
+        }
+
+        // T5 live proof (2026-10-15): a minted account has NO squad and its
+        // ready is refused ERR_EMPTY/PNPS- until CMD_SET_MYCLUB_ENTRY_INFO
+        // pushes the roster from THIS mint response. Do it now, on this
+        // live session, exactly like the real client bootstraps.
+        if (entryInfo.isNotEmpty()) {
+            val setRes = BotSquad.setFromEntryInfo(checkGate, entryInfo)
+            val sqOk = setRes == "NOERR" && BotSquad.check(checkGate) == "NOERR"
+            log("squad bootstrap -> ${if (sqOk) "OK (23-player roster on file)" else "FAILED ($setRes)"}")
+            if (!sqOk) return null
+        } else {
+            log("mint response carried no entry_info -- squad not bootstrapped")
             return null
         }
         log("bot account minted and verified: uid=$uid")

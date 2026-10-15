@@ -73,8 +73,7 @@ The two-phone P2P flow with the far phone replaced by the local bot:
   raises the one-time system dialog (`ACTION_VPN_CONSENT` -> MainActivity),
   never silently skipping the VPN. Then `BotMatchDriver` -- state-driven:
   seat poll -> entry side -> relay-quality report (room-time, capture
-  block 63 -- every NOERR-ready session on record SETs it first; without it
-  the ready is refused ERR_EMPTY, both 2026-10-15 device runs) ->
+  block 63 -- every NOERR-ready session on record SETs it first) ->
   enable-check (OTZP- tolerated) -> ready
   (translated profile: real LAN host / fabricated reflexive) -> go poll -> session -> capture block-105 check-res
   echo -> game_id -> session id -> TURN announce/watch -> antenna, then
@@ -106,6 +105,16 @@ The two-phone P2P flow with the far phone replaced by the local bot:
   LAN-path lock, no peer-link probe. Two earlier attempts that day (a legacy
   Kotlin engine datapath) died at birth and black-holed the game; both are
   removed. A fresh install still needs the one-time VPN consent dialog.
+- SQUAD BOOTSTRAP (T5 live proof, 2026-10-15): a freshly minted account has
+  NO squad (`GET_USER_SQUAD` -> `ERR_NOT_ENOUGH_PLAYER_IN_SQUAD`) and its
+  ready is refused `ERR_EMPTY`/PNPS- regardless of endpoints or quality
+  reports -- this, not the address and not the quality, is what the 22:42 /
+  23:53 / 00:19 device runs hit. The mint now pushes
+  `CMD_SET_MYCLUB_ENTRY_INFO` (captured template + the account's own
+  entry_info) on its verify session, and `BotRoomService` self-heals an
+  older squad-less account by minting a replacement automatically. Proven
+  end-to-end on the live gate: fresh+mint+squad = ready NOERR, `go_match`
+  YES.
 - Peer mode untouched: pair still computed from both phones' LANs,
   `verifyPeerPath`/LAN lock intact.
 - Declared vs measured: bot mode declares a translated endpoint (real LAN

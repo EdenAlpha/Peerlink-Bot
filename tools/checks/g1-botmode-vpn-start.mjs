@@ -36,6 +36,9 @@ const lanRes = read('app/src/main/java/com/peerlink/app/network/LanPathResolver.
 const driver = read('app/src/main/java/com/peerlink/app/bot/BotMatchDriver.kt');
 const gate = read('app/src/main/java/com/peerlink/app/bot/KgsGate.kt');
 const quality = read('app/src/main/java/com/peerlink/app/bot/BotRelayQuality.kt');
+const squad = read('app/src/main/java/com/peerlink/app/bot/BotSquad.kt');
+const captures = read('app/src/main/java/com/peerlink/app/bot/GateCaptures.kt');
+const minter = read('app/src/main/java/com/peerlink/app/bot/BotMinter.kt');
 
 // (a) the branch exists and is gated on bot mode
 must(/import com\.peerlink\.app\.bot\.BotMode/.test(svc), 'a: service imports BotMode');
@@ -82,7 +85,9 @@ must(/@Synchronized[\s\S]{0,60}fun startBeats/.test(botMode), 'e: startBeats is 
 // (f) call sites wired
 must(/restoreIfActive\(this\)/.test(pbot), 'f: PeerBotService restores bot mode on create');
 must(/restoreIfActive\(this\)/.test(svc), 'f: VPN service restores bot mode on null-intent restart');
-must(/ensureStarted\(ctx, identity\.userId\)/.test(roomSvc), 'f: BotRoomService starts bot mode with the minted uid');
+must(/ensureStarted\(ctx, identityInUse\.userId\)/.test(roomSvc) ||
+     /ensureStarted\(ctx, identity\.userId\)/.test(roomSvc),
+  'f: BotRoomService starts bot mode with the minted uid');
 
 // (h) the peer slot speaks the native wire format on loopback
 must(/LOOPBACK_PEER_IP = "127\.0\.0\.1"/.test(peerSlot), 'h: slot is the loopback peer');
@@ -170,6 +175,26 @@ must(/BotRelayQuality\.loginReport\(gate\)/.test(roomSvc),
 }
 must(!/qualityTemplate/.test(roomSvc), 'l: the dead qualityTemplate path is gone');
 
+// (m) the squad bootstrap (T5 live proof, 2026-10-15: a minted account has
+// no squad -> GET_USER_SQUAD ERR_NOT_ENOUGH_PLAYER_IN_SQUAD -> its ready is
+// refused ERR_EMPTY/PNPS-; SET_MYCLUB_ENTRY_INFO from the mint's own
+// entry_info fixes it -- ready NOERR, go flipped YES on the live gate).
+must(/SET_MYCLUB_ENTRY_INFO_BODY_HEX/.test(captures),
+  'm: the captured SET_MYCLUB_ENTRY_INFO body is committed');
+must(/fun check\(|fun setFromEntryInfo\(|fun ensure\(/.test(squad),
+  'm: BotSquad check/bootstrap/verify ladder exists');
+must(/ERR_NOT_ENOUGH_PLAYER_IN_SQUAD/.test(squad),
+  'm: the squad-less gate answer is handled');
+must(/BotSquad\.setFromEntryInfo\(checkGate, entryInfo\)/.test(minter),
+  'm: mint bootstraps the squad on its verify session');
+must(/entryInfoJson = if \(entryInfo\.isEmpty\(\)\) ""/.test(minter) ||
+     /BotSquad\.mapToJson\(entryInfo\)/.test(minter),
+  'm: mint stores the roster for later bootstrap');
+must(/BotSquad\.ensure\(gate, identity\.entryInfoJson\)/.test(roomSvc),
+  'm: create-room guards the squad before anything else');
+must(/bot account has no usable squad -- minting a replacement/.test(roomSvc),
+  'm: a squad-less old account is replaced automatically');
+
 // (g) syntax-level balance on every edited file
 for (const [name, text] of [
   ['PeerLinkVpnService.kt', svc],
@@ -182,6 +207,9 @@ for (const [name, text] of [
   ['BotMatchDriver.kt', driver],
   ['KgsGate.kt', gate],
   ['BotRelayQuality.kt', quality],
+  ['BotSquad.kt', squad],
+  ['GateCaptures.kt', captures],
+  ['BotMinter.kt', minter],
 ]) {
   const ob = (text.match(/\{/g) || []).length, cb = (text.match(/\}/g) || []).length;
   const op = (text.match(/\(/g) || []).length, cp = (text.match(/\)/g) || []).length;
