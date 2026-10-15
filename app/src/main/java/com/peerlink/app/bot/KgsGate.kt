@@ -111,9 +111,15 @@ class KgsGate(
         "client_version" to GateCodec.CLIENT_VERSION,
     )
 
+    /** Public ladder step: envelope for [msgid] merged with [extra], sent. */
+    fun step(msgid: String, extra: LinkedHashMap<String, Any?> = linkedMapOf()): LinkedHashMap<String, Any?> {
+        val m = envelope(msgid)
+        m.putAll(extra)
+        return send(m)
+    }
+
     /** POST one gate request and decode the response; never throws on server error shapes. */
-    private fun send(msg: LinkedHashMap<String, Any?>, timeoutMs: Int = 25_000): LinkedHashMap<String, Any?> {
-        val body = GateCodec.encode(msg)
+    private fun send(msg: LinkedHashMap<String, Any?>, timeoutMs: Int = 25_000): LinkedHashMap<String, Any?> {        val body = GateCodec.encode(msg)
         val sign = GateCodec.makeSign(body)
         val url = URL("https://${GateCodec.HOST}/pes22/gate/gate_${msg["msgid"]}.php")
         val conn = (url.openConnection() as HttpURLConnection).apply {
