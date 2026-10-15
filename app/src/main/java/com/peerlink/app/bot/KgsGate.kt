@@ -297,8 +297,13 @@ class KgsGate(
             )
         }
         val m = envelope("CMD_CREATEJOIN_ROOM")
+        // mode CUSTOM / kind SINGLE -- the PROVEN friend-room shape. The
+        // search-by-number index only lists CUSTOM/SINGLE rooms (proven live
+        // 2026-10-15: a CUSTOM/SINGLE room answers is_room_search=YES with
+        // NOERR, while the old STRIKE_ARENA default answered
+        // ERR_ROOM_NOT_FOUND and the real game's search could not find it).
         m["core_settings"] = linkedMapOf<String, Any?>(
-            "mode" to "STRIKE_ARENA", "event_id" to 0, "kind" to "STRIKE_ARENA",
+            "mode" to "CUSTOM", "event_id" to 0, "kind" to "SINGLE",
             "name_tag" to 0, "entry_restriction" to "NONE", "password" to "",
             "lang" to identity.lang, "capacity" to 2, "observer_capacity" to 0,
             "guest_num_by_user" to 0, "is_coop_vs_com_single" to "NO",

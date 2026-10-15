@@ -26,6 +26,9 @@ component. Nothing here is invented; anything not yet ported is marked.
   `GateCaptures` is decoded at runtime and the identity's credentials are
   patched in memory. Every accepted live run logged in exactly this way; the
   from-scratch envelope login was never live-proven.
+- Room create MUST be `mode CUSTOM / kind SINGLE`: the search-by-number index
+  only lists those. A `STRIKE_ARENA` room answers the game's search with
+  `ERR_ROOM_NOT_FOUND` (proven live 2026-10-15, room 4009780 vs 3966797).
 - `client_version` is a moving lock. The 2026-10-15 store update (app 11.1.1)
   made the gate answer `ERR_DEFCLIENTVER` (`CIYU-`) for 6.1.0; the same
   request with **6.1.1** logged in `NOERR` — and the 11.1.0 s_keyword CONST
