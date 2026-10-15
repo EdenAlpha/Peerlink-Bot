@@ -42,6 +42,24 @@ component. Nothing here is invented; anything not yet ported is marked.
   open NAT; the bot side never runs STUN-fabrication — it declares and beats
   on its own.
 
+## Bot mode (PeerLink-in-PeerLink) -- locked 2026-10-15
+
+The two-phone P2P flow with the far phone replaced by the local bot:
+
+- Fabricated pair is FIXED in this mode: game = `197.210.53.1` (the existing
+  StunFabricator keeps lying to it, untouched), bot = `197.210.53.2:1162`
+  declared at the gate. The bot never runs the fabricator.
+- Peer slot fills locally: traffic the game sends to `.53.2` goes to the bot
+  engine instead of the tunnel to another phone; the bot's replies are
+  injected back wearing the peer fabricated address (the existing path).
+- Bot lifecycle: room create -> T7 beats (own socket, outside the per-app
+  VPN, local bind `:44001`) -> state-driven ladder half -> connection-phase
+  responder (initiate + answer, per the 2026-10-13 match capture).
+- Peer mode untouched: pair still computed from both phones' LANs.
+- Declared vs measured: bot mode declares the fabricated identity, NOT the
+  measured one; `KgsGate.createRoom` now refuses an empty endpoint outright
+  (the old `undeclared()` path could PUT blank addresses).
+
 ## Open items (largest first)
 
 1. Full match sequence: the ladder itself is **ported** (`bot/BotMatchFlow`).

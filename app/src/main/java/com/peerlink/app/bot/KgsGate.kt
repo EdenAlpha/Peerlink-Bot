@@ -243,6 +243,20 @@ class KgsGate(
                     reflexivePort = mapped.port,
                     natType = NAT_P2P_A,
                 )
+
+            /**
+             * Bot mode (locked 2026-10-15): the declared endpoint is the
+             * fabricated peer identity (fixed: game .53.1 / bot .53.2). There
+             * is no local/measured half in this world -- the bot simply
+             * claims the peer slot's address and never runs the fabricator.
+             */
+            fun fabricated(ip: String, port: Int) = NatProfile(
+                hostAddress = ip,
+                hostPort = port,
+                reflexiveAddress = ip,
+                reflexivePort = port,
+                natType = NAT_P2P_A,
+            )
         }
     }
 
@@ -255,6 +269,15 @@ class KgsGate(
      * -> SC + relay). Returns the gate response (room_id inside on NOERR).
      */
     fun createRoom(): LinkedHashMap<String, Any?> {
+        // Honest-failure guard (architecture review 2026-10-15): never PUT an
+        // empty endpoint. Bot mode declares the fabricated peer identity; a
+        // blank address here means the profile was never set -- refuse.
+        if (nat.hostAddress.isBlank() || nat.reflexiveAddress.isBlank()) {
+            return linkedMapOf(
+                "result" to "_NO_ENDPOINT",
+                "msg" to "endpoint not set -- bot mode must declare the fabricated profile",
+            )
+        }
         val m = envelope("CMD_CREATEJOIN_ROOM")
         m["core_settings"] = linkedMapOf<String, Any?>(
             "mode" to "STRIKE_ARENA", "event_id" to 0, "kind" to "STRIKE_ARENA",

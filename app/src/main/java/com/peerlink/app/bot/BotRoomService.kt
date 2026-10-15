@@ -2,25 +2,23 @@ package com.peerlink.app.bot
 
 import android.content.Context
 import com.peerlink.app.play.BotRoomBackend
-import java.net.InetSocketAddress
 
 /**
  * The bot's room service -- the per-session gate flow in the proven order
- * (bundle: RUN.txt + room1/room2):
+ * (bundle: RUN.txt + room1/room2), now in BOT MODE addressing (locked
+ * 2026-10-15):
  *
- *   T7 keepalive (bind-time reflexive measurement) -> CMD_LOGIN (bot account)
+ *   fixed fabricated pair (game .53.1 / bot .53.2) + bot T7 beats
+ *   -> CMD_LOGIN (bot account)
  *   -> CMD_SET_GAMERELAY_QUALITY [when real data exists]
  *   -> CMD_CREATEJOIN_ROOM -> room number for the user's own eFootball.
  *
- * Fails honestly when a step has no real data (no bot account, no measured
- * reflexive was required-but-missing, no quality template). Never invents
- * values; never invents a room number.
+ * The declared endpoint is the fabricated peer identity: no real address, no
+ * measurement, and no empty-address path (KgsGate.createRoom refuses a blank
+ * endpoint outright). Fails honestly when a step has no real data (no bot
+ * account, no quality template). Never invents a room number.
  */
 object BotRoomService : BotRoomBackend {
-
-    /** Called at room-create time to fetch the T7-measured reflexive, if any. */
-    @Volatile
-    var measuredEndpointProvider: (() -> InetSocketAddress?)? = null
 
     /** Relay-quality entries captured from the real client, if the phone has them. */
     @Volatile
@@ -33,14 +31,13 @@ object BotRoomService : BotRoomBackend {
                     "auth_code under General Settings, then create the room again."
             )
 
-        // Profile: advertise what STUN actually measured from the beating
-        // socket. Without a measurement we say so instead of inventing one.
-        val measured = measuredEndpointProvider?.invoke()
-        val gate = if (measured != null) {
-            KgsGate(identity, KgsGate.NatProfile.measured(localAddress(ctx), localPort, measured))
-        } else {
-            KgsGate(identity)
-        }
+        // Step 1: fixed fabricated pair (game .53.1 / bot .53.2).
+        // Step 2: the bot's T7 beats start here and keep running.
+        BotMode.ensureStarted()
+        BotMode.startBeats(identity.userId)
+
+        // The bot declares the fabricated peer identity at the gate.
+        val gate = KgsGate(identity, BotMode.declaredProfile())
 
         gate.login()
 
@@ -56,6 +53,12 @@ object BotRoomService : BotRoomBackend {
         // back SC despite the right nat_type (the real client sends it).
 
         val r = gate.createRoom()
+        if (r["result"] == "_NO_ENDPOINT") {
+            throw KgsGate.GateException(
+                "Bot endpoint not set -- bot mode must declare the fabricated " +
+                    "peer identity before creating a room."
+            )
+        }
         if (r["result"] == "NOERR") {
             val num = gate.roomNumberOf(r)
             if (num.isBlank()) {
@@ -67,23 +70,6 @@ object BotRoomService : BotRoomBackend {
             "room create rejected: ${shallow(r)}" +
                 (if (quality == null) "  [note: no relay-quality sent -- sycom may come back SC]" else "")
         )
-    }
-
-    private const val localPort = 44001  // bundle convention: bot beats from its own fixed port
-
-    private fun localAddress(ctx: Context): String {
-        return try {
-            val nis = java.net.NetworkInterface.getNetworkInterfaces()
-            for (ni in nis) {
-                if (!ni.isUp || ni.isLoopback) continue
-                for (ia in ni.inetAddresses) {
-                    if (!ia.isLoopbackAddress && ia is java.net.Inet4Address) return ia.hostAddress ?: ""
-                }
-            }
-            ""
-        } catch (_: Throwable) {
-            ""
-        }
     }
 
     /** Shallow error surface only -- no request/response bodies land in the UI. */
