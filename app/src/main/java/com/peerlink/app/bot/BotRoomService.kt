@@ -6,6 +6,7 @@ import com.peerlink.app.core.AppState
 import com.peerlink.app.play.BotRoomBackend
 import com.peerlink.app.service.PeerBotService
 import com.peerlink.app.service.PeerLinkVpnService
+import com.peerlink.app.ui.MainActivity
 
 /**
  * The bot's room service -- the per-session gate flow in the proven order
@@ -125,11 +126,18 @@ object BotRoomService : BotRoomBackend {
                     ctx.startService(vpnIntent)
                 }
                 AppState.appendLog("[BOT-SVC   ] game VPN service started")
+                PeerBotService.status("game VPN starting -- join from eFootball now")
             } else {
-                AppState.appendLog(
-                    "[BOT-SVC   ] VPN consent not granted yet -- open PeerLink " +
-                        "once and start a normal session, then create the room again"
-                )
+                // Fresh installs (and every reinstall) need ONE system dialog
+                // before any VPN can run. Ask for it through the UI instead of
+                // silently doing nothing (the 2026-10-15 "no VPN" report).
+                AppState.appendLog("[BOT-SVC   ] VPN permission needed -- raising the one-time consent dialog")
+                PeerBotService.status("VPN permission needed -- approve the Android dialog")
+                val ask = Intent(ctx, MainActivity::class.java).apply {
+                    action = PeerBotService.ACTION_VPN_CONSENT
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                }
+                ctx.startActivity(ask)
             }
         }.onFailure { AppState.appendLog("[BOT-SVC   ] VPN start failed: ${it.message}") }
     }

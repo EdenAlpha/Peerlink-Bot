@@ -101,6 +101,7 @@ import com.peerlink.app.core.PeerSessionPhase
 import com.peerlink.app.core.AppState
 import com.peerlink.app.discovery.NsdDiscovery
 import com.peerlink.app.godmode.GodModeManager
+import com.peerlink.app.service.PeerBotService
 import com.peerlink.app.service.PeerLinkVpnService
 import com.peerlink.app.tunnel.PassthroughRecorder
 import com.peerlink.app.service.CallMonitorService
@@ -206,6 +207,10 @@ class MainActivity : AppCompatActivity(), NsdDiscovery.NsdCallback {
                 AppState.sessionPhase.set(PeerSessionPhase.ERROR)
             }
         }
+
+        // Bot mode: the create-room flow asks for the one-time VPN permission
+        // through this action; the launcher below starts the VPN on approval.
+        if (intent?.action == PeerBotService.ACTION_VPN_CONSENT) requestBotVpnConsent()
 
         setContent {
             var isDestroyed by remember { mutableStateOf(prefs.getBoolean("isDestroyed", false)) }
@@ -1627,11 +1632,39 @@ class MainActivity : AppCompatActivity(), NsdDiscovery.NsdCallback {
         }
     }
 
+    /**
+     * Bot mode: raise the one-time VPN permission dialog. The activity-result
+     * launcher (registered in onCreate) starts the VPN service itself on OK
+     * -- its success branch calls startVpnService() -- so no callback is
+     * needed here.
+     */
+    private fun requestBotVpnConsent() {
+        try {
+            val consent = VpnService.prepare(this)
+            if (consent == null) {
+                startVpnService()
+                return
+            }
+            pendingVpnStartedCallback = null
+            val launcher = vpnConsentLauncher
+            if (launcher == null) {
+                AppState.appendLog("[BOT-SVC   ] consent dialog unavailable")
+                return
+            }
+            launcher.launch(consent)
+        } catch (t: Throwable) {
+            AppState.appendLog("[BOT-SVC   ] consent request failed: ${t.message}")
+        }
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
         if (intent.action == ACTION_OPEN_PRIME_SETUP) {
             showPrimeSetup = true
+        }
+        if (intent.action == PeerBotService.ACTION_VPN_CONSENT) {
+            requestBotVpnConsent()
         }
     }
 

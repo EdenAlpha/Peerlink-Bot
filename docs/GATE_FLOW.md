@@ -60,10 +60,15 @@ The two-phone P2P flow with the far phone replaced by the local bot:
   engine instead of the tunnel to another phone; the bot's replies are
   injected back wearing the peer fabricated address (the existing path).
 - Bot lifecycle: room create -> T7 beats (own socket, outside the per-app
-  VPN, local bind `:44001`) -> `BotMatchDriver` -- state-driven: seat poll ->
-  entry side -> enable-check (OTZP- tolerated) -> ready (fabricated profile)
-  -> go poll -> session -> capture block-105 check-res echo -> game_id ->
-  session id -> TURN announce/watch -> antenna, then periodic antenna beats.
+  VPN, local bind `:44001`) -> `PeerBotService` foreground lifeline (the
+  bot session must survive the user living in eFootball) + per-app VPN
+  start. A FRESH INSTALL has no VPN consent yet: the create-room flow
+  raises the one-time system dialog (`ACTION_VPN_CONSENT` -> MainActivity),
+  never silently skipping the VPN. Then `BotMatchDriver` -- state-driven:
+  seat poll -> entry side -> enable-check (OTZP- tolerated) -> ready
+  (fabricated profile) -> go poll -> session -> capture block-105 check-res
+  echo -> game_id -> session id -> TURN announce/watch -> antenna, then
+  periodic antenna beats.
   Connection-phase responder + tunnel sink = `PeerSlot` -- **LIVE**:
   TunnelEngine hands every game packet addressed to `.53.2` to the slot,
   which answers with the byte-exact forms (PeerBotEngine) and injects its

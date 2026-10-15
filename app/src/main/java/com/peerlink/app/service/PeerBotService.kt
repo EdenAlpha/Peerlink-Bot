@@ -33,6 +33,9 @@ class PeerBotService : Service() {
         const val EXTRA_ROOM = "room_number"
         const val ACTION_STOP = "com.peerlink.BOT_STOP"
 
+        /** Bot mode: ask the UI to raise the one-time VPN permission dialog. */
+        const val ACTION_VPN_CONSENT = "com.peerlink.BOT_VPN_CONSENT"
+
         @Volatile
         var running = false
             private set
