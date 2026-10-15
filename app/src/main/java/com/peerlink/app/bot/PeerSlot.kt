@@ -89,6 +89,18 @@ object PeerSlot {
      * [localIp]/[localPort] = its host half from the session's address list.
      */
     fun arm(uid: Long, announced: String, localIp: String, localPort: Int) {
+        // Idempotent re-arm: the driver arms this slot the moment go_match
+        // fires (socket live, reactive), then re-targets it once the
+        // session reply carries the game's address. Never churn the socket
+        // or lose the punch-watch state on the update.
+        if (armed && gameUid == uid && socket != null) {
+            if (announced.isNotBlank()) gameAddress = announced
+            if (localIp.isNotBlank()) gameIp = localIp
+            if (localPort > 0) gamePort = localPort
+            AppState.appendLog("[BOT-SLOT  ] target updated: " +
+                "announced=$gameAddress local=$gameIp:$gamePort")
+            return
+        }
         engine = PeerBotEngine(uid.toString())
         gameUid = uid
         gameAddress = announced

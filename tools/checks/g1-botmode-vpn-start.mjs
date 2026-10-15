@@ -33,6 +33,7 @@ const pbot = read('app/src/main/java/com/peerlink/app/service/PeerBotService.kt'
 const tunnel = read('app/src/main/java/com/peerlink/app/tunnel/TunnelEngine.kt');
 const peerSlot = read('app/src/main/java/com/peerlink/app/bot/PeerSlot.kt');
 const lanRes = read('app/src/main/java/com/peerlink/app/network/LanPathResolver.kt');
+const driver = read('app/src/main/java/com/peerlink/app/bot/BotMatchDriver.kt');
 
 // (a) the branch exists and is gated on bot mode
 must(/import com\.peerlink\.app\.bot\.BotMode/.test(svc), 'a: service imports BotMode');
@@ -104,6 +105,29 @@ must(/if \(!bindSocketToWifi\(sock\)\) \{[\s\S]{0,400}BotMode\.active/.test(tunn
 must(/Exact gameplay network bind failed/.test(tunnel), 'i: peer-mode throw intact');
 must(/fun isActive\(\): Boolean = isRunning\.get\(\)/.test(tunnel), 'i: engine exposes isActive()');
 
+// (j) the driver never stops silently and never gives up early (v2)
+must(!/stopping/.test(driver), 'j: no rung gives up with a "-- stopping" anymore');
+must(/READY_REASSERT_MS/.test(driver), 'j: the ready re-assert cadence exists');
+must(/fun transient\(/.test(driver) && /_NET_FAIL/.test(driver),
+  'j: transport noise is retried, not fatal');
+must(/fun already\(/.test(driver) && /startsWith\("ERR_ALREADY"\)/.test(driver),
+  'j: ERR_ALREADY_* answers count as the done state');
+must(/PeerSlot\.arm\(opp, "", "", 0\)/.test(driver),
+  'j: the peer slot arms on go_match (reactive before the ladder ends)');
+must(/PeerSlot\.arm\(opp, peerAddr, localIp, localPort\)/.test(driver),
+  'j: the slot is re-targeted with the session address');
+must(!/SEAT_TIMEOUT_MS|GO_TIMEOUT_MS/.test(driver),
+  'j: the v1 seat/go deadlines are gone (no silent give-up)');
+{
+  const seatFn = sliceFn(driver, 'private fun waitForSeat(');
+  must(seatFn.length > 100 && !/deadline/i.test(seatFn),
+    'j: the seat watch runs with no deadline');
+}
+must((driver.match(/\bstatus\("/g) || []).length >= 6,
+  'j: every rung narrates its state to the notification');
+must(/if \(armed && gameUid == uid && socket != null\)/.test(peerSlot),
+  'j: PeerSlot.arm is idempotent (early arm + re-target)');
+
 // (g) syntax-level balance on every edited file
 for (const [name, text] of [
   ['PeerLinkVpnService.kt', svc],
@@ -113,6 +137,7 @@ for (const [name, text] of [
   ['TunnelEngine.kt', tunnel],
   ['PeerSlot.kt', peerSlot],
   ['LanPathResolver.kt', lanRes],
+  ['BotMatchDriver.kt', driver],
 ]) {
   const ob = (text.match(/\{/g) || []).length, cb = (text.match(/\}/g) || []).length;
   const op = (text.match(/\(/g) || []).length, cp = (text.match(/\)/g) || []).length;

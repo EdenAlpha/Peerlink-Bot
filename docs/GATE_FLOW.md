@@ -68,11 +68,18 @@ The two-phone P2P flow with the far phone replaced by the local bot:
   seat poll -> entry side -> enable-check (OTZP- tolerated) -> ready
   (fabricated profile) -> go poll -> session -> capture block-105 check-res
   echo -> game_id -> session id -> TURN announce/watch -> antenna, then
-  periodic antenna beats.
-  Connection-phase responder + tunnel sink = `PeerSlot` -- **LIVE**:
-  TunnelEngine hands every game packet addressed to `.53.2` to the slot,
-  which answers with the byte-exact forms (PeerBotEngine) and injects its
-  replies toward the game as the fabricated peer. The game's address comes
+  periodic antenna beats. Driver v2 (2026-10-15 late -- the user's game sat
+  on "Waiting for Opponent" because v1 could give up silently): the seat
+  watch has NO deadline, every rung retries transport noise
+  (`_NET_FAIL`/`_HTTP_EMPTY`/`_DECODE_FAIL`) and `ERR_ALREADY_*` counts as
+  done, the ready is re-asserted every 20 s while waiting, the peer slot is
+  armed the moment `go_match` fires and re-targeted when the session reply
+  carries the game's address, and every rung narrates to the notification.
+  Connection-phase responder + native peer sink = `PeerSlot` -- **LIVE**:
+  the native backend's diverted `.53.2` frames land on the slot's loopback
+  socket (next bullet), which answers with the byte-exact forms
+  (PeerBotEngine) and returns complete inner IP packets toward the game. The
+  game's address comes
   AUTOMATICALLY from the session's `ntl_address_list` (host half = delivery
   target, reflexive half = what the game announced); the bot punches FIRST
   and retries until the crossing, then the session + capability burst
@@ -97,8 +104,8 @@ The two-phone P2P flow with the far phone replaced by the local bot:
 
 ## Open items (largest first)
 
-1. Full match sequence: the ladder itself is **ported** (`bot/BotMatchFlow`).
-   Remaining: the driver that walks it with both gates, and `SquadSource`
+1. Full match sequence: the ladder is **ported** (`bot/BotMatchFlow`) and the
+   driver walks it (`bot/BotMatchDriver`). Remaining: `SquadSource`
    (23-player lists w/ `parameters` for the SGR checksums, from
    `CMD_GET_USER_SQUAD`).
 2. gRPC CommandStream heartbeat port (`kgs_client` framing + `beat_stream`).

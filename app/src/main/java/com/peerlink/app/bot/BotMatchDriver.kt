@@ -6,34 +6,43 @@ import com.peerlink.app.service.PeerBotService
 import kotlin.concurrent.thread
 
 /**
- * Bot mode step 3 -- the state-driven driver.
+ * Bot mode step 3 -- the state-driven driver (v2, 2026-10-15 late).
  *
- * The CLI walked a scripted order with two scripted players; in bot mode the
- * second player is the user's REAL game, so the bot advances on ROOM STATE:
+ * The ladder is the proven order, byte-for-byte:
+ *   seat -> entry side (HOME/leader) -> check_match_enable (OTZP- tolerated)
+ *   -> match_ready (.53.2) -> go_match -> game_session -> opponent address
+ *   -> check-res echo -> game_id -> send_session_id -> TURN announce/watch
+ *   -> antenna beat -> PeerSlot armed (live connection phase).
  *
- *   poll CMD_GET_ROOM_INFO until the game is seated (num_users == 2)
- *   -> entry side (bot is the room creator: HOME / leader)
- *   -> CMD_CHECK_MATCH_ENABLE (ERR_INVALID_SESSION/OTZP- is non-blocking,
- *      proven in every run since #29 -- tolerated, never fatal)
- *   -> CMD_SET_ROOM_MATCH_READY with the FABRICATED profile (.53.2)
- *   -> poll room state for is_go_match == YES (both sides ready)
- *   -> CMD_GET_GAME_SESSION -> check-res echo (capture block 105 body)
- *   -> CMD_GET_GAME_ID (6-form fallback) -> CMD_SEND_SESSION_ID
- *   -> TURN announce + watch -> antenna beat
- *   -> PeerSlot.arm(...): the connection phase is live (step 4's sink).
+ * v1 could stop silently, and the user's game then sat on "Waiting for
+ * Opponent" forever because the bot's half had failed quietly (a 10-minute
+ * seat watch that gave up, one-shot rungs that treated a transient network
+ * answer as fatal, a single ready send never re-asserted). v2 policy:
  *
- * Then a periodic antenna re-push keeps the 11.1.0 liveness signal flowing
- * (the real client polls CMD_GET_GAME_SESSION_CHECK_RES on an interval and
- * re-pushes the SET through the WHOLE match). Every step logs through
- * AppState; a required-step failure stops the driver with the reason (never
- * a silent stall). The T7 beats belong to BotMode and keep running.
+ *  - the seat watch has NO deadline (runs until the driver is stopped);
+ *  - every rung retries on transport noise (_NET_FAIL / _HTTP_EMPTY /
+ *    _DECODE_FAIL) and on ERR_ALREADY_* answers (idempotent states);
+ *  - the ready is RE-ASSERTED on a cadence while waiting -- if it was lost
+ *    the server receives it again, if it landed the answer is
+ *    ERR_ALREADY_READY and nothing changes;
+ *  - the peer slot is armed the moment go_match fires (the game starts
+ *    punching immediately), then re-targeted with the session's address;
+ *  - every rung pushes its state to the notification, so the phone itself
+ *    shows where the bot stands (the user's screen is the log).
  */
 object BotMatchDriver {
 
     private const val SEAT_POLL_MS = 2_000L
     private const val GO_POLL_MS = 1_000L
-    private const val SEAT_TIMEOUT_MS = 10 * 60_000L
-    private const val GO_TIMEOUT_MS = 90_000L
+
+    /** Re-assert the bot's ready on this cadence while waiting for go. */
+    private const val READY_REASSERT_MS = 20_000L
+
+    /** Notification heartbeat while nothing else is moving. */
+    private const val STATUS_EVERY_MS = 30_000L
+
+    /** Retry spacing for transient ("_NET_FAIL"-class) answers. */
+    private const val RETRY_MS = 3_000L
 
     /**
      * Antenna re-push cadence. The exact 11.1.0 interval comes from the
@@ -42,6 +51,10 @@ object BotMatchDriver {
      * inside any sane interval.
      */
     private const val ANTENNA_INTERVAL_MS = 5_000L
+
+    /** TURN watch: poll for the peer address, then carry on without it. */
+    private const val WATCH_POLL_MS = 2_000L
+    private const val WATCH_TIMEOUT_MS = 60_000L
 
     @Volatile
     private var running = false
@@ -60,104 +73,218 @@ object BotMatchDriver {
 
     private fun log(line: String) = AppState.appendLog("[BOT-DRIVER] $line")
 
+    /** Log + live notification (never a silent state again). */
+    private fun status(line: String) {
+        log(line)
+        runCatching { PeerBotService.status(line) }
+    }
+
+    /** Transport noise: retry, never stop on it. */
+    private fun transient(result: String?): Boolean =
+        result == null || result == "_NET_FAIL" ||
+            result == "_HTTP_EMPTY" || result == "_DECODE_FAIL"
+
+    /** ERR_ALREADY_*: the state is already what we asked for. */
+    private fun already(result: String?): Boolean =
+        result?.startsWith("ERR_ALREADY") == true
+
     private fun run(gate: KgsGate, rid: Long, roomNumber: String) {
         val flow = BotMatchFlow(gate, gate, BotMatchFlow.SquadSource { emptyList() })
         val self = gate.uid
         try {
-            log("room $roomNumber open -- waiting for your game to join")
-            val opp = waitForSeat(flow, gate, rid, self)
-            if (opp == null) {
-                log("no game joined (timeout) -- driver stopped")
-                return
-            }
+            status("room $roomNumber open -- join it from eFootball now")
+
+            val oppSeen = waitForSeat(flow, gate, rid, self)
             if (!running) return
+            var opp = if (oppSeen < 0) 0L else oppSeen
             if (opp == 0L) {
                 log("seated, but the opponent uid was not parsed from room_info " +
-                    "-- user lists will carry 0; watch the server's answer")
+                    "-- the session's address list will carry the true id")
             }
-            log("your game is seated (uid=$opp) -- firing the bot's half")
-            PeerBotService.status("your game joined -- firing the bot's half")
+            status("your game joined -- the bot is firing its half")
 
-            val es = flow.entrySide(gate, rid, "HOME", true)
-            if (es["result"] != "NOERR") {
-                log("entry_side rejected (${es["result"]}) -- stopping")
-                return
+            // -- entry side (creator = HOME / leader). Retried; never fatal.
+            var entryOk = false
+            while (running && !entryOk) {
+                val es = flow.entrySide(gate, rid, "HOME", true)
+                val r = es["result"]?.toString()
+                when {
+                    r == "NOERR" -> { entryOk = true; log("entry_side -> NOERR") }
+                    already(r) -> { entryOk = true; log("entry_side -> $r (already set)") }
+                    else -> {
+                        log("entry_side -> $r -- retrying")
+                        Thread.sleep(if (transient(r)) RETRY_MS else READY_REASSERT_MS)
+                    }
+                }
             }
-            log("entry_side -> NOERR")
+            if (!running) return
 
-            val cme = flow.checkMatchEnable(gate)
-            // s23.12: ERR_INVALID_SESSION/OTZP- here is known and non-blocking.
-            log("check_match_enable -> ${cme["result"]}")
-
-            val mr = flow.matchReady(gate, rid, BotMode.declaredProfile())
-            val mrRes = mr["result"].toString()
-            if (mrRes != "NOERR" && mrRes != "ERR_ALREADY_READY") {
-                log("match_ready rejected ($mrRes) -- stopping")
-                return
+            // -- check_match_enable, immediately before the first ready
+            //    (capture adjacency). ERR_INVALID_SESSION / OTZP- is the
+            //    documented non-blocking answer; noise just retries.
+            var cmeDone = false
+            while (running && !cmeDone) {
+                val cme = flow.checkMatchEnable(gate)
+                val r = cme["result"]?.toString()
+                if (transient(r)) {
+                    log("check_match_enable -> $r -- retrying")
+                    Thread.sleep(RETRY_MS)
+                    continue
+                }
+                log("check_match_enable -> $r" + if (r != "NOERR") " (non-blocking)" else "")
+                cmeDone = true
             }
-            log("match_ready -> $mrRes")
-            PeerBotService.status("ready sent ($mrRes) -- waiting for your game")
+            if (!running) return
 
-            if (!waitGo(flow, gate, rid)) {
-                log("go_match never flipped (timeout) -- stopping")
-                return
+            // -- ready + go_match watch. The ready is re-asserted on a
+            //    cadence: the server wants both sides' ready, and the game
+            //    sends ITS ready when the user presses To Match. A lost
+            //    ready must never be the reason the room stalls.
+            var firstReady = true
+            var nextReadyAt = 0L
+            var nextStatusAt = 0L
+            var lastUsers = -1
+            var go = false
+            while (running && !go) {
+                val now = System.currentTimeMillis()
+                if (firstReady || now >= nextReadyAt) {
+                    val mr = flow.matchReady(gate, rid, BotMode.declaredProfile())
+                    val r = mr["result"]?.toString()
+                    firstReady = false
+                    nextReadyAt = now + READY_REASSERT_MS
+                    when {
+                        r == "NOERR" -> log("match_ready -> NOERR")
+                        already(r) -> log("match_ready -> $r (already ready)")
+                        else -> log("match_ready -> $r (will re-assert)")
+                    }
+                }
+                val info = flow.roomState(gate, rid)
+                val n = (info["num_users"] as? Number)?.toInt() ?: lastUsers
+                if (n > 0 && n != lastUsers) {
+                    lastUsers = n
+                    log("room now has $n user(s)")
+                }
+                if ((info["is_go_match"] as? String) == "YES") {
+                    go = true
+                    break
+                }
+                if (now >= nextStatusAt) {
+                    nextStatusAt = now + STATUS_EVERY_MS
+                    status("ready sent -- waiting for both sides " +
+                        "(press Ready + To Match in eFootball)")
+                }
+                Thread.sleep(GO_POLL_MS)
             }
-            log("go_match YES -- opening the session")
+            if (!running) return
+            status("both sides ready -- the game is entering the connection phase")
 
-            val gs = flow.gameSession(gate, rid)
-            if (gs["result"] != "NOERR") {
-                log("game_session rejected (${gs["result"]}) -- stopping")
-                return
+            // The game punches the moment its tunnel exists: make the peer
+            // slot live NOW (reactive) and fill its target once the session
+            // reply carries the game's address (arm is idempotent).
+            PeerSlot.arm(opp, "", "", 0)
+
+            // -- game_session + the opponent's address (retried together:
+            //    the reply must ALSO contain the address block).
+            var gs: Map<*, *>? = null
+            var oppBlock: Map<*, *>? = null
+            var rounds = 0
+            while (running && (gs == null || oppBlock == null)) {
+                rounds++
+                if (gs == null) {
+                    val r = flow.gameSession(gate, rid)
+                    val res = r["result"]?.toString()
+                    if (res == "NOERR") {
+                        gs = r
+                        log("game_session -> NOERR")
+                    } else {
+                        log("game_session -> $res (round $rounds) -- retrying")
+                        Thread.sleep(RETRY_MS)
+                        continue
+                    }
+                }
+                oppBlock = flow.opponentAddress(gs!!, self)
+                if (oppBlock == null) {
+                    log("session reply has no opponent address yet (round $rounds)")
+                    gs = null
+                    Thread.sleep(RETRY_MS)
+                }
             }
-            log("game_session -> NOERR")
+            if (!running) return
 
-            // The game's address comes AUTOMATICALLY from the session's
-            // address list -- the same source the real client uses. Its host
-            // half is the game's real local socket (the delivery target);
-            // its reflexive half is what the game announced.
-            val oppBlock = flow.opponentAddress(gs, self)
-            val a4 = oppBlock?.get("address_ipv4") as? Map<*, *>
+            val sessionOpp = (oppBlock!!["user_id"] as? Number)?.toLong() ?: opp
+            if (sessionOpp > 0 && sessionOpp != opp) {
+                opp = sessionOpp
+                log("opponent uid from the session: $opp")
+            }
+            val a4 = oppBlock!!["address_ipv4"] as? Map<*, *>
             val localIp = (a4?.get("host_address") as? String).orEmpty()
             val localPort = (a4?.get("host_port") as? Number)?.toInt() ?: 0
             val reflIp = (a4?.get("reflexive_address") as? String).orEmpty()
             val reflPort = (a4?.get("reflexive_port") as? Number)?.toInt() ?: 0
             log("game address from the session: local=$localIp:$localPort " +
                 "declared=$reflIp:$reflPort")
+            PeerSlot.arm(opp, "$reflIp:$reflPort", localIp, localPort)
 
-            val chk = flow.checkResEcho(gate, rid, self, opp, gs)
-            log("check_res (capture block 105 body) -> ${chk["result"]}")
+            // -- check-res echo (capture block 105 body); retried on noise,
+            //    otherwise logged and carried on (the game sends its own).
+            var chkDone = false
+            while (running && !chkDone) {
+                val chk = flow.checkResEcho(gate, rid, self, opp, gs!!)
+                val cr = chk["result"]?.toString()
+                if (transient(cr)) {
+                    log("check_res -> $cr -- retrying")
+                    Thread.sleep(RETRY_MS)
+                } else {
+                    log("check_res (capture block 105 body) -> $cr")
+                    chkDone = true
+                }
+            }
+            if (!running) return
 
-            val gameId = flow.getGameId(gate, rid)
-            if (gameId == null) {
-                log("game_id missing in every form -- stopping")
-                return
+            // -- game id + session id (the gate assembles these over a beat).
+            var gameId: Long? = null
+            while (running && gameId == null) {
+                gameId = flow.getGameId(gate, rid)
+                if (gameId == null) {
+                    log("game_id not there yet -- retrying")
+                    Thread.sleep(RETRY_MS)
+                }
             }
             log("game_id found")
-            flow.sendSessionId(gate, gameId)
+            flow.sendSessionId(gate, gameId!!)
 
+            // -- TURN announce + watch (the watch polls for the peer address;
+            //    when it stays blank the slot learns the address from traffic).
             val addr = "${BotMode.BOT_FAB_IP}:${BotMode.BOT_PORT}"
             val blob = Base64.encodeToString(addr.toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
             val sd = flow.sendTurnAddress(gate, opp, blob, addr.length)
             log("turn announce -> ${sd["result"]}")
             flow.getTurnAddress(gate)
-            val watch = flow.watchTurnAddress(gate)
-            val peerAddr = (watch["address"] as? String).orEmpty()
-            log("turn watch -> ${watch["result"]} " +
-                "(peer address ${if (peerAddr.isBlank()) "pending" else peerAddr})")
+            val watchDeadline = System.currentTimeMillis() + WATCH_TIMEOUT_MS
+            var peerAddr = ""
+            while (running && peerAddr.isBlank() && System.currentTimeMillis() < watchDeadline) {
+                val watch = flow.watchTurnAddress(gate)
+                peerAddr = (watch["address"] as? String).orEmpty()
+                if (peerAddr.isBlank()) Thread.sleep(WATCH_POLL_MS)
+            }
+            log("turn watch -> peer address " +
+                (if (peerAddr.isBlank()) "pending (the slot learns it from traffic)"
+                 else peerAddr))
 
-            val (setR, getR) = flow.antennaBeat(gate, rid, self, opp, gs)
+            // -- antenna beat (the liveness signal the server watches).
+            val (setR, getR) = flow.antennaBeat(gate, rid, self, opp, gs!!)
             log("antenna set=${setR["result"]} get=${getR["result"]} " +
                 "finished=${getR["is_check_finished"]}")
 
             PeerSlot.arm(opp, peerAddr, localIp, localPort)
             log("connection phase ARMED -- the bot answers .53.2 traffic from here")
-            PeerBotService.status("CONNECTED -- answering the game's connection packets")
+            status("CONNECTED -- answering the game's connection packets")
 
             // Mid-match liveness: re-push the antenna echo on a cadence.
             while (running) {
                 Thread.sleep(ANTENNA_INTERVAL_MS)
                 if (!running) break
-                flow.antennaBeat(gate, rid, self, opp, gs)
+                flow.antennaBeat(gate, rid, self, opp, gs!!)
             }
         } catch (t: Throwable) {
             log("stopped by ${t.javaClass.simpleName}: ${t.message}")
@@ -166,34 +293,33 @@ object BotMatchDriver {
         }
     }
 
-    /** Poll the room until the opponent is seated; null on timeout. */
-    private fun waitForSeat(flow: BotMatchFlow, gate: KgsGate, rid: Long, self: Long): Long? {
-        val deadline = System.currentTimeMillis() + SEAT_TIMEOUT_MS
-        while (running && System.currentTimeMillis() < deadline) {
+    /**
+     * Poll the room until the opponent is seated. NO deadline: giving up
+     * here is what left the user's game waiting forever (v1's 10-minute
+     * timeout). Runs until the driver is stopped; heartbeats meanwhile.
+     */
+    private fun waitForSeat(flow: BotMatchFlow, gate: KgsGate, rid: Long, self: Long): Long {
+        var lastStatusAt = 0L
+        while (running) {
             val info = flow.roomState(gate, rid)
             val n = (info["num_users"] as? Number)?.toInt() ?: 0
             if (n >= 2) return findOpponentUid(info, self) ?: 0L
+            val now = System.currentTimeMillis()
+            if (now - lastStatusAt >= STATUS_EVERY_MS) {
+                lastStatusAt = now
+                status("waiting for your game to join the room...")
+            }
             Thread.sleep(SEAT_POLL_MS)
         }
-        return null
-    }
-
-    /** Poll until both sides are ready (is_go_match == YES). */
-    private fun waitGo(flow: BotMatchFlow, gate: KgsGate, rid: Long): Boolean {
-        val deadline = System.currentTimeMillis() + GO_TIMEOUT_MS
-        while (running && System.currentTimeMillis() < deadline) {
-            val info = flow.roomState(gate, rid)
-            if ((info["is_go_match"] as? String) == "YES") return true
-            Thread.sleep(GO_POLL_MS)
-        }
-        return false
+        return -1L
     }
 
     /**
      * Scan room_info for the opponent's user id. Defensive on purpose: the
      * exact container field is not yet pinned, so any user_id-style key
      * holding an id that is not the bot counts. If nothing is found the
-     * driver continues with 0 (logged) -- the server decides.
+     * driver continues with 0 (logged) -- the server decides, and the
+     * session's address list carries the true id anyway.
      */
     private fun findOpponentUid(info: Map<*, *>, self: Long): Long? {
         val found = ArrayList<Long>()
