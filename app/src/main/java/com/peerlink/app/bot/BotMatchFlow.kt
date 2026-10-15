@@ -188,6 +188,105 @@ class BotMatchFlow(
     }
 
     // ------------------------------------------------------------ ladder
+    /**
+     * The proven join ladder (sendreq_probe.py, around CMD_JOIN_ROOM).
+     * CMD_JOIN_ROOM alone gives NQZT- for both sides; the request/invite
+     * exchange is part of the path:
+     *   bot SEND_JOIN_ROOM_REQUEST{target:0} -> count
+     *   -> owner SEND_JOIN_ROOM_REQUEST{target:bot} (invite, if needed)
+     *   -> both GET_REQUESTED_JOIN_ROOM_INFO -> bot JOIN_ROOM (CUSTOM)
+     *   -> count == 2.
+     */
+    fun sendJoinRoomRequest(g: KgsGate, target: Long, rid: Long) =
+        g.step("CMD_SEND_JOIN_ROOM_REQUEST", linkedMapOf(
+            "target_user_id" to target,
+            "room_id" to linkedMapOf("id" to rid),
+        ))
+
+    fun getRequestedJoinRoomInfo(g: KgsGate, sender: Long) =
+        g.step("CMD_GET_REQUESTED_JOIN_ROOM_INFO", linkedMapOf("sender_user_id" to sender))
+
+    /** CMD_GET_ROOM_INFO -> room_info.num_users (the seating probe). */
+    fun seatedCount(g: KgsGate, rid: Long): Any? {
+        val r = g.step("CMD_GET_ROOM_INFO", linkedMapOf(
+            "mode" to "CUSTOM", "id" to 0,
+            "room_id" to linkedMapOf("id" to rid),
+            "event_id" to 0, "user_compe_id" to 0, "is_room_search" to "NO",
+        ))
+        val info = r["room_info"] as? Map<*, *> ?: return "err:${r["result"]}"
+        return info["num_users"]
+    }
+
+    /** CMD_JOIN_ROOM (room2.join_body verbatim; probe sets mode CUSTOM). */
+    fun joinRoom(g: KgsGate, rid: Long, nat4: KgsGate.NatProfile) =
+        g.step("CMD_JOIN_ROOM", linkedMapOf(
+            "mode" to "CUSTOM",
+            "room_id" to linkedMapOf("id" to rid),
+            "event_id" to 0, "password" to "", "is_need_password" to "NO",
+            "address_ipv4" to linkedMapOf(
+                "host_address" to nat4.hostAddress, "host_port" to nat4.hostPort,
+                "reflexive_address" to nat4.reflexiveAddress,
+                "reflexive_port" to nat4.reflexivePort, "nat_type" to nat4.natType),
+            "address_ipv6" to NET6,
+            "platform_session_id_info" to linkedMapOf(
+                "ps_session_id" to "", "xb_session_id" to ""),
+            "event_account_type" to "GAME_PLAYER",
+            "is_invited" to "NO",
+            "strike_arena_selected_info" to listOf(
+                linkedMapOf("player_id" to 1, "costume_id" to 0)),
+            "user_compe_id" to 0,
+        ))
+
+    /** The full join ladder; returns final seat count (2 = both seated). */
+    fun runJoinLadder(rid: Long, ownerNat: KgsGate.NatProfile, botNat: KgsGate.NatProfile): Long {
+        sendJoinRoomRequest(bot, 0L, rid)
+        pace()
+        val n1 = seatedCount(owner, rid)
+        pace()
+        if ((n1 as? Long ?: ((n1 as? Int)?.toLong() ?: 0L)) < 2L) {
+            sendJoinRoomRequest(owner, bot.uid, rid)
+            pace()
+        }
+        getRequestedJoinRoomInfo(bot, owner.uid)
+        pace()
+        getRequestedJoinRoomInfo(owner, bot.uid)
+        pace()
+        joinRoom(bot, rid, botNat)
+        pace()
+        val n2 = seatedCount(owner, rid)
+        pace()
+        return when (n2) {
+            is Long -> n2
+            is Int -> n2.toLong()
+            else -> -1L
+        }
+    }
+
+    /** CMD_GET_USER_SQUAD -- the roster fetch that feeds [SquadSource]. */
+    fun userSquad(g: KgsGate, target: Long) =
+        g.step("CMD_GET_USER_SQUAD", linkedMapOf("target_user_id" to target))
+
+    /** CMD_USER_DATA_SYNC (11.1.0 builder FUN_07eadd40), sent by BOTH clients. */
+    fun userDataSync(g: KgsGate, side: String, userName: String) =
+        g.step("CMD_USER_DATA_SYNC", linkedMapOf(
+            "name" to userName, "pad_no" to 0,
+            "np_account_id" to "", "xuid_one" to "",
+            "platform_id" to "ANDROID", "platform_user_name" to userName,
+            "avator" to linkedMapOf(
+                "is_already_set" to "NO", "player_id" to 0, "special_id" to 0,
+                "background_id" to 0, "special_id_background" to 0,
+                "is_enable_player" to "YES", "is_enable_background" to "YES",
+                "material_key_player" to "", "material_key_background" to ""),
+            "user_info" to linkedMapOf(
+                "user_id" to g.uid, "platform_kind" to "ANDROID",
+                "is_platform_game_session" to "NO"),
+            "side" to side, "guest_num" to 0,
+        ))
+
+    /** CMD_TEAM_DATA_SYNC -- both clients, right before CMD_START_GAME. */
+    fun teamDataSync(g: KgsGate, side: String, jsonData: String) =
+        g.step("CMD_TEAM_DATA_SYNC", linkedMapOf("side" to side, "json_data" to jsonData))
+
     /** CMD_SET_ROOM_USER_ENTRY_SIDE (verbatim). */
     fun entrySide(g: KgsGate, rid: Long, side: String, leader: Boolean) =
         g.step("CMD_SET_ROOM_USER_ENTRY_SIDE", linkedMapOf(
