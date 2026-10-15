@@ -2,6 +2,7 @@ package com.peerlink.app.bot
 
 import android.util.Base64
 import com.peerlink.app.core.AppState
+import com.peerlink.app.service.PeerBotService
 import kotlin.concurrent.thread
 
 /**
@@ -75,6 +76,7 @@ object BotMatchDriver {
                     "-- user lists will carry 0; watch the server's answer")
             }
             log("your game is seated (uid=$opp) -- firing the bot's half")
+            PeerBotService.status("your game joined -- firing the bot's half")
 
             val es = flow.entrySide(gate, rid, "HOME", true)
             if (es["result"] != "NOERR") {
@@ -94,6 +96,7 @@ object BotMatchDriver {
                 return
             }
             log("match_ready -> $mrRes")
+            PeerBotService.status("ready sent ($mrRes) -- waiting for your game")
 
             if (!waitGo(flow, gate, rid)) {
                 log("go_match never flipped (timeout) -- stopping")
@@ -148,6 +151,7 @@ object BotMatchDriver {
 
             PeerSlot.arm(opp, peerAddr, localIp, localPort)
             log("connection phase ARMED -- the bot answers .53.2 traffic from here")
+            PeerBotService.status("CONNECTED -- answering the game's connection packets")
 
             // Mid-match liveness: re-push the antenna echo on a cadence.
             while (running) {

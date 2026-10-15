@@ -1,8 +1,11 @@
 package com.peerlink.app.bot
 
 import android.content.Context
+import android.content.Intent
 import com.peerlink.app.core.AppState
 import com.peerlink.app.play.BotRoomBackend
+import com.peerlink.app.service.PeerBotService
+import com.peerlink.app.service.PeerLinkVpnService
 
 /**
  * The bot's room service -- the per-session gate flow in the proven order
@@ -75,10 +78,18 @@ object BotRoomService : BotRoomBackend {
             if (num.isBlank()) {
                 throw KgsGate.GateException("Room opened but Konami returned no room number.")
             }
-            // Step 3: the state-driven driver takes over in the background --
-            // it watches the room and fires the bot's half of the gate ladder
-            // as the user's game joins (creator = HOME: entry side -> ready ->
-            // go -> session -> TURN -> antenna), then arms the peer slot.
+            // Keep the bot session ALIVE while the user plays in eFootball:
+            // a foreground service (persistent room notification + live
+            // status) and the per-app VPN for the game's traffic. Without
+            // this the app freezes the moment the user switches away and the
+            // bot never answers the game's To Match (2026-10-15 fix).
+            PeerBotService.start(ctx, num)
+            startGameVpn(ctx)
+
+            // Step 3: the state-driven driver takes over -- it watches the
+            // room and fires the bot's half of the gate ladder as the user's
+            // game joins (creator = HOME: entry side -> ready -> go ->
+            // session -> TURN -> antenna), then arms the peer slot.
             val rid = ((r["room_id"] as? Map<*, *>)?.get("id") as? Number)?.toLong() ?: 0L
             if (rid != 0L) BotMatchDriver.start(gate, rid, num)
             return num
@@ -97,5 +108,29 @@ object BotRoomService : BotRoomBackend {
             parts.add("$k=$v")
         }
         return if (parts.isEmpty()) "gate rejected the request" else parts.joinToString("  ")
+    }
+
+    /**
+     * Bring the per-app VPN up for the game now, so its traffic is handled
+     * from its first packet. Consent is a one-time system dialog; if it was
+     * never granted, say so honestly instead of silently doing nothing.
+     */
+    private fun startGameVpn(ctx: Context) {
+        runCatching {
+            if (android.net.VpnService.prepare(ctx) == null) {
+                val vpnIntent = Intent(ctx, PeerLinkVpnService::class.java)
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                    ctx.startForegroundService(vpnIntent)
+                } else {
+                    ctx.startService(vpnIntent)
+                }
+                AppState.appendLog("[BOT-SVC   ] game VPN service started")
+            } else {
+                AppState.appendLog(
+                    "[BOT-SVC   ] VPN consent not granted yet -- open PeerLink " +
+                        "once and start a normal session, then create the room again"
+                )
+            }
+        }.onFailure { AppState.appendLog("[BOT-SVC   ] VPN start failed: ${it.message}") }
     }
 }

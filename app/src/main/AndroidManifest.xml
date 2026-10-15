@@ -132,6 +132,15 @@
             android:stopWithTask="false"
             android:foregroundServiceType="dataSync" />
 
+        <!-- Bot mode lifeline: keeps the bot session alive while eFootball is
+             foreground (without it the app freezes when the user switches to
+             the game and the bot never answers To Match). -->
+        <service
+            android:name=".service.PeerBotService"
+            android:exported="false"
+            android:stopWithTask="false"
+            android:foregroundServiceType="dataSync" />
+
         <!-- Call Blocker Service — silently declines calls during gameplay.
              phoneCall foregroundServiceType is required on Android 14+ (the app
              targets SDK 36); without this <service> declaration the service
