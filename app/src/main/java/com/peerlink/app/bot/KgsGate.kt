@@ -72,7 +72,10 @@ data class BotIdentity(
  *   login (bot identity) -> session_id
  *   CMD_CREATEJOIN_ROOM  -> room_id  (the number the user types into eFootball)
  */
-class KgsGate(private val identity: BotIdentity) {
+class KgsGate(
+    private val identity: BotIdentity,
+    profile: NatProfile = NatProfile.undeclared(),
+) {
 
     var sid: String = ""
         private set
@@ -179,8 +182,43 @@ class KgsGate(private val identity: BotIdentity) {
     }
 
     /**
+     * The NAT block declared to the gate -- the exact shape the proven runs
+     * established. Runs #26 vs #27-#29 (POSTROOM_FLOW §): nat_type=1 with a
+     * port-preserving reflexive got `game_sycom:"SC"` + a real relay; the
+     * capture's believable shape (reflexive port TRANSLATED to a distinct
+     * port, nat_type 270532787) got `game_sycom:"P2P"` + no relay. The gate
+     * reads what each side declares here and labels the match, so the bot
+     * must declare the P2P shape -- it never runs any STUN of its own.
+     *
+     * [hostAddress]/[hostPort] are the bot's local binding (the punch stack
+     * binds these); [reflexiveAddress]/[reflexivePort] are the device's real
+     * public mapping as the gate/STUN sees it (measured at runtime, never
+     * invented; on a phone these come from the existing connectivity probe).
+     */
+    data class NatProfile(
+        val hostAddress: String,
+        val hostPort: Int,
+        val reflexiveAddress: String,
+        val reflexivePort: Int,
+        val natType: Long,
+    ) {
+        companion object {
+            /** Capture-proven device shapes; nat variants observed on real clients. */
+            const val NAT_P2P_A = 270532787L   // capture client A (0x102000B3)
+            const val NAT_P2P_B = 268435711L   // capture client B (0x0FFFFFFF)
+
+            /** Placeholder until the runtime probe fills the device's real mapping. */
+            fun undeclared() = NatProfile("", 1, "", 1, NAT_P2P_A)
+        }
+    }
+
+    private val nat: NatProfile = profile
+
+    /**
      * CMD_CREATEJOIN_ROOM -- the bot hosts a 1v1 room. Body mirrors room1.create_room
-     * verbatim; returns the gate response (room_id inside on NOERR).
+     * verbatim, with the NAT block in the capture-proven P2P shape (runs #26/#27-#29:
+     * nat_type 270532787 + translated reflexive port -> sycom P2P, no relay; nat_type 1
+     * -> SC + relay). Returns the gate response (room_id inside on NOERR).
      */
     fun createRoom(): LinkedHashMap<String, Any?> {
         val m = envelope("CMD_CREATEJOIN_ROOM")
@@ -201,12 +239,14 @@ class KgsGate(private val identity: BotIdentity) {
         )
         m["event_account_type"] = "GAME_PLAYER"
         m["address_ipv4"] = linkedMapOf<String, Any?>(
-            "host_address" to "", "host_port" to 1, "reflexive_address" to "",
-            "reflexive_port" to 1, "nat_type" to 1,
+            "host_address" to nat.hostAddress, "host_port" to nat.hostPort,
+            "reflexive_address" to nat.reflexiveAddress, "reflexive_port" to nat.reflexivePort,
+            "nat_type" to nat.natType,
         )
         m["address_ipv6"] = linkedMapOf<String, Any?>(
-            "host_address" to "", "host_port" to 1, "reflexive_address" to "",
-            "reflexive_port" to 1, "nat_type" to 1,
+            "host_address" to "::", "host_port" to 0,
+            "reflexive_address" to "::", "reflexive_port" to 0,
+            "nat_type" to 0,
         )
         m["platform_session_id_info"] = linkedMapOf("ps_session_id" to "", "xb_session_id" to "")
         m["strike_arena_selected_info"] = listOf(linkedMapOf("player_id" to 1, "costume_id" to 0))
