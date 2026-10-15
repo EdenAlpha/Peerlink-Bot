@@ -21,6 +21,13 @@ data class BotIdentity(
     val region: String = "REGION_US",
     val platform: String = "ANDROID",
     val myPlatform: String = "ANDROID",
+    // Minted at account creation (CMD_CREATE_USER), kept local-only like the
+    // bundle does: user_code for display, the first session_id, and the
+    // full entry_info roster -- the only place a new account's squad is
+    // ever visible; SET_MYCLUB_ENTRY_INFO needs it later.
+    val userCode: String = "",
+    val firstSessionId: String = "",
+    val entryInfoJson: String = "",
 ) {
     val isComplete: Boolean get() = userId != 0L && authCode.isNotBlank()
 
@@ -40,6 +47,9 @@ data class BotIdentity(
                 region = p.getString("region", "REGION_US") ?: "REGION_US",
                 platform = p.getString("platform", "ANDROID") ?: "ANDROID",
                 myPlatform = p.getString("my_platform", "ANDROID") ?: "ANDROID",
+                userCode = p.getString("user_code", "") ?: "",
+                firstSessionId = p.getString("first_session_id", "") ?: "",
+                entryInfoJson = p.getString("entry_info_json", "") ?: "",
             )
         }
 
@@ -53,6 +63,9 @@ data class BotIdentity(
                 .putString("region", id.region)
                 .putString("platform", id.platform)
                 .putString("my_platform", id.myPlatform)
+                .putString("user_code", id.userCode)
+                .putString("first_session_id", id.firstSessionId)
+                .putString("entry_info_json", id.entryInfoJson)
                 .apply()
         }
 
@@ -209,6 +222,21 @@ class KgsGate(
 
             /** Placeholder until the runtime probe fills the device's real mapping. */
             fun undeclared() = NatProfile("", 1, "", 1, NAT_P2P_A)
+
+            /**
+             * The rule from the record: advertise the reflexive that STUN
+             * actually measured from the SAME socket that keeps beating
+             * (T7 MAPPED-ADDRESS). Run #30 advertised a stale mapping while
+             * beats left from the current egress -> uncorrelated -> DISCONN_HB.
+             */
+            fun measured(hostAddress: String, localPort: Int, mapped: InetSocketAddress): NatProfile =
+                NatProfile(
+                    hostAddress = hostAddress,
+                    hostPort = localPort,
+                    reflexiveAddress = mapped.address?.hostAddress ?: "",
+                    reflexivePort = mapped.port,
+                    natType = NAT_P2P_A,
+                )
         }
     }
 
