@@ -1,5 +1,6 @@
 package com.peerlink.app.bot
 
+import com.peerlink.app.core.AppState
 import org.json.JSONArray
 import org.json.JSONObject
 
