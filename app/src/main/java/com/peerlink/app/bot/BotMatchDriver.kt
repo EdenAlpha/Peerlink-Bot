@@ -119,6 +119,29 @@ object BotMatchDriver {
             }
             if (!running) return
 
+            // -- ROOM-TIME relay-quality report (capture block 63). The real
+            //    client measures AGAIN inside the room, after the entry side
+            //    and immediately before check_match_enable -> ready
+            //    (run #47 exactly: entry_side -> relay_qual -> CME -> ready
+            //    -> NOERR). This is the measurement the server binds to the
+            //    room; declaring COMPLETE with an empty record is the
+            //    ERR_EMPTY the device runs hit every time. Retried on
+            //    transport noise, never fatal on a hard error (logged).
+            var qualityDone = false
+            while (running && !qualityDone) {
+                val rep = BotRelayQuality.roomReport(gate)
+                if (rep.skipped) {
+                    log("room relay quality -> no endpoints to measure (continuing)")
+                    qualityDone = true
+                } else if (transient(rep.result)) {
+                    log("room relay quality -> ${rep.result} -- retrying")
+                    Thread.sleep(RETRY_MS)
+                } else {
+                    qualityDone = true
+                }
+            }
+            if (!running) return
+
             // -- check_match_enable, immediately before the first ready
             //    (capture adjacency). ERR_INVALID_SESSION / OTZP- is the
             //    documented non-blocking answer; noise just retries.

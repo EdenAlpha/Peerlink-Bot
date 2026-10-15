@@ -15,19 +15,19 @@ import com.peerlink.app.ui.MainActivity
  *
  *   fixed fabricated pair (game .53.1 / bot .53.2) + bot T7 beats
  *   -> CMD_LOGIN (bot account)
- *   -> CMD_SET_GAMERELAY_QUALITY [when real data exists]
+ *   -> quality ladder: CMD_GET_GAMERELAY_QUALITYCHECK_LIST -> measure the
+ *      UDP echo regions -> CMD_SET_GAMERELAY_QUALITY (BotRelayQuality; the
+ *      capture blocks 35/38-40 form -- the ready is refused ERR_EMPTY
+ *      without it)
  *   -> CMD_CREATEJOIN_ROOM -> room number for the user's own eFootball.
  *
  * The declared endpoint is translated (real LAN host / fabricated .53.2
- * reflexive): no measurement, and no empty-address path (KgsGate.createRoom
- * refuses a blank endpoint outright). Fails honestly when a step has no real
- * data (no bot account, no quality template). Never invents a room number.
+ * reflexive): no measurement of the bot's own NAT, and no empty-address
+ * path (KgsGate.createRoom refuses a blank endpoint outright). Fails
+ * honestly when a step has no real data (no bot account). Never invents a
+ * room number.
  */
 object BotRoomService : BotRoomBackend {
-
-    /** Relay-quality entries captured from the real client, if the phone has them. */
-    @Volatile
-    var qualityTemplate: List<Map<String, Any?>>? = null
 
     override suspend fun createRoom(ctx: Context): String {
         val loaded = BotIdentity.load(ctx)
@@ -58,16 +58,20 @@ object BotRoomService : BotRoomBackend {
 
         gate.login()
 
-        val quality = qualityTemplate
-        if (quality != null && quality.isNotEmpty()) {
-            val q = gate.setRelayQuality(quality, System.currentTimeMillis() / 1000L)
-            if (q["result"] != "NOERR") {
-                throw KgsGate.GateException("relay quality rejected: ${shallow(q)}")
-            }
+        // The capture's login-time quality report (blocks 35 + 38-40): fetch
+        // the region list, measure the echo endpoints, SET. The room-time
+        // report (block 63) re-sends the SET inside the room before the
+        // ready -- run #47 order: entry_side -> relay_qual -> CME -> ready.
+        // The device runs of 2026-10-15 proved the ready is refused
+        // (ERR_EMPTY) when no measurement was ever reported, regardless of
+        // the declared endpoint shape.
+        val quality = BotRelayQuality.loginReport(gate)
+        if (quality.skipped || quality.result != "NOERR") {
+            AppState.appendLog(
+                "[BOT-QUALITY] login report did not land (${quality.result ?: "no endpoints"}) " +
+                    "-- the room-time report will retry"
+            )
         }
-        // No qualityTemplate: proceed without it -- runs #27-#29 still reached
-        // P2P without the quality step -- but the record warns sycom can come
-        // back SC despite the right nat_type (the real client sends it).
 
         val r = gate.createRoom()
         if (r["result"] == "_NO_ENDPOINT") {
@@ -98,8 +102,7 @@ object BotRoomService : BotRoomBackend {
             return num
         }
         throw KgsGate.GateException(
-            "room create rejected: ${shallow(r)}" +
-                (if (quality == null) "  [note: no relay-quality sent -- sycom may come back SC]" else "")
+            "room create rejected: ${shallow(r)}"
         )
     }
 

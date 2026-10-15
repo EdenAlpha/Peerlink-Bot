@@ -13,10 +13,13 @@ import com.peerlink.app.network.LanPathResolver
  *    StunFabricator (untouched), and the bot's punched address is
  *    197.210.53.2. At the gate the bot declares a TRANSLATED endpoint --
  *    host = this phone's real LAN IP, reflexive = .53.2:1162 (the address
- *    the game punches from the session reply). Every accepted ready on
- *    record has host != reflexive (VM bots, run-#26 loopbacks, the real
- *    games in the flipped peer-mode rooms); the 2026-10-15 device run
- *    declared host == reflexive and the gate answered ERR_EMPTY x7.
+ *    the game punches from the session reply). The declared host must be
+ *    an address the client actually owns: run #21's host == reflexive ==
+ *    real egress was accepted, and the real games in the flipped peer-mode
+ *    rooms declare real hosts with fabricated reflexives. The 2026-10-15
+ *    device run declared host .53.2 -- a public address that exists
+ *    nowhere on the wire -- and the gate answered ERR_EMPTY x7 (empty
+ *    endpoint record).
  *  - The bot never runs the StunFabricator -- it just declares the peer
  *    identity. Traffic the game sends to .53.2 is the bot's to answer.
  *  - The VPN for the game runs the KOTLIN datapath with no peer device: no
@@ -65,7 +68,7 @@ object BotMode {
      * captured in [ensureStarted] before any gate traffic. The reflexive half
      * stays the fabricated peer identity (the address the game punches).
      * Fallback is loopback -- also a proven-accepted host shape -- never the
-     * fabricated IP (host == reflexive is the rejected shape).
+     * fabricated IP (a host the client does not own is the rejected shape).
      */
     @Volatile
     var hostIp: String = "127.0.0.1"

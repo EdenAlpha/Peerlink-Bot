@@ -58,8 +58,11 @@ The two-phone P2P flow with the far phone replaced by the local bot:
   `197.210.53.2:1162`. At the gate the bot declares a TRANSLATED endpoint --
   host = this phone's real LAN IP, reflexive = `.53.2:1162` (same shape the
   real games declare in the flipped peer rooms). The bot never runs the
-  fabricator. (2026-10-15 night: host == reflexive got `ERR_EMPTY` x7 on
-  `match_ready`; every accepted ready on record has host != reflexive.)
+  fabricator. (2026-10-15 night: declaring host .53.2 -- an address that
+  exists nowhere on the wire -- got `ERR_EMPTY` x7 on `match_ready`, the
+  empty endpoint record. Run #21's host == reflexive == real egress was
+  accepted, so the rule is the host must be owned, not that it must
+  differ.)
 - Peer slot fills locally: traffic the game sends to `.53.2` goes to the bot
   engine instead of the tunnel to another phone; the bot's replies are
   injected back wearing the peer fabricated address (the existing path).
@@ -69,7 +72,10 @@ The two-phone P2P flow with the far phone replaced by the local bot:
   start. A FRESH INSTALL has no VPN consent yet: the create-room flow
   raises the one-time system dialog (`ACTION_VPN_CONSENT` -> MainActivity),
   never silently skipping the VPN. Then `BotMatchDriver` -- state-driven:
-  seat poll -> entry side -> enable-check (OTZP- tolerated) -> ready
+  seat poll -> entry side -> relay-quality report (room-time, capture
+  block 63 -- every NOERR-ready session on record SETs it first; without it
+  the ready is refused ERR_EMPTY, both 2026-10-15 device runs) ->
+  enable-check (OTZP- tolerated) -> ready
   (translated profile: real LAN host / fabricated reflexive) -> go poll -> session -> capture block-105 check-res
   echo -> game_id -> session id -> TURN announce/watch -> antenna, then
   periodic antenna beats. Driver v2 (2026-10-15 late -- the user's game sat

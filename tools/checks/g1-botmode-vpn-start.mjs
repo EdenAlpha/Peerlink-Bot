@@ -35,6 +35,7 @@ const peerSlot = read('app/src/main/java/com/peerlink/app/bot/PeerSlot.kt');
 const lanRes = read('app/src/main/java/com/peerlink/app/network/LanPathResolver.kt');
 const driver = read('app/src/main/java/com/peerlink/app/bot/BotMatchDriver.kt');
 const gate = read('app/src/main/java/com/peerlink/app/bot/KgsGate.kt');
+const quality = read('app/src/main/java/com/peerlink/app/bot/BotRelayQuality.kt');
 
 // (a) the branch exists and is gated on bot mode
 must(/import com\.peerlink\.app\.bot\.BotMode/.test(svc), 'a: service imports BotMode');
@@ -130,9 +131,11 @@ must(/if \(armed && gameUid == uid && socket != null\)/.test(peerSlot),
   'j: PeerSlot.arm is idempotent (early arm + re-target)');
 
 // (k) the bot declares a TRANSLATED endpoint at the gate (2026-10-15 device
-// run: host == reflexive got ERR_EMPTY x7; every accepted ready on record --
-// VM bots, run-#26 loopbacks, real games in flipped peer rooms -- has
-// host != reflexive).
+// run: host .53.2 -- an address that exists nowhere on the wire -- got
+// ERR_EMPTY x7 (empty endpoint record); run #21's host == reflexive == real
+// egress was accepted, and the real games in flipped peer rooms declare real
+// hosts with fabricated reflexives: the host must be owned, the reflexive is
+// the punched address).
 must(/var hostIp/.test(botMode), 'k: BotMode captures the declare-host IP');
 must(/resolveDefaultUnderlay\(ctx\)\?\.localIp/.test(botMode),
   'k: the host is the phone\u2019s real LAN IP');
@@ -142,6 +145,30 @@ must(/reflexiveAddress = BOT_FAB_IP/.test(botMode),
   'k: the reflexive stays the fabricated peer identity');
 must(!/fun fabricated\(/.test(gate),
   'k: the host==reflexive helper is gone');
+
+// (l) the relay-quality ladder is wired in the proven places (2026-10-15
+// night: BOTH endpoint shapes were refused ERR_EMPTY x7 -- the real
+// discriminator was the never-sent quality report; every accepted session
+// on record SETs it at login AND in the room before CME -> ready).
+must(/fun fetchRows\(/.test(quality) && /CMD_GET_GAMERELAY_QUALITYCHECK_LIST/.test(quality),
+  'l: the qualitycheck list is fetched from the gate');
+must(/PINGCHAIN3QUALITYCHECK000000000000/.test(quality),
+  'l: the UDP echo probe is the VM-proven payload');
+must(/CALLABLE|Callable\(/.test(quality) || /newFixedThreadPool/.test(quality),
+  'l: regions are measured concurrently');
+must(/setRelayQuality\(/.test(quality), 'l: the measured rows are SET to the gate');
+must(/fun loginReport\(/.test(quality), 'l: the login-time report exists');
+must(/fun roomReport\(/.test(quality), 'l: the room-time report exists');
+must(/BotRelayQuality\.loginReport\(gate\)/.test(roomSvc),
+  'l: BotRoomService runs the login-time report');
+{
+  const es = driver.indexOf('entry_side -> NOERR');
+  const qual = driver.indexOf('BotRelayQuality.roomReport(gate)');
+  const cme = driver.indexOf('check_match_enable, immediately before');
+  must(es >= 0 && qual > es && cme > qual,
+    'l: the room-time report sits between entry_side and check_match_enable (run #47 order)');
+}
+must(!/qualityTemplate/.test(roomSvc), 'l: the dead qualityTemplate path is gone');
 
 // (g) syntax-level balance on every edited file
 for (const [name, text] of [
@@ -154,6 +181,7 @@ for (const [name, text] of [
   ['LanPathResolver.kt', lanRes],
   ['BotMatchDriver.kt', driver],
   ['KgsGate.kt', gate],
+  ['BotRelayQuality.kt', quality],
 ]) {
   const ob = (text.match(/\{/g) || []).length, cb = (text.match(/\}/g) || []).length;
   const op = (text.match(/\(/g) || []).length, cp = (text.match(/\)/g) || []).length;
