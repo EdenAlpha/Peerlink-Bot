@@ -1,6 +1,7 @@
 package com.peerlink.app.bot
 
 import android.content.Context
+import com.peerlink.app.core.AppState
 import com.peerlink.app.play.BotRoomBackend
 
 /**
@@ -25,11 +26,21 @@ object BotRoomService : BotRoomBackend {
     var qualityTemplate: List<Map<String, Any?>>? = null
 
     override suspend fun createRoom(ctx: Context): String {
-        val identity = BotIdentity.load(ctx)
-            ?: throw KgsGate.GateException(
-                "No bot account on this phone yet. Add the bot's user_id and " +
-                    "auth_code under General Settings, then create the room again."
-            )
+        val loaded = BotIdentity.load(ctx)
+        val identity = if (loaded != null) loaded else {
+            // First room on this phone: mint the bot's account (the mint.py
+            // port), verify it with the proven login, keep it in app-private
+            // prefs. One tap, nothing to type.
+            AppState.appendLog("[BOT-MINT ] no bot account yet -- creating one")
+            val minted = BotMinter.mint()
+                ?: throw KgsGate.GateException(
+                    "Couldn't create the bot account (Konami's gate refused the " +
+                        "sign-up). Try once more -- if it keeps failing, watch the " +
+                        "log for [BOT-MINT] lines."
+                )
+            BotIdentity.save(ctx, minted)
+            minted
+        }
 
         // Step 1: fixed fabricated pair (game .53.1 / bot .53.2).
         // Step 2: the bot's T7 beats start here and keep running.

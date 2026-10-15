@@ -9,7 +9,7 @@ component. Nothing here is invented; anything not yet ported is marked.
 | # | Bundle step | App component | Status |
 |---|---|---|---|
 | 1 | `gate_client.py` cipher selftest | `bot/GateCodec.selftest()` (msgpack+AES+sign+s_keyword regressions) | ported |
-| 2 | `mint.py` — mint bot identity via captured `CMD_CREATE_USER` (replay → dedupe retries → fresh user_name/device_identifier), carry `auth_code/user_code/entry_info`, **verify via CMD_LOGIN** before saving | identity store + login verify (`BotIdentity`, `KgsGate.login`); minting itself (CREATE_USER replay) | store ported; mint **NOT ported** |
+| 2 | `mint.py` — mint bot identity via captured `CMD_CREATE_USER` (replay → dedupe retries → fresh user_name/device_identifier), carry `auth_code/user_code/entry_info`, **verify via CMD_LOGIN** before saving | `BotMinter` (auto-mints on first room create; captured bodies in `GateCaptures`, decoded at runtime, credentials patched in memory) + proven captured-login replay in `KgsGate.login` | **ported** (entry_info carry: pending) |
 | 3 | `stun_keepalive.py` — T7 keepalive both ports *(owner :44000, bot :44001)*, every ~5 s, **both uids**; bind-time `stun_mapped()` → advertise the measured reflexive | `bot/T7Keepalive` + `bot/T7` (0x0001 + 0x9090 → pesam.stun.service.konami.net:3478; MAPPED-ADDRESS 0x0001 parse) | ported (service wiring pending) |
 | 4 | `chain3.py --live` — full match: login → relay quality → create room → join → READY_FLAG → TURN/session → phases → goals → `set_result` both → `get_result` | `bot/BotMatchFlow` (join ladder, user/team sync, entry side, ready, session, phase ladder, add score/foul, START_GAME, set_result body + checksum rule, get_result); `bot/KgsGate` primitives | ladder + bodies **ported**; remaining: two-gate driver + `SquadSource` data |
 | 5 | relay quality — replayed/real quality list before create | `bot/BotRoomService` (sends only with a real template; notes otherwise) | hook ported; real measurement **NOT ported** |
@@ -22,6 +22,10 @@ component. Nothing here is invented; anything not yet ported is marked.
   `b64(HMAC-SHA256(secret|rand^clock) ‖ clock_le ‖ rand_le)`.
 - `s_keyword = CONST ^ client_version` (per-build CONST; 11.0.1 regression
   pinned in `GateCodec.selftest`).
+- Login = capture replay (room1.py's path): the committed ciphertext body in
+  `GateCaptures` is decoded at runtime and the identity's credentials are
+  patched in memory. Every accepted live run logged in exactly this way; the
+  from-scratch envelope login was never live-proven.
 - `client_version` is a moving lock. The 2026-10-15 store update (app 11.1.1)
   made the gate answer `ERR_DEFCLIENTVER` (`CIYU-`) for 6.1.0; the same
   request with **6.1.1** logged in `NOERR` — and the 11.1.0 s_keyword CONST
@@ -79,6 +83,8 @@ The two-phone P2P flow with the far phone replaced by the local bot:
    `CMD_GET_USER_SQUAD`).
 2. gRPC CommandStream heartbeat port (`kgs_client` framing + `beat_stream`).
 3. DTLS supervisor hold port (rendezvous + DTLS 1.2 + 143 B cadence).
-4. Identity minting port (CREATE_USER flow + LOGIN verification at intake).
+4. ~~Identity minting port~~ **done**: `BotMinter` auto-mints + verifies on
+   first room create. Still open: carrying `entry_info` (the 23-player roster
+   from the CREATE reply) for SET_MYCLUB_ENTRY_INFO.
 5. VPN loopback-peer wiring: game's packets → `PeerBotEngine`, replies out as
    the peer identity (addresses pinned from tunnel_capture headers first).

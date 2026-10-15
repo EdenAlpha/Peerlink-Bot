@@ -119,6 +119,15 @@ class KgsGate(
         return send(m)
     }
 
+    /** Fresh rqid for raw capture replays (the gate caches responses per rqid). */
+    fun nextRqid(): Long {
+        rqid += 1
+        return rqid
+    }
+
+    /** Send an already-built message map verbatim (capture replays patch it first). */
+    fun sendRaw(msg: LinkedHashMap<String, Any?>): LinkedHashMap<String, Any?> = send(msg)
+
     /** POST one gate request and decode the response; never throws on server error shapes. */
     private fun send(msg: LinkedHashMap<String, Any?>, timeoutMs: Int = 25_000): LinkedHashMap<String, Any?> {        val body = GateCodec.encode(msg)
         val sign = GateCodec.makeSign(body)
@@ -174,7 +183,15 @@ class KgsGate(
 
     /** CMD_LOGIN as the bot account; returns the gate response. */
     fun login(): LinkedHashMap<String, Any?> {
-        val m = envelope("CMD_LOGIN")
+        // The PROVEN login: replay the committed capture body (room1.py's
+        // path -- every accepted live run logged in exactly this way), with
+        // the identity's credentials patched in memory. The from-scratch
+        // envelope login was never live-proven; this one is.
+        val m = GateCaptures.decodeBody(GateCaptures.LOGIN_BODY_HEX)
+        if (m.isEmpty()) throw GateException("login capture body failed to decode")
+        m["rqid"] = nextRqid()
+        m["client_version"] = GateCodec.CLIENT_VERSION
+        m["s_keyword"] = GateCodec.sKeyword()
         m["user_id"] = identity.userId
         m["auth_code"] = identity.authCode
         m["session_id"] = ""
@@ -187,7 +204,7 @@ class KgsGate(
             val pui = r["pes_user_info"]
             uid = identity.userId
             if (pui is Map<*, *>) {
-                (pui["user_id"] as? Long)?.let { uid = it }
+                (pui["user_id"] as? Number)?.let { uid = it.toLong() }
             }
             return r
         }
