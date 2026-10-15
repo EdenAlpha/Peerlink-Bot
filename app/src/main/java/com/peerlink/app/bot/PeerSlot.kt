@@ -4,7 +4,7 @@ import com.peerlink.app.core.AppState
 import kotlin.concurrent.thread
 
 /**
- * Bot mode step 4 -- the peer slot, now LIVE.
+ * Bot mode step 4 -- the peer slot, LIVE.
  *
  * In peer mode "the peer" is the paired remote phone reached over the tunnel.
  * In bot mode the same slot is filled locally: the tunnel hands every packet
@@ -13,11 +13,14 @@ import kotlin.concurrent.thread
  * punch/session/capability forms (PeerBotEngine, 98/99 replay) and injects
  * its replies back toward the game through the TunnelEngine's injector.
  *
- * Timing follows the 2026-10-13 two-phone capture: the game's first knock is
- * learned (address + port from its own packet), answered instantly; the bot
- * then originates its own punch (retried ~every 600 ms) and, once the knock
- * has crossed, sends the session + capability burst -- exactly the order the
- * real creator side used.
+ * The game's address comes AUTOMATICALLY from the gate session's
+ * ntl_address_list (the same source the real client uses): its host half is
+ * the game's real local socket -- the delivery target -- and its reflexive
+ * half is what the game announced. No waiting for a first packet, so the bot
+ * punches FIRST exactly like the real creator side of the 2026-10-13 match,
+ * retrying (~600 ms) until the exchange crosses; every knock is answered
+ * instantly; then the session + capability burst follows. The first inbound
+ * packet still refreshes the address (ground truth beats declaration).
  *
  * Non-STUN frames (the game channel's 8-byte-header frames) are consumed and
  * logged by class; a cls-0xC0 frame is the live key box the real game hands
@@ -48,7 +51,7 @@ object PeerSlot {
     var gameAddress = ""
         private set
 
-    /** The game's real local socket address, learned from its first packet. */
+    /** The game's real local socket (delivery target), refreshed by its packets. */
     @Volatile
     private var gameIp = ""
     @Volatile
@@ -56,7 +59,7 @@ object PeerSlot {
 
     /** The fabricated port the game sent TO (our declared port). */
     @Volatile
-    private var gameTargetPort = 0
+    private var gameTargetPort = BotMode.BOT_PORT
 
     @Volatile
     private var sawInboundStun = false
@@ -68,17 +71,24 @@ object PeerSlot {
         injector = fn
     }
 
-    /** Arm the slot: from here the bot owns .53.2 traffic. */
-    fun arm(uid: Long, address: String) {
+    /**
+     * Arm the slot. [announced] = the game's announced address (logs);
+     * [localIp]/[localPort] = its host half from the session's address list
+     * (the delivery target; "" if not declared yet -- the first inbound
+     * packet then supplies it).
+     */
+    fun arm(uid: Long, announced: String, localIp: String, localPort: Int) {
         engine = PeerBotEngine(uid.toString())
         gameUid = uid
-        gameAddress = address
-        gameIp = ""
-        gamePort = 0
-        gameTargetPort = 0
+        gameAddress = announced
+        gameIp = localIp
+        gamePort = localPort
+        gameTargetPort = BotMode.BOT_PORT
         sawInboundStun = false
         armed = true
-        AppState.appendLog("[BOT-SLOT  ] armed: game uid=$uid announced=$address")
+        AppState.appendLog("[BOT-SLOT  ] armed: game uid=$uid announced=$announced " +
+            (if (localIp.isNotBlank() && localPort > 0) "local=$localIp:$localPort"
+             else "local address pending"))
         worker = thread(name = "peer-slot") { originateLoop() }
     }
 
@@ -99,20 +109,16 @@ object PeerSlot {
         if (destIp != AppState.peerFabricatedIp) return false
 
         val p = parseUdp(buffer, length) ?: return false
-        if (!sawInboundStun) {
-            gameIp = p.srcIp
-            gamePort = p.srcPort
-            gameTargetPort = p.dstPort
-        }
+
+        // The game's own packets are the ground truth for its address.
+        gameIp = p.srcIp
+        gamePort = p.srcPort
+        gameTargetPort = p.dstPort
 
         val eng = engine ?: return false
         val (reply, note) = eng.handle(p.payload)
         if (note == "not-stun") {
             noteGameFrame(p.payload)
-            if (!sawInboundStun && p.payload.size >= 8) {
-                // pure game-channel frame (no STUN seen yet) -- keep the
-                // learned address but do not count it as the knock
-            }
             return true
         }
 
@@ -128,41 +134,41 @@ object PeerSlot {
     }
 
     /**
-     * Originate side: wait for the game's first knock (learns its address),
-     * punch with retries, then the session + capability burst. Mirrors the
-     * real creator side of the 2026-10-13 capture.
+     * Originate side: punch FIRST (the real creator did), retrying ~600 ms
+     * apart until the exchange crosses; then the session + capability burst.
      */
     private fun originateLoop() {
         try {
-            val deadline = System.currentTimeMillis() + 60_000L
-            while (armed && !sawInboundStun && System.currentTimeMillis() < deadline) {
-                Thread.sleep(200)
+            val eng = engine ?: return
+            val tid = eng.freshTid()
+            val deadline = System.currentTimeMillis() + 30_000L
+            var punches = 0
+            while (armed && !sawInboundStun && punches < 15 &&
+                System.currentTimeMillis() < deadline
+            ) {
+                if (gameIp.isBlank() || gamePort <= 0) {
+                    Thread.sleep(200)   // address not declared yet -- wait for it
+                    continue
+                }
+                val m = eng.punchReq(tid, gameUid.toString())
+                injector?.invoke(m, gameIp, gamePort, gameTargetPort)
+                punches++
+                Thread.sleep(600)
             }
-            if (!armed || !sawInboundStun) {
-                AppState.appendLog("[BOT-SLOT  ] no knock from the game yet -- " +
+            if (!armed) return
+            if (!sawInboundStun) {
+                AppState.appendLog("[BOT-SLOT  ] no answer to $punches punches yet -- " +
                     "slot stays armed and reactive")
                 return
             }
-            val eng = engine ?: return
-            val toIp = gameIp
-            val toPort = gamePort
-            val fromPort = gameTargetPort
-            val tid = eng.freshTid()
-            // Punch with retries (~600 ms like the capture's cadence).
-            for (i in 0 until 5) {
-                if (!armed) return
-                val m = eng.punchReq(tid, gameUid.toString())
-                injector?.invoke(m, toIp, toPort, fromPort)
-                Thread.sleep(600)
-            }
-            // Session + capability burst, paced.
+            // Session + capability burst, paced (the capture's order).
             for (m in eng.originateBytes(nSession = 3)) {
                 if (!armed) return
-                injector?.invoke(m, toIp, toPort, fromPort)
+                injector?.invoke(m, gameIp, gamePort, gameTargetPort)
                 Thread.sleep(120)
             }
             AppState.appendLog("[BOT-SLOT  ] originate burst sent " +
-                "(punch + sessions + capability)")
+                "(punch crossing seen; sessions + capability out)")
         } catch (t: Throwable) {
             AppState.appendLog("[BOT-SLOT  ] originate stopped: ${t.javaClass.simpleName}")
         }

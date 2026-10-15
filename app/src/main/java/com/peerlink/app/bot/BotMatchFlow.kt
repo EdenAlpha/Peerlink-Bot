@@ -430,6 +430,22 @@ class BotMatchFlow(
         return (r["room_info"] as? Map<*, *>) ?: emptyMap<String, Any?>()
     }
 
+    /**
+     * From a CMD_GET_GAME_SESSION reply: the OTHER user's address entry of
+     * ntl_address_list. The server distributes both sides' NAT blocks here --
+     * the automatic source of the game's address (host half = its real local
+     * socket, reflexive half = what it announced).
+     */
+    fun opponentAddress(gs: Map<*, *>, selfU: Long): Map<*, *>? {
+        val list = gs["ntl_address_list"] as? List<*> ?: return null
+        for (e in list) {
+            val m = e as? Map<*, *> ?: continue
+            val uid = (m["user_id"] as? Number)?.toLong() ?: 0L
+            if (uid != selfU) return m
+        }
+        return null
+    }
+
     /** CMD_GET_GAME_ID -- builder form first, then the server-side fallbacks. */
     fun getGameId(g: KgsGate, rid: Long): Long? {
         val forms = listOf(

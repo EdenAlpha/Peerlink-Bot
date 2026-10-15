@@ -108,6 +108,19 @@ object BotMatchDriver {
             }
             log("game_session -> NOERR")
 
+            // The game's address comes AUTOMATICALLY from the session's
+            // address list -- the same source the real client uses. Its host
+            // half is the game's real local socket (the delivery target);
+            // its reflexive half is what the game announced.
+            val oppBlock = flow.opponentAddress(gs, self)
+            val a4 = oppBlock?.get("address_ipv4") as? Map<*, *>
+            val localIp = (a4?.get("host_address") as? String).orEmpty()
+            val localPort = (a4?.get("host_port") as? Number)?.toInt() ?: 0
+            val reflIp = (a4?.get("reflexive_address") as? String).orEmpty()
+            val reflPort = (a4?.get("reflexive_port") as? Number)?.toInt() ?: 0
+            log("game address from the session: local=$localIp:$localPort " +
+                "declared=$reflIp:$reflPort")
+
             val chk = flow.checkResEcho(gate, rid, self, opp, gs)
             log("check_res (capture block 105 body) -> ${chk["result"]}")
 
@@ -133,7 +146,7 @@ object BotMatchDriver {
             log("antenna set=${setR["result"]} get=${getR["result"]} " +
                 "finished=${getR["is_check_finished"]}")
 
-            PeerSlot.arm(opp, peerAddr)
+            PeerSlot.arm(opp, peerAddr, localIp, localPort)
             log("connection phase ARMED -- the bot answers .53.2 traffic from here")
 
             // Mid-match liveness: re-push the antenna echo on a cadence.

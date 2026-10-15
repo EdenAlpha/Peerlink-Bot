@@ -60,9 +60,12 @@ The two-phone P2P flow with the far phone replaced by the local bot:
   Connection-phase responder + tunnel sink = `PeerSlot` -- **LIVE**:
   TunnelEngine hands every game packet addressed to `.53.2` to the slot,
   which answers with the byte-exact forms (PeerBotEngine) and injects its
-  replies toward the game as the fabricated peer (first knock learns the
-  game's address, then the originate burst: punch retries + sessions +
-  capability, per the 2026-10-13 capture order).
+  replies toward the game as the fabricated peer. The game's address comes
+  AUTOMATICALLY from the session's `ntl_address_list` (host half = delivery
+  target, reflexive half = what the game announced); the bot punches FIRST
+  and retries until the crossing, then the session + capability burst
+  (2026-10-13 capture order). The first inbound packet refreshes the
+  address (ground truth beats declaration).
 - Peer mode untouched: pair still computed from both phones' LANs.
 - Declared vs measured: bot mode declares the fabricated identity, NOT the
   measured one; `KgsGate.createRoom` now refuses an empty endpoint outright
