@@ -80,6 +80,42 @@ object LanPathResolver {
             .maxByOrNull { it.score }
             ?.path
 
+    /**
+     * BOT MODE: the underlay is simply whatever network the phone is on --
+     * Wi-Fi OR mobile. Unlike [bestDiscoveryPath] this does not require a
+     * Wi-Fi private address; it resolves the system's ACTIVE network so the
+     * native backend can bind its peer socket and the game keeps working
+     * (2026-10-15: the "no exact gameplay network" bot-mode death).
+     */
+    fun resolveDefaultUnderlay(context: Context): LanPath? {
+        return try {
+            val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+                ?: return null
+            val network = cm.activeNetwork ?: return null
+            val lp = cm.getLinkProperties(network) ?: return null
+            val caps = runCatching { cm.getNetworkCapabilities(network) }.getOrNull()
+            val iface = lp.interfaceName.orEmpty()
+            if (iface.isBlank()) return null
+            if (iface.lowercase().startsWith("tun") || iface.lowercase().contains("vpn")) return null
+            val ifIndex = runCatching { NetworkInterface.getByName(iface)?.index ?: 0 }.getOrDefault(0)
+            val link = lp.linkAddresses.firstOrNull {
+                val a = it.address
+                a is Inet4Address && !a.isLoopbackAddress && !a.isLinkLocalAddress
+            } ?: return null
+            val local = link.address as Inet4Address
+            LanPath(
+                localIp = local.hostAddress ?: return null,
+                interfaceName = iface,
+                interfaceIndex = ifIndex,
+                prefixLength = link.prefixLength,
+                androidNetwork = network,
+                isWifiTransport = caps?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true,
+            )
+        } catch (_: Throwable) {
+            null
+        }
+    }
+
     /** Validate the saved source address against the live interface, not an old index alone. */
     fun isStillAvailable(path: LanPath): Boolean = runCatching {
         val nif = NetworkInterface.getByName(path.interfaceName) ?: return@runCatching false

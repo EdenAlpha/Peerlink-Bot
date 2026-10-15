@@ -31,23 +31,28 @@ const botMode = read('app/src/main/java/com/peerlink/app/bot/BotMode.kt');
 const roomSvc = read('app/src/main/java/com/peerlink/app/bot/BotRoomService.kt');
 const pbot = read('app/src/main/java/com/peerlink/app/service/PeerBotService.kt');
 const tunnel = read('app/src/main/java/com/peerlink/app/tunnel/TunnelEngine.kt');
+const peerSlot = read('app/src/main/java/com/peerlink/app/bot/PeerSlot.kt');
+const lanRes = read('app/src/main/java/com/peerlink/app/network/LanPathResolver.kt');
 
 // (a) the branch exists and is gated on bot mode
 must(/import com\.peerlink\.app\.bot\.BotMode/.test(svc), 'a: service imports BotMode');
 must(/if \(BotMode\.active\) \{[\s\S]{0,80}startBotModeVpn\(\)/.test(svc), 'a: startVpn branches on BotMode.active into startBotModeVpn');
 must(/private fun startBotModeVpn\(\)/.test(svc), 'a: startBotModeVpn() exists');
 
-// (b) the bot start uses the Kotlin engine on the real TUN, no peer machinery
+// (b) the bot start uses the NATIVE datapath with a loopback peer
 {
   const fn = sliceFn(svc, 'private fun startBotModeVpn(');
-  must(fn.length > 200, 'b: startBotModeVpn body found');
-  must(/TunnelEngine\(/.test(fn), 'b: constructs TunnelEngine');
-  must(/bridgeMode\s*=\s*false/.test(fn), 'b: full datapath (bridgeMode = false)');
-  must(!/verifyPeerPath/.test(fn), 'b: no verifyPeerPath in bot start');
-  must(!/NativePeerLinkBackend\(/.test(fn), 'b: no NativePeerLinkBackend construction in bot start');
-  must(!/resolveForPeer/.test(fn), 'b: no LAN peer resolution in bot start');
-  must(!/calculateFabricatedIps/.test(fn), 'b: no calculateFabricatedIps requirement in bot start');
-  must(/establish\(\)/.test(fn), 'b: establishes the real TUN interface');
+  must(fn.length > 400, 'b: startBotModeVpn body found');
+  must(/NativePeerLinkBackend\(/.test(fn), 'b: constructs the native backend (the peer-mode datapath)');
+  must(/peerLanIp = PeerSlot\.LOOPBACK_PEER_IP/.test(fn), 'b: the native peer is the loopback slot');
+  must(/peerPort = BotMode\.BOT_PORT/.test(fn), 'b: peer port is the slot port');
+  must(/LanPathResolver\.resolveDefaultUnderlay\(this\)/.test(fn), 'b: default underlay (Wi-Fi or mobile)');
+  must(/PassthroughBridgeEngine\(/.test(fn), 'b: passthrough bridge starts as in peer mode');
+  must(/fabricateStunWithExistingLogic/.test(fn), 'b: STUN fabrication wired as in peer mode');
+  must(/detachFd\(\)/.test(fn), 'b: TUN detached to the native backend');
+  must(!/TunnelEngine\(/.test(fn), 'b: no Kotlin engine in the bot datapath');
+  must(!/verifyPeerPath/.test(fn), 'b: no peer-link probe in the bot start');
+  must(!/resolveForPeer/.test(fn), 'b: no LAN peer resolution in the bot start');
 }
 
 // (c) the peer path is intact
@@ -55,14 +60,14 @@ must(/Peer LAN IP is not set/.test(svc), 'c: peer-mode peerLanIp guard intact');
 must(/resolveForPeer\(this, peerLanIp\)/.test(svc), 'c: peer-mode resolveForPeer intact');
 must(/verifyPeerPath\(60_000\)/.test(svc), 'c: peer-mode verifyPeerPath intact');
 
-// (d) stop path tears the bot engine down
+// (d) the dead Kotlin-engine path is gone; teardown covers the native stack
+must(!/botModeEngine/.test(svc), 'd: dead Kotlin datapath field fully removed');
 {
   const fn = sliceFn(svc, 'private fun stopVpn(');
   must(fn.length > 200, 'd: stopVpn body found');
-  must(/botModeEngine/.test(fn), 'd: stopVpn reads botModeEngine');
-  must(/botEngine\?\.stop\(\)/.test(fn), 'd: stopVpn stops the bot engine');
+  must(/passthroughBridgeEngine/.test(fn), 'd: stopVpn tears the bridge down');
+  must(/backend\?\.requestStop\(\)/.test(fn), 'd: stopVpn tears the native backend down');
 }
-must(/private var botModeEngine: TunnelEngine\? = null/.test(svc), 'd: botModeEngine field declared');
 
 // (e) BotMode API exists as specified
 must(/var active = false/.test(botMode), 'e: BotMode.active flag');
@@ -76,19 +81,28 @@ must(/restoreIfActive\(this\)/.test(pbot), 'f: PeerBotService restores bot mode 
 must(/restoreIfActive\(this\)/.test(svc), 'f: VPN service restores bot mode on null-intent restart');
 must(/ensureStarted\(ctx, identity\.userId\)/.test(roomSvc), 'f: BotRoomService starts bot mode with the minted uid');
 
-// (h) the exact-gameplay-WiFi bind is waived ONLY in bot mode (the 2026-10-15
-// engine-death / game-black-hole fix); the peer-mode throw stays.
-must(/import com\.peerlink\.app\.bot\.BotMode/.test(tunnel), 'h: engine imports BotMode');
-must(/if \(!bindSocketToWifi\(sock\)\) \{[\s\S]{0,400}BotMode\.active/.test(tunnel),
-  'h: bindSocketToWifi failure consults BotMode.active');
-must(/Exact gameplay network bind failed/.test(tunnel), 'h: peer-mode throw intact');
-must(/fun isActive\(\): Boolean = isRunning\.get\(\)/.test(tunnel), 'h: engine exposes isActive()');
+// (h) the peer slot speaks the native wire format on loopback
+must(/LOOPBACK_PEER_IP = "127\.0\.0\.1"/.test(peerSlot), 'h: slot is the loopback peer');
+must(/BACKEND_PORT = 17024/.test(peerSlot), 'h: backend peer-socket port known');
+must(/0xFC/.test(peerSlot), 'h: peer probe 0xFC handled');
+must(/0xFDu/.test(peerSlot), 'h: probe reply 0xFD sent');
+must(/DIAG_HEADER_SIZE = 56/.test(peerSlot), 'h: native diag header stripped');
+must(/buildInnerUdpPacket\(/.test(peerSlot), 'h: replies are complete inner IP packets');
+must(/parseInnerUdp\(/.test(peerSlot), 'h: inner IPv4/UDP frames parsed');
+must(/fun resolveDefaultUnderlay\(context: Context\): LanPath\?/.test(lanRes),
+  'h: default-underlay resolver exists');
+must(/bindSocketFdToPreferredNetwork/.test(svc), 'h: peer-mode socket bind intact');
+must(/else if \(BotMode\.active\) \{[\s\S]{0,900}activeNetwork\?\.bindSocket/.test(svc),
+  'h: bot-mode native-socket bind is default-network best-effort');
 
-// (i) the bot start refuses to claim an active datapath when the engine died
-must(/engine\.start\(\)[\s\S]{0,400}if \(!engine\.isActive\(\)\)/.test(svc),
-  'i: bot start verifies engine liveness after start');
-must(/bot datapath engine failed to start/.test(svc),
-  'i: a dead engine tears the VPN start down instead of pretending');
+// (i) the exact-gameplay-WiFi waiver stays bot-mode-only in the Kotlin engine
+// (defense in depth: the engine is no longer the bot datapath, but the waiver
+// must never leak into peer mode).
+must(/import com\.peerlink\.app\.bot\.BotMode/.test(tunnel), 'i: engine imports BotMode');
+must(/if \(!bindSocketToWifi\(sock\)\) \{[\s\S]{0,400}BotMode\.active/.test(tunnel),
+  'i: bindSocketToWifi failure consults BotMode.active');
+must(/Exact gameplay network bind failed/.test(tunnel), 'i: peer-mode throw intact');
+must(/fun isActive\(\): Boolean = isRunning\.get\(\)/.test(tunnel), 'i: engine exposes isActive()');
 
 // (g) syntax-level balance on every edited file
 for (const [name, text] of [
@@ -97,6 +111,8 @@ for (const [name, text] of [
   ['BotMode.kt', botMode],
   ['BotRoomService.kt', roomSvc],
   ['TunnelEngine.kt', tunnel],
+  ['PeerSlot.kt', peerSlot],
+  ['LanPathResolver.kt', lanRes],
 ]) {
   const ob = (text.match(/\{/g) || []).length, cb = (text.match(/\}/g) || []).length;
   const op = (text.match(/\(/g) || []).length, cp = (text.match(/\)/g) || []).length;

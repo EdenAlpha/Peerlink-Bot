@@ -15,6 +15,7 @@ import android.os.Build
 import android.os.ParcelFileDescriptor
 import android.os.SystemClock
 import com.peerlink.app.bot.BotMode
+import com.peerlink.app.bot.PeerSlot
 import com.peerlink.app.core.AppState
 import com.peerlink.app.core.MatchTracker
 import com.peerlink.app.core.PeerSessionPhase
@@ -28,7 +29,6 @@ import com.peerlink.app.tunnel.NativeBackendStats
 import com.peerlink.app.tunnel.NativePeerLinkBackend
 import com.peerlink.app.tunnel.RawCaptureStats
 import com.peerlink.app.tunnel.PassthroughBridgeEngine
-import com.peerlink.app.tunnel.TunnelEngine
 import com.peerlink.app.ui.MainActivity
 import java.io.File
 import java.io.FileDescriptor
@@ -341,10 +341,6 @@ class PeerLinkVpnService : VpnService() {
         return builder.build()
     }
 
-    /** Bot mode's Kotlin datapath engine (null in peer mode). */
-    @Volatile
-    private var botModeEngine: TunnelEngine? = null
-
     private fun startVpn() {
         if (startupCancelled.get() || stopVpnGuard.get()) return
         AppState.sessionError.set(null)
@@ -633,17 +629,30 @@ class PeerLinkVpnService : VpnService() {
     }
 
     /**
-     * BOT MODE start: the Kotlin engine owns the real TUN. No peer LAN path,
-     * no native peer backend, no bidirectional probe -- the game's STUN
-     * probes are fabricated locally, its traffic to the fabricated peer
-     * identity (.53.2) is answered by PeerSlot inside the engine's TUNNEL
-     * branch, and everything else passes through. Peer mode never enters
-     * here (this is the 2026-10-15 "Peer LAN IP is not set" fix).
+     * BOT MODE start -- the SAME native datapath peer mode uses, with the
+     * "peer" made local (the user's architecture correction, 2026-10-15):
+     * the native backend owns the TUN and passes everything through exactly
+     * like peer mode (login, Konami, DNS), diverting only the game's
+     * fabricated-IP UDP frames -- which travel to 127.0.0.1:1162, where
+     * PeerSlot answers as the peer. No peer LAN path, no peer probe.
      */
     private fun startBotModeVpn() {
-        AppState.appendLog("[VPN-START ] Bot mode: no peer device -- Kotlin datapath (no LAN path lock, no peer probe)")
+        AppState.appendLog("[VPN-START ] Bot mode: native datapath -- peer slot at 127.0.0.1:${BotMode.BOT_PORT}, default underlay")
         try {
             BotMode.ensurePair()
+
+            // Underlay: whatever network the phone is on (Wi-Fi or mobile).
+            val path = LanPathResolver.resolveDefaultUnderlay(this)
+                ?: throw IllegalStateException("No active network path for bot mode")
+            AppState.localIp.set(path.localIp)
+            AppState.localLanInterfaceName.set(path.interfaceName)
+            AppState.localLanInterfaceIndex.set(path.interfaceIndex)
+            AppState.localLanPrefixLength.set(path.prefixLength)
+            AppState.localLanNetwork.set(path.androidNetwork)
+            AppState.appendLog(
+                "[VPN-UNDER ] Bot default underlay ${path.interfaceName}#${path.interfaceIndex} " +
+                    "${path.localIp}/${path.prefixLength}"
+            )
 
             val builder = Builder()
                 .setSession("LanLink")
@@ -677,21 +686,67 @@ class PeerLinkVpnService : VpnService() {
             AppState.appendLog("[VPN-START ] Interface established (IPv4 + IPv6)")
             updateUnderlyingNetworks()
 
-            val engine = TunnelEngine(
+            // TUN detached to the NATIVE backend -- the exact peer-mode path.
+            vpnInterfaceForClose = iface
+            val pcapDir = java.io.File(getExternalFilesDir(null) ?: filesDir, "pcapng")
+            if (!pcapDir.exists()) pcapDir.mkdirs()
+            rawCaptureFile = java.io.File(pcapDir, "peerlink_capture.pcapng")
+            lastRawCapturePath = rawCaptureFile!!.absolutePath
+            val detachedTunFd = iface.detachFd()
+            vpnInterface = null
+            lastRawCaptureStats = RawCaptureStats()
+            AppState.appendLog("[VPN-START ] TUN detached to native backend")
+            runCatching { logNetworkDoors("NET-DOORS") }
+
+            val backendConfig = NativeBackendConfig(
+                peerLanIp = PeerSlot.LOOPBACK_PEER_IP,   // the local peer slot
+                peerPort = BotMode.BOT_PORT,             // 127.0.0.1:1162
+                myFabricatedIp = AppState.myFabricatedIp,
+                peerFabricatedIp = AppState.peerFabricatedIp,
+                localLanIp = path.localIp,
+                localInterfaceIndex = path.interfaceIndex,
+                rawCapturePath = lastRawCapturePath,
+            )
+            nativeBackend = NativePeerLinkBackend(
+                config = backendConfig,
+                callbacks = object : NativePeerLinkBackend.Callbacks {
+                    override fun preparePeerSocket(fdForBinding: Int): Boolean {
+                        return prepareNativePeerSocket(fdForBinding)
+                    }
+
+                    override fun fabricateStunResponse(packet: ByteArray, length: Int): ByteArray? {
+                        return NativePeerLinkBackend.fabricateStunWithExistingLogic(
+                            config = backendConfig,
+                            packet = packet,
+                            length = length,
+                        )
+                    }
+
+                    override fun onNativeLog(level: Int, message: String, fileOnly: Boolean) {
+                        val elevated = !fileOnly || level >= NativePeerLinkBackend.LOG_LEVEL_WARN
+                        if (elevated) {
+                            AppState.appendLog(message)
+                        } else {
+                            AppState.appendFileOnly(message)
+                        }
+                    }
+
+                    override fun onStats(stats: NativeBackendStats) {
+                        AppState.tunneled.set(stats.totalTunneledPackets)
+                    }
+                },
+            )
+            val bridgeFd = nativeBackend!!.start(detachedTunFd)
+            val bridgePfd = ParcelFileDescriptor.adoptFd(bridgeFd)
+            passthroughBridgeEngine = PassthroughBridgeEngine(
                 context = this,
-                vpnInterface = iface,
+                vpnInterface = bridgePfd,
                 protectDatagramSocket = { socket -> protect(socket) },
                 protectTcpSocket = { socket -> protect(socket) },
-                bridgeMode = false,
             )
-            botModeEngine = engine
-            engine.start()
-            if (!engine.isActive()) {
-                // The engine refused to start (bind failure etc.). A VPN with
-                // no datapath black-holes every game packet -- the 2026-10-15
-                // "cannot log in" incident. Tear down instead of pretending.
-                throw IllegalStateException("bot datapath engine failed to start (see engine log)")
-            }
+            passthroughBridgeEngine?.start()
+
+            AppState.appendLog("[VPN-UNDER ] Bot mode: the peer slot is local -- no peer-link probe")
 
             AppState.sessionStartedElapsedMs.set(android.os.SystemClock.elapsedRealtime())
             AppState.isRunning.set(true)
@@ -752,6 +807,18 @@ class PeerLinkVpnService : VpnService() {
                 if (!protect(pfd.fd)) {
                     AppState.appendLog("[VPN-UNDER ] Native peer socket protection failed")
                     false
+                } else if (BotMode.active) {
+                    // BOT MODE: no exact gameplay network exists (the underlay
+                    // is Wi-Fi OR mobile). The protected socket rides the
+                    // system default; the bind is best-effort and must never
+                    // fail the backend start (2026-10-15 fix).
+                    runCatching {
+                        val cm = getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager
+                        cm.activeNetwork?.bindSocket(pfd.fileDescriptor)
+                    }.onFailure {
+                        AppState.appendLog("[VPN-UNDER ] Bot default-network bind skipped: ${it.message}")
+                    }
+                    true
                 } else {
                     bindSocketFdToPreferredNetwork(pfd.fileDescriptor)
                 }
@@ -1048,8 +1115,6 @@ class PeerLinkVpnService : VpnService() {
             nativeBackend = null
             val bridge = passthroughBridgeEngine
             passthroughBridgeEngine = null
-            val botEngine = botModeEngine
-            botModeEngine = null
             val iface = vpnInterface
             vpnInterface = null
             // Capture the original PFD reference that we saved before detaching.
@@ -1059,7 +1124,6 @@ class PeerLinkVpnService : VpnService() {
             vpnInterfaceForClose = null
 
             runCatching { backend?.requestStop() }
-            runCatching { botEngine?.stop() }
             lastNativeUdpTraceDump = try {
                 backend?.dumpUdpTrace().orEmpty().ifBlank { lastNativeUdpTraceDump }
             } catch (_: Exception) {

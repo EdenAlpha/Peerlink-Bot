@@ -78,22 +78,19 @@ The two-phone P2P flow with the far phone replaced by the local bot:
   and retries until the crossing, then the session + capability burst
   (2026-10-13 capture order). The first inbound packet refreshes the
   address (ground truth beats declaration).
-- Bot VPN datapath: BOT MODE owns the real TUN in KOTLIN (`TunnelEngine`,
-  `bridgeMode=false`): the game's STUN probes are fabricated locally, its
-  `.53.2` traffic is answered by `PeerSlot` in the engine's TUNNEL branch,
-  everything else passes through. No peer LAN path, no native peer backend,
-  no bidirectional probe -- those are peer-mode-only requirements; their
-  absence in bot mode was the 2026-10-15 "Peer LAN IP is not set" failure.
-  A fresh install still needs the one-time VPN consent dialog.
-- Bot VPN datapath, part 2 (same day): the engine's own "exact gameplay
-  WiFi network" bind is ALSO a peer-mode rule -- bot mode waives it and
-  rides the system default underlay (`bindSocketToWifi` returns false ->
-  continue when `BotMode.active`; peer mode still throws). Without the
-  waiver the engine died at birth ("No exact gameplay network available for
-  mode=none") while the service still claimed "datapath active", black-holing
-  the game (no login). The bot start now verifies `engine.isActive()` after
-  start and tears the whole VPN down on failure instead of pretending.
-- Peer mode untouched: pair still computed from both phones' LANs.
+- Bot VPN datapath (final, user-corrected): the SAME native backend peer
+  mode uses owns the TUN and passes everything through (login, Konami, DNS);
+  only the game's fabricated-IP UDP frames are diverted -- and the native
+  "peer" is pointed at the loopback PeerSlot (`peerLanIp=127.0.0.1`,
+  `peerPort=1162`). The slot answers in the native wire format (header-less
+  replies are accepted as raw payload; 0xFC probe -> 0xFD; 0xFF keepalive
+  ignored) and the native injects the replies into the game. Underlay = the
+  system default network (Wi-Fi OR mobile, `resolveDefaultUnderlay`); no
+  LAN-path lock, no peer-link probe. Two earlier attempts that day (a legacy
+  Kotlin engine datapath) died at birth and black-holed the game; both are
+  removed. A fresh install still needs the one-time VPN consent dialog.
+- Peer mode untouched: pair still computed from both phones' LANs,
+  `verifyPeerPath`/LAN lock intact.
 - Declared vs measured: bot mode declares the fabricated identity, NOT the
   measured one; `KgsGate.createRoom` now refuses an empty endpoint outright
   (the old `undeclared()` path could PUT blank addresses).
