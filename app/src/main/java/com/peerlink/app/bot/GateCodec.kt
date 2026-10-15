@@ -28,8 +28,8 @@ object GateCodec {
     private val KEY_B = byteArrayOf(
         0x43, 0x74, 0x09, 0x81.toByte(), 0x52, 0x3c, 0xdc.toByte(), 0x17,
         0x1e, 0x71, 0xde.toByte(), 0x2c, 0xca.toByte(), 0xb1.toByte(), 0xa5.toByte(), 0xa9.toByte(),
-        0xb8, 0x6f, 0x4b, 0x83.toByte(), 0x31, 0x96, 0xc5.toByte(), 0x5f,
-        0xac.toByte(), 0xd4.toByte(), 0xbd.toByte(), 0x25, 0x84, 0x6c, 0x33, 0xf5.toByte(),
+        0xb8.toByte(), 0x6f, 0x4b, 0x83.toByte(), 0x31, 0x96.toByte(), 0xc5.toByte(), 0x5f,
+        0xac.toByte(), 0xd4.toByte(), 0xbd.toByte(), 0x25, 0x84.toByte(), 0x6c, 0x33, 0xf5.toByte(),
     )
 
     private const val SIGN_SECRET = "Xrq-RtAF_91MAE82"
@@ -55,7 +55,7 @@ object GateCodec {
         val cv = clientVersion.toByteArray(Charsets.ISO_8859_1)
         val out = ByteArray(konst.length)
         for (i in out.indices) {
-            out[i] = (konst[i].code xor cv[i % cv.size].code).toByte()
+            out[i] = (konst[i].code xor cv[i % cv.size].toInt()).toByte()
         }
         return String(out, Charsets.ISO_8859_1)
     }

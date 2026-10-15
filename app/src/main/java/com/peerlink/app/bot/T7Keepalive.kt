@@ -42,7 +42,7 @@ object T7 {
         val tid = ByteArray(12)
         SecureRandom().nextBytes(tid)
         buf.put(tid)
-        buf.putShort(0x9090)
+        buf.putShort(0x9090.toShort())
         buf.putShort(attr.size.toShort())
         buf.put(attr)
         return buf.array()

@@ -150,7 +150,7 @@ object PeerSlot {
                     Thread.sleep(200)   // address not declared yet -- wait for it
                     continue
                 }
-                val m = eng.punchReq(tid, gameUid.toString())
+                val m = PeerBotEngine.punchReq(tid, gameUid.toString())
                 injector?.invoke(m, gameIp, gamePort, gameTargetPort)
                 punches++
                 Thread.sleep(600)
