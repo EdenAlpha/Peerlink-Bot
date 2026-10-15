@@ -2,6 +2,7 @@ package com.peerlink.app.bot
 
 import android.content.Context
 import com.peerlink.app.core.AppState
+import com.peerlink.app.network.LanPathResolver
 
 /**
  * PeerLink bot mode -- the two-phone P2P flow with the far phone replaced by
@@ -9,7 +10,13 @@ import com.peerlink.app.core.AppState
  *
  *  - The fabricated pair is FIXED in this mode (there is no second LAN to
  *    compare): the game on this phone gets 197.210.53.1 from the existing
- *    StunFabricator (untouched), and the bot claims 197.210.53.2 at the gate.
+ *    StunFabricator (untouched), and the bot's punched address is
+ *    197.210.53.2. At the gate the bot declares a TRANSLATED endpoint --
+ *    host = this phone's real LAN IP, reflexive = .53.2:1162 (the address
+ *    the game punches from the session reply). Every accepted ready on
+ *    record has host != reflexive (VM bots, run-#26 loopbacks, the real
+ *    games in the flipped peer-mode rooms); the 2026-10-15 device run
+ *    declared host == reflexive and the gate answered ERR_EMPTY x7.
  *  - The bot never runs the StunFabricator -- it just declares the peer
  *    identity. Traffic the game sends to .53.2 is the bot's to answer.
  *  - The VPN for the game runs the KOTLIN datapath with no peer device: no
@@ -54,6 +61,17 @@ object BotMode {
     private var keepalive: T7Keepalive? = null
 
     /**
+     * The host half the bot declares at the gate: this phone's real LAN IPv4,
+     * captured in [ensureStarted] before any gate traffic. The reflexive half
+     * stays the fabricated peer identity (the address the game punches).
+     * Fallback is loopback -- also a proven-accepted host shape -- never the
+     * fabricated IP (host == reflexive is the rejected shape).
+     */
+    @Volatile
+    var hostIp: String = "127.0.0.1"
+        private set
+
+    /**
      * Put the fixed fabricated pair in place. Called on every room create --
      * also re-asserts the values if anything overwrote them since (say, a
      * stale peer-mode calculation at VPN start).
@@ -63,9 +81,10 @@ object BotMode {
         AppState.peerFabricatedIp = BOT_FAB_IP
     }
 
-    /** Begin a bot-mode session: fixed pair + persisted marker + T7 beats. */
+    /** Begin a bot-mode session: fixed pair + host capture + marker + beats. */
     fun ensureStarted(ctx: Context, uid: Long) {
         ensurePair()
+        hostIp = resolveHostIp(ctx)
         active = true
         ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .putBoolean("active", true)
@@ -98,9 +117,40 @@ object BotMode {
         keepalive = k
     }
 
-    /** The profile the bot declares at the gate: the fabricated peer identity. */
+    /** The profile the bot declares at the gate: a TRANSLATED endpoint --
+     * host = this phone's real LAN IP, reflexive = the fabricated peer
+     * identity (.53.2:1162, the address the game punches from the session
+     * reply). Same shape the real games declare in the flipped peer-mode
+     * rooms (real host : game port / fabricated reflexive : game port). */
     fun declaredProfile(): KgsGate.NatProfile =
-        KgsGate.NatProfile.fabricated(BOT_FAB_IP, BOT_PORT)
+        KgsGate.NatProfile(
+            hostAddress = hostIp,
+            hostPort = BOT_PORT,
+            reflexiveAddress = BOT_FAB_IP,
+            reflexivePort = BOT_PORT,
+            natType = KgsGate.NatProfile.NAT_P2P_A,
+        )
+
+    /**
+     * Real LAN IPv4 for the declared host half: the active network's address
+     * first (fresh, pre-VPN), the stored LAN IP second, loopback last. Never
+     * the fabricated IP -- host == reflexive is the rejected shape.
+     */
+    private fun resolveHostIp(ctx: Context): String {
+        val underlay = runCatching {
+            LanPathResolver.resolveDefaultUnderlay(ctx)?.localIp
+        }.getOrNull().orEmpty()
+        if (isRealHost(underlay)) return underlay
+        val stored = AppState.localIp.get().orEmpty()
+        if (isRealHost(stored)) return stored
+        return "127.0.0.1"
+    }
+
+    private fun isRealHost(ip: String): Boolean {
+        if (ip.isBlank() || ip == BOT_FAB_IP) return false
+        val parts = ip.split(".")
+        return parts.size == 4 && parts.all { p -> p.toIntOrNull() in 0..255 }
+    }
 
     fun stop() {
         keepalive?.stop()

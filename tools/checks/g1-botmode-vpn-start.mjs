@@ -34,6 +34,7 @@ const tunnel = read('app/src/main/java/com/peerlink/app/tunnel/TunnelEngine.kt')
 const peerSlot = read('app/src/main/java/com/peerlink/app/bot/PeerSlot.kt');
 const lanRes = read('app/src/main/java/com/peerlink/app/network/LanPathResolver.kt');
 const driver = read('app/src/main/java/com/peerlink/app/bot/BotMatchDriver.kt');
+const gate = read('app/src/main/java/com/peerlink/app/bot/KgsGate.kt');
 
 // (a) the branch exists and is gated on bot mode
 must(/import com\.peerlink\.app\.bot\.BotMode/.test(svc), 'a: service imports BotMode');
@@ -128,6 +129,20 @@ must((driver.match(/\bstatus\("/g) || []).length >= 6,
 must(/if \(armed && gameUid == uid && socket != null\)/.test(peerSlot),
   'j: PeerSlot.arm is idempotent (early arm + re-target)');
 
+// (k) the bot declares a TRANSLATED endpoint at the gate (2026-10-15 device
+// run: host == reflexive got ERR_EMPTY x7; every accepted ready on record --
+// VM bots, run-#26 loopbacks, real games in flipped peer rooms -- has
+// host != reflexive).
+must(/var hostIp/.test(botMode), 'k: BotMode captures the declare-host IP');
+must(/resolveDefaultUnderlay\(ctx\)\?\.localIp/.test(botMode),
+  'k: the host is the phone\u2019s real LAN IP');
+must(/hostAddress = hostIp/.test(botMode),
+  'k: the declared host is the real LAN IP, not the fabricated one');
+must(/reflexiveAddress = BOT_FAB_IP/.test(botMode),
+  'k: the reflexive stays the fabricated peer identity');
+must(!/fun fabricated\(/.test(gate),
+  'k: the host==reflexive helper is gone');
+
 // (g) syntax-level balance on every edited file
 for (const [name, text] of [
   ['PeerLinkVpnService.kt', svc],
@@ -138,6 +153,7 @@ for (const [name, text] of [
   ['PeerSlot.kt', peerSlot],
   ['LanPathResolver.kt', lanRes],
   ['BotMatchDriver.kt', driver],
+  ['KgsGate.kt', gate],
 ]) {
   const ob = (text.match(/\{/g) || []).length, cb = (text.match(/\}/g) || []).length;
   const op = (text.match(/\(/g) || []).length, cp = (text.match(/\)/g) || []).length;

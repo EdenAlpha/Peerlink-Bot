@@ -261,20 +261,6 @@ class KgsGate(
                     reflexivePort = mapped.port,
                     natType = NAT_P2P_A,
                 )
-
-            /**
-             * Bot mode (locked 2026-10-15): the declared endpoint is the
-             * fabricated peer identity (fixed: game .53.1 / bot .53.2). There
-             * is no local/measured half in this world -- the bot simply
-             * claims the peer slot's address and never runs the fabricator.
-             */
-            fun fabricated(ip: String, port: Int) = NatProfile(
-                hostAddress = ip,
-                hostPort = port,
-                reflexiveAddress = ip,
-                reflexivePort = port,
-                natType = NAT_P2P_A,
-            )
         }
     }
 

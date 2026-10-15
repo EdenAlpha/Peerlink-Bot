@@ -140,6 +140,8 @@ object BotMatchDriver {
             //    cadence: the server wants both sides' ready, and the game
             //    sends ITS ready when the user presses To Match. A lost
             //    ready must never be the reason the room stalls.
+            log("bot endpoint: host=${BotMode.hostIp}:${BotMode.BOT_PORT} " +
+                "reflexive=${BotMode.BOT_FAB_IP}:${BotMode.BOT_PORT}")
             var firstReady = true
             var nextReadyAt = 0L
             var nextStatusAt = 0L

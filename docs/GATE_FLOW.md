@@ -54,8 +54,12 @@ component. Nothing here is invented; anything not yet ported is marked.
 The two-phone P2P flow with the far phone replaced by the local bot:
 
 - Fabricated pair is FIXED in this mode: game = `197.210.53.1` (the existing
-  StunFabricator keeps lying to it, untouched), bot = `197.210.53.2:1162`
-  declared at the gate. The bot never runs the fabricator.
+  StunFabricator keeps lying to it, untouched); the game punches the bot at
+  `197.210.53.2:1162`. At the gate the bot declares a TRANSLATED endpoint --
+  host = this phone's real LAN IP, reflexive = `.53.2:1162` (same shape the
+  real games declare in the flipped peer rooms). The bot never runs the
+  fabricator. (2026-10-15 night: host == reflexive got `ERR_EMPTY` x7 on
+  `match_ready`; every accepted ready on record has host != reflexive.)
 - Peer slot fills locally: traffic the game sends to `.53.2` goes to the bot
   engine instead of the tunnel to another phone; the bot's replies are
   injected back wearing the peer fabricated address (the existing path).
@@ -66,7 +70,7 @@ The two-phone P2P flow with the far phone replaced by the local bot:
   raises the one-time system dialog (`ACTION_VPN_CONSENT` -> MainActivity),
   never silently skipping the VPN. Then `BotMatchDriver` -- state-driven:
   seat poll -> entry side -> enable-check (OTZP- tolerated) -> ready
-  (fabricated profile) -> go poll -> session -> capture block-105 check-res
+  (translated profile: real LAN host / fabricated reflexive) -> go poll -> session -> capture block-105 check-res
   echo -> game_id -> session id -> TURN announce/watch -> antenna, then
   periodic antenna beats. Driver v2 (2026-10-15 late -- the user's game sat
   on "Waiting for Opponent" because v1 could give up silently): the seat
@@ -98,9 +102,10 @@ The two-phone P2P flow with the far phone replaced by the local bot:
   removed. A fresh install still needs the one-time VPN consent dialog.
 - Peer mode untouched: pair still computed from both phones' LANs,
   `verifyPeerPath`/LAN lock intact.
-- Declared vs measured: bot mode declares the fabricated identity, NOT the
-  measured one; `KgsGate.createRoom` now refuses an empty endpoint outright
-  (the old `undeclared()` path could PUT blank addresses).
+- Declared vs measured: bot mode declares a translated endpoint (real LAN
+  host, fabricated .53.2 reflexive -- the address the game punches), NOT a
+  measured STUN mapping; `KgsGate.createRoom` now refuses an empty endpoint
+  outright (the old `undeclared()` path could PUT blank addresses).
 
 ## Open items (largest first)
 

@@ -18,10 +18,10 @@ import com.peerlink.app.ui.MainActivity
  *   -> CMD_SET_GAMERELAY_QUALITY [when real data exists]
  *   -> CMD_CREATEJOIN_ROOM -> room number for the user's own eFootball.
  *
- * The declared endpoint is the fabricated peer identity: no real address, no
- * measurement, and no empty-address path (KgsGate.createRoom refuses a blank
- * endpoint outright). Fails honestly when a step has no real data (no bot
- * account, no quality template). Never invents a room number.
+ * The declared endpoint is translated (real LAN host / fabricated .53.2
+ * reflexive): no measurement, and no empty-address path (KgsGate.createRoom
+ * refuses a blank endpoint outright). Fails honestly when a step has no real
+ * data (no bot account, no quality template). Never invents a room number.
  */
 object BotRoomService : BotRoomBackend {
 
@@ -52,7 +52,8 @@ object BotRoomService : BotRoomBackend {
         // bot-mode session instead of failing the peer-mode requirements.
         BotMode.ensureStarted(ctx, identity.userId)
 
-        // The bot declares the fabricated peer identity at the gate.
+        // The bot declares the translated endpoint at the gate (real LAN
+        // host, fabricated .53.2 reflexive -- the address the game punches).
         val gate = KgsGate(identity, BotMode.declaredProfile())
 
         gate.login()
