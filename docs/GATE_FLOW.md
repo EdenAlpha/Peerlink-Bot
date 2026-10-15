@@ -53,8 +53,12 @@ The two-phone P2P flow with the far phone replaced by the local bot:
   engine instead of the tunnel to another phone; the bot's replies are
   injected back wearing the peer fabricated address (the existing path).
 - Bot lifecycle: room create -> T7 beats (own socket, outside the per-app
-  VPN, local bind `:44001`) -> state-driven ladder half -> connection-phase
-  responder (initiate + answer, per the 2026-10-13 match capture).
+  VPN, local bind `:44001`) -> `BotMatchDriver` -- state-driven: seat poll ->
+  entry side -> enable-check (OTZP- tolerated) -> ready (fabricated profile)
+  -> go poll -> session -> capture block-105 check-res echo -> game_id ->
+  session id -> TURN announce/watch -> antenna, then periodic antenna beats.
+  Connection-phase responder + tunnel sink = `PeerSlot` (armed by the driver;
+  the `.53.2` packet hookup lands with the step-4 wiring).
 - Peer mode untouched: pair still computed from both phones' LANs.
 - Declared vs measured: bot mode declares the fabricated identity, NOT the
   measured one; `KgsGate.createRoom` now refuses an empty endpoint outright

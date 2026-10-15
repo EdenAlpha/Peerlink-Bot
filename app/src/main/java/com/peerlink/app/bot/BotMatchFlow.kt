@@ -419,6 +419,135 @@ class BotMatchFlow(
         }
     }
 
+    // -------------------------------------------------- pre-connection half
+    /** CMD_GET_ROOM_INFO -> room_info (the state the driver polls). */
+    fun roomState(g: KgsGate, rid: Long): Map<*, *> {
+        val r = g.step("CMD_GET_ROOM_INFO", linkedMapOf(
+            "mode" to "CUSTOM", "id" to 0,
+            "room_id" to linkedMapOf("id" to rid),
+            "event_id" to 0, "user_compe_id" to 0, "is_room_search" to "NO",
+        ))
+        return (r["room_info"] as? Map<*, *>) ?: emptyMap<String, Any?>()
+    }
+
+    /** CMD_GET_GAME_ID -- builder form first, then the server-side fallbacks. */
+    fun getGameId(g: KgsGate, rid: Long): Long? {
+        val forms = listOf(
+            "map-int" to linkedMapOf<String, Any?>("room_id" to linkedMapOf("id" to rid)),
+            "flat-int" to linkedMapOf<String, Any?>("room_id" to rid),
+            "str" to linkedMapOf<String, Any?>("room_id" to rid.toString()),
+            "arr-str" to linkedMapOf<String, Any?>("room_id" to listOf(rid.toString())),
+            "map-str" to linkedMapOf<String, Any?>("room_id" to linkedMapOf("id" to rid.toString())),
+            "roominfo" to linkedMapOf<String, Any?>(
+                "mode" to "CUSTOM", "id" to 0,
+                "room_id" to linkedMapOf("id" to rid),
+                "event_id" to 0, "user_compe_id" to 0, "is_room_search" to "NO"),
+        )
+        for ((_, extra) in forms) {
+            val r = g.step("CMD_GET_GAME_ID", extra)
+            val gid = findKeyIn(r, "game_id") as? Number
+            if (r["result"] == "NOERR" && gid != null) return gid.toLong()
+            Thread.sleep(PACE_MS)
+        }
+        return null
+    }
+
+    /** CMD_SEND_SESSION_ID (FUN_07f88880 body; Android sends both ids empty). */
+    fun sendSessionId(g: KgsGate, gameId: Long) = g.step("CMD_SEND_SESSION_ID", linkedMapOf(
+        "game_id" to gameId,
+        "platform_session_id_info" to linkedMapOf("ps_session_id" to "", "xb_session_id" to ""),
+    ))
+
+    /**
+     * CMD_SET_GAME_SESSION_CHECK_RES -- the CAPTURE block-105 connection report
+     * (six capture-exact fields: matching_num 0, answer "NO", antenna_min 3,
+     * error_code "_0x0", link_type "Ethernet", create_session_time 0 -- all
+     * flagged in the record as kickoff-critical).
+     */
+    fun checkResEcho(g: KgsGate, rid: Long, selfU: Long, oppU: Long, gs: Map<*, *>) =
+        g.step("CMD_SET_GAME_SESSION_CHECK_RES", linkedMapOf(
+            "game_sycom" to (gs["game_sycom"] as? String ?: ""),
+            "error_code" to "NOERR",
+            "gamerelay" to relayBlock(gs),
+            "failed_reason" to 0,
+            "is_lobby" to "YES",
+            "room_id" to linkedMapOf("id" to rid),
+            "statistical_data" to linkedMapOf(
+                "user_id_list" to listOf(selfU, oppU), "matching_num" to 0,
+                "answer" to "NO", "antenna_min" to 3,
+                "error_code" to "_0x0", "link_type" to "Ethernet",
+                "create_session_time" to 0, "background_times" to "",
+            ),
+        ))
+
+    /**
+     * The 11.1.0 antenna heartbeat: SET echo (mid-match statistical_data
+     * variant) + GET poll. This is the liveness signal the real client keeps
+     * pushing through the WHOLE match.
+     */
+    fun antennaBeat(
+        g: KgsGate, rid: Long, selfU: Long, oppU: Long, gs: Map<*, *>,
+    ): Pair<LinkedHashMap<String, Any?>, LinkedHashMap<String, Any?>> {
+        val set = g.step("CMD_SET_GAME_SESSION_CHECK_RES", linkedMapOf(
+            "game_sycom" to (gs["game_sycom"] as? String ?: ""),
+            "error_code" to "NOERR",
+            "gamerelay" to relayBlock(gs),
+            "failed_reason" to 0,
+            "is_lobby" to "YES",
+            "room_id" to linkedMapOf("id" to rid),
+            "statistical_data" to linkedMapOf(
+                "user_id_list" to listOf(selfU, oppU), "matching_num" to 2,
+                "answer" to "", "antenna_min" to asLong(gs["ping"]),
+                "error_code" to "NOERR", "link_type" to "",
+                "create_session_time" to asLong(gs["connecting_start_time"]),
+                "background_times" to "",
+            ),
+        ))
+        val get = g.step("CMD_GET_GAME_SESSION_CHECK_RES", linkedMapOf(
+            "room_id" to linkedMapOf("id" to rid), "is_lobby" to "YES",
+            "game_entry_user_list" to listOf(selfU, oppU),
+        ))
+        return set to get
+    }
+
+    /** The gamerelay block both session-check bodies echo from the server. */
+    private fun relayBlock(gs: Map<*, *>): LinkedHashMap<String, Any?> {
+        val gr = gs["gamerelay"] as? Map<*, *> ?: emptyMap<String, Any?>()
+        return linkedMapOf(
+            "name" to (gr["name"] as? String ?: ""),
+            "region" to (gr["region"] as? String ?: ""),
+            "ip_addr" to (gr["ip_addr"] as? String ?: ""),
+            "port" to asLong(gr["port"]),
+        )
+    }
+
+    private fun asLong(v: Any?): Long = when (v) {
+        is Number -> v.toLong()
+        is String -> v.toLongOrNull() ?: 0L
+        else -> 0L
+    }
+
+    /** CMD_SEND_TURN_ADDRESS_DATA -- announce this side's address to the peer. */
+    fun sendTurnAddress(g: KgsGate, target: Long, addressB64: String, size: Int) =
+        g.step("CMD_SEND_TURN_ADDRESS_DATA", linkedMapOf(
+            "target_user_id" to target, "address" to addressB64,
+            "address_data_size" to size,
+        ))
+
+    /** CMD_GET_TURN_ADDRESS_DATA -- the gate answers with our own address. */
+    fun getTurnAddress(g: KgsGate) = g.step("CMD_GET_TURN_ADDRESS_DATA")
+
+    /** CMD_WATCH_TURN_ADDRESS_DATA -- yields the peer's announced address. */
+    fun watchTurnAddress(g: KgsGate) = g.step("CMD_WATCH_TURN_ADDRESS_DATA")
+
     private fun Map<String, Any?>.gid(): Map<String, Any?> =
         (this["gameplayer_id"] as? Map<String, Any?>) ?: emptyMap()
+}
+
+/** Recursive key search (the bundle's `find_key`): first match wins. */
+internal fun findKeyIn(o: Any?, key: String): Any? = when (o) {
+    is Map<*, *> -> if (o.containsKey(key)) o[key]
+        else o.values.firstNotNullOfOrNull { findKeyIn(it, key) }
+    is List<*> -> o.firstNotNullOfOrNull { findKeyIn(it, key) }
+    else -> null
 }

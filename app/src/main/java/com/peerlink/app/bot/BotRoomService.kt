@@ -64,6 +64,12 @@ object BotRoomService : BotRoomBackend {
             if (num.isBlank()) {
                 throw KgsGate.GateException("Room opened but Konami returned no room number.")
             }
+            // Step 3: the state-driven driver takes over in the background --
+            // it watches the room and fires the bot's half of the gate ladder
+            // as the user's game joins (creator = HOME: entry side -> ready ->
+            // go -> session -> TURN -> antenna), then arms the peer slot.
+            val rid = ((r["room_id"] as? Map<*, *>)?.get("id") as? Number)?.toLong() ?: 0L
+            if (rid != 0L) BotMatchDriver.start(gate, rid, num)
             return num
         }
         throw KgsGate.GateException(
