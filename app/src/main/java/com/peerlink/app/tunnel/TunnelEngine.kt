@@ -7,6 +7,7 @@ import android.os.ParcelFileDescriptor
 import android.system.ErrnoException
 import android.system.Os
 import android.system.OsConstants
+import com.peerlink.app.bot.BotMode
 import com.peerlink.app.bot.PeerSlot
 import com.peerlink.app.core.AppState
 import com.peerlink.app.core.PrimeGameplayTracker
@@ -1483,7 +1484,18 @@ class TunnelEngine(
                     throw IllegalStateException("Failed to protect peer channel")
                 }
                 if (!bindSocketToWifi(sock)) {
-                    throw IllegalStateException("Exact gameplay network bind failed")
+                    if (BotMode.active) {
+                        // BOT MODE: there is no "exact gameplay WiFi network"
+                        // -- that is a peer-mode LAN notion, and demanding it
+                        // killed the engine at birth with "No exact gameplay
+                        // network available for mode=none" (2026-10-15, the
+                        // game-keeps-black-holing incident). The socket is
+                        // protected, so it simply rides the system default
+                        // underlay (Wi-Fi or mobile).
+                        debugLog("ENGINE", "Bot mode: exact gameplay network not required - peer channel on the system default underlay")
+                    } else {
+                        throw IllegalStateException("Exact gameplay network bind failed")
+                    }
                 }
                 ch.configureBlocking(false)
 
@@ -1563,6 +1575,9 @@ class TunnelEngine(
             stop()
         }
     }
+
+    /** True while the engine's loops own the TUN (bot-mode start verifies this). */
+    fun isActive(): Boolean = isRunning.get()
 
     private fun preferredPassthroughNetwork(): android.net.Network? {
         return try {

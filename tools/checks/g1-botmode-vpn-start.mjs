@@ -30,6 +30,7 @@ const svc = read('app/src/main/java/com/peerlink/app/service/PeerLinkVpnService.
 const botMode = read('app/src/main/java/com/peerlink/app/bot/BotMode.kt');
 const roomSvc = read('app/src/main/java/com/peerlink/app/bot/BotRoomService.kt');
 const pbot = read('app/src/main/java/com/peerlink/app/service/PeerBotService.kt');
+const tunnel = read('app/src/main/java/com/peerlink/app/tunnel/TunnelEngine.kt');
 
 // (a) the branch exists and is gated on bot mode
 must(/import com\.peerlink\.app\.bot\.BotMode/.test(svc), 'a: service imports BotMode');
@@ -75,12 +76,27 @@ must(/restoreIfActive\(this\)/.test(pbot), 'f: PeerBotService restores bot mode 
 must(/restoreIfActive\(this\)/.test(svc), 'f: VPN service restores bot mode on null-intent restart');
 must(/ensureStarted\(ctx, identity\.userId\)/.test(roomSvc), 'f: BotRoomService starts bot mode with the minted uid');
 
+// (h) the exact-gameplay-WiFi bind is waived ONLY in bot mode (the 2026-10-15
+// engine-death / game-black-hole fix); the peer-mode throw stays.
+must(/import com\.peerlink\.app\.bot\.BotMode/.test(tunnel), 'h: engine imports BotMode');
+must(/if \(!bindSocketToWifi\(sock\)\) \{[\s\S]{0,400}BotMode\.active/.test(tunnel),
+  'h: bindSocketToWifi failure consults BotMode.active');
+must(/Exact gameplay network bind failed/.test(tunnel), 'h: peer-mode throw intact');
+must(/fun isActive\(\): Boolean = isRunning\.get\(\)/.test(tunnel), 'h: engine exposes isActive()');
+
+// (i) the bot start refuses to claim an active datapath when the engine died
+must(/engine\.start\(\)[\s\S]{0,400}if \(!engine\.isActive\(\)\)/.test(svc),
+  'i: bot start verifies engine liveness after start');
+must(/bot datapath engine failed to start/.test(svc),
+  'i: a dead engine tears the VPN start down instead of pretending');
+
 // (g) syntax-level balance on every edited file
 for (const [name, text] of [
   ['PeerLinkVpnService.kt', svc],
   ['PeerBotService.kt', pbot],
   ['BotMode.kt', botMode],
   ['BotRoomService.kt', roomSvc],
+  ['TunnelEngine.kt', tunnel],
 ]) {
   const ob = (text.match(/\{/g) || []).length, cb = (text.match(/\}/g) || []).length;
   const op = (text.match(/\(/g) || []).length, cp = (text.match(/\)/g) || []).length;

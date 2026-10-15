@@ -686,6 +686,12 @@ class PeerLinkVpnService : VpnService() {
             )
             botModeEngine = engine
             engine.start()
+            if (!engine.isActive()) {
+                // The engine refused to start (bind failure etc.). A VPN with
+                // no datapath black-holes every game packet -- the 2026-10-15
+                // "cannot log in" incident. Tear down instead of pretending.
+                throw IllegalStateException("bot datapath engine failed to start (see engine log)")
+            }
 
             AppState.sessionStartedElapsedMs.set(android.os.SystemClock.elapsedRealtime())
             AppState.isRunning.set(true)

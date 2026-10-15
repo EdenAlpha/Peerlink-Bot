@@ -85,6 +85,14 @@ The two-phone P2P flow with the far phone replaced by the local bot:
   no bidirectional probe -- those are peer-mode-only requirements; their
   absence in bot mode was the 2026-10-15 "Peer LAN IP is not set" failure.
   A fresh install still needs the one-time VPN consent dialog.
+- Bot VPN datapath, part 2 (same day): the engine's own "exact gameplay
+  WiFi network" bind is ALSO a peer-mode rule -- bot mode waives it and
+  rides the system default underlay (`bindSocketToWifi` returns false ->
+  continue when `BotMode.active`; peer mode still throws). Without the
+  waiver the engine died at birth ("No exact gameplay network available for
+  mode=none") while the service still claimed "datapath active", black-holing
+  the game (no login). The bot start now verifies `engine.isActive()` after
+  start and tears the whole VPN down on failure instead of pretending.
 - Peer mode untouched: pair still computed from both phones' LANs.
 - Declared vs measured: bot mode declares the fabricated identity, NOT the
   measured one; `KgsGate.createRoom` now refuses an empty endpoint outright
