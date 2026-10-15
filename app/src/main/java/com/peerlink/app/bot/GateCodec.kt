@@ -40,7 +40,10 @@ object GateCodec {
     private const val SK_CONST_1101 = "YE5PUd6m"
     private const val SK_CONST_1100 = "hGcKSg6k"
 
-    const val CLIENT_VERSION = "6.1.0"
+    // 2026-10-15 store update: the live gate answers ERR_DEFCLIENTVER for
+    // 6.1.0 and NOERR for 6.1.1 (proven live; the 11.1.0 s_keyword CONST is
+    // still accepted, so this is the only constant the update moved).
+    const val CLIENT_VERSION = "6.1.1"
     const val BUILD = "11.1.0"
 
     /**
