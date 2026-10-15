@@ -57,8 +57,12 @@ The two-phone P2P flow with the far phone replaced by the local bot:
   entry side -> enable-check (OTZP- tolerated) -> ready (fabricated profile)
   -> go poll -> session -> capture block-105 check-res echo -> game_id ->
   session id -> TURN announce/watch -> antenna, then periodic antenna beats.
-  Connection-phase responder + tunnel sink = `PeerSlot` (armed by the driver;
-  the `.53.2` packet hookup lands with the step-4 wiring).
+  Connection-phase responder + tunnel sink = `PeerSlot` -- **LIVE**:
+  TunnelEngine hands every game packet addressed to `.53.2` to the slot,
+  which answers with the byte-exact forms (PeerBotEngine) and injects its
+  replies toward the game as the fabricated peer (first knock learns the
+  game's address, then the originate burst: punch retries + sessions +
+  capability, per the 2026-10-13 capture order).
 - Peer mode untouched: pair still computed from both phones' LANs.
 - Declared vs measured: bot mode declares the fabricated identity, NOT the
   measured one; `KgsGate.createRoom` now refuses an empty endpoint outright

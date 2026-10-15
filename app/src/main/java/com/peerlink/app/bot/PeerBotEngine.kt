@@ -267,6 +267,17 @@ class PeerBotEngine(private val uid: String) {
     /** Originate our own punch + session(s) + capability toward the peer. */
     fun originate(dest: InetSocketAddress, nSession: Int = 3): Int {
         val s = sock ?: error("call open() first")
+        val msgs = originateBytes(nSession)
+        for (m in msgs) s.send(DatagramPacket(m, m.size, dest))
+        return msgs.size
+    }
+
+    /**
+     * The originate burst as BYTES -- bot mode injects these through the
+     * tunnel's peer slot instead of a socket send (the far phone's place is
+     * filled locally, so there is no InetSocketAddress to send to).
+     */
+    fun originateBytes(nSession: Int = 3): List<ByteArray> {
         val msgs = ArrayList<ByteArray>()
         msgs.add(punchReq(randomTid(), uid))
         repeat(nSession) {
@@ -274,9 +285,11 @@ class PeerBotEngine(private val uid: String) {
             msgs.add(sessReqLong(randomTid(), uid, 0x13 + count))
         }
         msgs.add(capReq(randomTid(), uid))
-        for (m in msgs) s.send(DatagramPacket(m, m.size, dest))
-        return msgs.size
+        return msgs
     }
+
+    /** A fresh 12-byte STUN transaction id (punch retries reuse one tid). */
+    fun freshTid(): ByteArray = randomTid()
 
     /** Receive one datagram, answer it, return a log line (or null on timeout). */
     fun pump(timeoutMs: Int = 50): String? {

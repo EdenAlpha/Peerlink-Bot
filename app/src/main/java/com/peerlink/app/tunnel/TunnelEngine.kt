@@ -7,6 +7,7 @@ import android.os.ParcelFileDescriptor
 import android.system.ErrnoException
 import android.system.Os
 import android.system.OsConstants
+import com.peerlink.app.bot.PeerSlot
 import com.peerlink.app.core.AppState
 import com.peerlink.app.core.PrimeGameplayTracker
 import com.peerlink.app.network.LowLatencyLock
@@ -525,6 +526,24 @@ class TunnelEngine(
         val pkt = packetPool.acquire()
         pkt.set(data, offset, length, receivedAtNs, source)
         networkToDeviceQueue.offer(pkt)
+    }
+
+    /**
+     * Bot mode: inject one peer-slot packet toward the game as the fabricated
+     * peer identity (the same dressing peer mode's tunnel-in path uses).
+     * Called through the lambda installed into PeerSlot.
+     */
+    private fun injectAsPeer(payload: ByteArray, toIp: String, toPort: Int, fromPort: Int) {
+        updateCachedIpBytes()
+        val ip = buildUdpIpPacket(
+            srcIpBytes = getPeerFabricatedIpBytes(),
+            dstIpBytes = ipv4StringToBytesOptimized(toIp),
+            srcPort = fromPort,
+            dstPort = toPort,
+            payload = payload,
+            payloadLength = payload.size,
+        )
+        offerToDevice(ip, ip.size, "BOT-SLOT")
     }
 
     // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
@@ -2330,6 +2349,14 @@ fun exactWifiUdpNetwork(): android.net.Network? {
                 handlePassthrough(buffer, length, parsed)
             }
             PacketParser.PacketAction.TUNNEL -> {
+                // Bot mode (2026-10-15): packets the game addresses to the
+                // peer's fabricated identity belong to the local bot -- the
+                // peer slot replaces the far phone. Peer mode never arms the
+                // slot, so this guard is a no-op there.
+                PeerSlot.installInjector { p, ip, port, from ->
+                    injectAsPeer(p, ip, port, from)
+                }
+                if (!PeerSlot.handleGamePacketToPeer(parsed.destIp, buffer, length)) {
                 JitterDiag.intervalTunReadTunnel.incrementAndGet()
                 if (forcedTunnel) {
                     JitterDiag.intervalForcedUdpTunnel.incrementAndGet()
@@ -2380,6 +2407,7 @@ fun exactWifiUdpNetwork(): android.net.Network? {
                     originalDestIsFabricated = originalAction == PacketParser.PacketAction.TUNNEL,
                     forcedTunnel = forcedTunnel
                 )
+                }   // end bot-mode peer-slot guard
             }
             PacketParser.PacketAction.INTERCEPT -> {
                 JitterDiag.intervalTunReadIntercept.incrementAndGet()
