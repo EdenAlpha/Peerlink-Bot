@@ -14,6 +14,7 @@ import android.net.VpnService
 import android.os.Build
 import android.os.ParcelFileDescriptor
 import android.os.SystemClock
+import com.peerlink.app.bot.BotMode
 import com.peerlink.app.core.AppState
 import com.peerlink.app.core.MatchTracker
 import com.peerlink.app.core.PeerSessionPhase
@@ -27,6 +28,7 @@ import com.peerlink.app.tunnel.NativeBackendStats
 import com.peerlink.app.tunnel.NativePeerLinkBackend
 import com.peerlink.app.tunnel.RawCaptureStats
 import com.peerlink.app.tunnel.PassthroughBridgeEngine
+import com.peerlink.app.tunnel.TunnelEngine
 import com.peerlink.app.ui.MainActivity
 import java.io.File
 import java.io.FileDescriptor
@@ -216,6 +218,7 @@ class PeerLinkVpnService : VpnService() {
         // tunnel automatically.
         if (intent == null) {
             AppState.appendLog("[T-STATE   ] VPN service restarted by OS (null intent) — attempting session recovery")
+            BotMode.restoreIfActive(this)
             restoreSessionStateIfAvailable()
         }
 
@@ -338,6 +341,10 @@ class PeerLinkVpnService : VpnService() {
         return builder.build()
     }
 
+    /** Bot mode's Kotlin datapath engine (null in peer mode). */
+    @Volatile
+    private var botModeEngine: TunnelEngine? = null
+
     private fun startVpn() {
         if (startupCancelled.get() || stopVpnGuard.get()) return
         AppState.sessionError.set(null)
@@ -346,6 +353,17 @@ class PeerLinkVpnService : VpnService() {
             lastNativeUdpTraceDump = ""
             AppState.initFileLog(this)
             AppState.appendLog("[VPN-START ] PeerLink VPN starting")
+
+            // BOT MODE (PeerLink-in-PeerLink): there is no peer device. The
+            // game's .53.2 traffic is answered locally and everything else is
+            // passthrough, so the start path must not require a peer LAN path
+            // or run the native peer backend / bidirectional probe -- those
+            // are peer-mode-only requirements (the 2026-10-15 "Peer LAN IP is
+            // not set" failure).
+            if (BotMode.active) {
+                startBotModeVpn()
+                return
+            }
 
             val transportMode = canonicalTransportMode()
             val peerLanIp = AppState.peerIp.get()?.hostAddress
@@ -609,6 +627,88 @@ class PeerLinkVpnService : VpnService() {
             stopVpn()
             if (!startupCancelled.get()) {
                 AppState.sessionError.set(e.message ?: "Peer tunnel setup failed")
+                AppState.sessionPhase.set(PeerSessionPhase.ERROR)
+            }
+        }
+    }
+
+    /**
+     * BOT MODE start: the Kotlin engine owns the real TUN. No peer LAN path,
+     * no native peer backend, no bidirectional probe -- the game's STUN
+     * probes are fabricated locally, its traffic to the fabricated peer
+     * identity (.53.2) is answered by PeerSlot inside the engine's TUNNEL
+     * branch, and everything else passes through. Peer mode never enters
+     * here (this is the 2026-10-15 "Peer LAN IP is not set" fix).
+     */
+    private fun startBotModeVpn() {
+        AppState.appendLog("[VPN-START ] Bot mode: no peer device -- Kotlin datapath (no LAN path lock, no peer probe)")
+        try {
+            BotMode.ensurePair()
+
+            val builder = Builder()
+                .setSession("LanLink")
+                .setMtu(1400)
+                .addAddress("10.0.0.2", 32)
+                .addRoute("0.0.0.0", 0)
+                .addAddress("fd00::2", 128)
+                .addRoute("::", 0)
+                .addDnsServer("8.8.8.8")
+                .addDnsServer("8.8.4.4")
+                .setBlocking(true)
+                .allowBypass()
+
+            try {
+                builder.addAllowedApplication(EFOOTBALL_PACKAGE)
+                AppState.appendLog("[VPN-START ] Per-app VPN: $EFOOTBALL_PACKAGE only")
+            } catch (e: Exception) {
+                AppState.appendLog("[VPN-START ] eFootball not installed - capturing all traffic")
+            }
+
+            val iface = builder.establish()
+            if (iface == null) {
+                AppState.appendLog("[VPN-START ] ERROR: VPN interface establish failed (bot mode)")
+                stopVpn()
+                AppState.sessionError.set("Android could not create the VPN interface")
+                AppState.sessionPhase.set(PeerSessionPhase.ERROR)
+                return
+            }
+            vpnInterface = iface
+            vpnInterfaceForClose = iface
+            AppState.appendLog("[VPN-START ] Interface established (IPv4 + IPv6)")
+            updateUnderlyingNetworks()
+
+            val engine = TunnelEngine(
+                context = this,
+                vpnInterface = iface,
+                protectDatagramSocket = { socket -> protect(socket) },
+                protectTcpSocket = { socket -> protect(socket) },
+                bridgeMode = false,
+            )
+            botModeEngine = engine
+            engine.start()
+
+            AppState.sessionStartedElapsedMs.set(android.os.SystemClock.elapsedRealtime())
+            AppState.isRunning.set(true)
+            AppState.sessionPhase.set(PeerSessionPhase.ACTIVE)
+
+            try {
+                val pm = getSystemService(POWER_SERVICE) as android.os.PowerManager
+                tunnelWakeLock = pm.newWakeLock(
+                    android.os.PowerManager.PARTIAL_WAKE_LOCK,
+                    "LanLink:TunnelSession"
+                ).also { it.acquire() }
+                AppState.appendLog("[VPN-START ] PARTIAL_WAKE_LOCK acquired")
+            } catch (e: Exception) {
+                AppState.appendLog("[VPN-START ] Wake lock acquire failed: ${e.message}")
+            }
+
+            AppState.appendLog("[VPN-START ] Bot datapath active -- waiting for game traffic")
+            saveSessionState()
+        } catch (e: Exception) {
+            AppState.appendLog("[VPN-START ] Start error: ${e.message}")
+            stopVpn()
+            if (!startupCancelled.get()) {
+                AppState.sessionError.set(e.message ?: "Bot-mode tunnel setup failed")
                 AppState.sessionPhase.set(PeerSessionPhase.ERROR)
             }
         }
@@ -942,6 +1042,8 @@ class PeerLinkVpnService : VpnService() {
             nativeBackend = null
             val bridge = passthroughBridgeEngine
             passthroughBridgeEngine = null
+            val botEngine = botModeEngine
+            botModeEngine = null
             val iface = vpnInterface
             vpnInterface = null
             // Capture the original PFD reference that we saved before detaching.
@@ -951,6 +1053,7 @@ class PeerLinkVpnService : VpnService() {
             vpnInterfaceForClose = null
 
             runCatching { backend?.requestStop() }
+            runCatching { botEngine?.stop() }
             lastNativeUdpTraceDump = try {
                 backend?.dumpUdpTrace().orEmpty().ifBlank { lastNativeUdpTraceDump }
             } catch (_: Exception) {

@@ -78,6 +78,13 @@ The two-phone P2P flow with the far phone replaced by the local bot:
   and retries until the crossing, then the session + capability burst
   (2026-10-13 capture order). The first inbound packet refreshes the
   address (ground truth beats declaration).
+- Bot VPN datapath: BOT MODE owns the real TUN in KOTLIN (`TunnelEngine`,
+  `bridgeMode=false`): the game's STUN probes are fabricated locally, its
+  `.53.2` traffic is answered by `PeerSlot` in the engine's TUNNEL branch,
+  everything else passes through. No peer LAN path, no native peer backend,
+  no bidirectional probe -- those are peer-mode-only requirements; their
+  absence in bot mode was the 2026-10-15 "Peer LAN IP is not set" failure.
+  A fresh install still needs the one-time VPN consent dialog.
 - Peer mode untouched: pair still computed from both phones' LANs.
 - Declared vs measured: bot mode declares the fabricated identity, NOT the
   measured one; `KgsGate.createRoom` now refuses an empty endpoint outright

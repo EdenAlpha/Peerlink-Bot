@@ -47,9 +47,10 @@ object BotRoomService : BotRoomBackend {
         }
 
         // Step 1: fixed fabricated pair (game .53.1 / bot .53.2).
-        // Step 2: the bot's T7 beats start here and keep running.
-        BotMode.ensureStarted()
-        BotMode.startBeats(identity.userId)
+        // Step 2: the bot's T7 beats start here and keep running; the mode
+        // marker is persisted so a restarted VPN service comes back as a
+        // bot-mode session instead of failing the peer-mode requirements.
+        BotMode.ensureStarted(ctx, identity.userId)
 
         // The bot declares the fabricated peer identity at the gate.
         val gate = KgsGate(identity, BotMode.declaredProfile())

@@ -11,6 +11,7 @@ import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
+import com.peerlink.app.bot.BotMode
 import com.peerlink.app.core.AppState
 
 /**
@@ -79,6 +80,7 @@ class PeerBotService : Service() {
         super.onCreate()
         active = this
         running = true
+        BotMode.restoreIfActive(this)
         createNotificationChannel()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             startForeground(
