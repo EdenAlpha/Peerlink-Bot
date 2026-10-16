@@ -206,7 +206,7 @@ object BotMatchDriver {
             // The game punches the moment its tunnel exists: make the peer
             // slot live NOW (reactive) and fill its target once the session
             // reply carries the game's address (arm is idempotent).
-            PeerSlot.arm(opp, "", "", 0)
+            PeerSlot.arm(opp, gate.uid, "", "", 0)
 
             // -- game_session + the opponent's address (retried together:
             //    the reply must ALSO contain the address block).
@@ -248,7 +248,7 @@ object BotMatchDriver {
             val reflPort = (a4?.get("reflexive_port") as? Number)?.toInt() ?: 0
             log("game address from the session: local=$localIp:$localPort " +
                 "declared=$reflIp:$reflPort")
-            PeerSlot.arm(opp, "$reflIp:$reflPort", localIp, localPort)
+            PeerSlot.arm(opp, gate.uid, "$reflIp:$reflPort", localIp, localPort)
 
             // -- check-res echo (capture block 105 body); retried on noise,
             //    otherwise logged and carried on (the game sends its own).
@@ -301,7 +301,7 @@ object BotMatchDriver {
             log("antenna set=${setR["result"]} get=${getR["result"]} " +
                 "finished=${getR["is_check_finished"]}")
 
-            PeerSlot.arm(opp, peerAddr, localIp, localPort)
+            PeerSlot.arm(opp, gate.uid, peerAddr, localIp, localPort)
             log("connection phase ARMED -- the bot answers .53.2 traffic from here")
             status("CONNECTED -- answering the game's connection packets")
 

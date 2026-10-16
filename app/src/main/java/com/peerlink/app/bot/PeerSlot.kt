@@ -100,15 +100,22 @@ object PeerSlot {
     }
 
     /**
-     * Arm the slot. [announced] = the game's announced address (logs);
-     * [localIp]/[localPort] = its host half from the session's address list.
+     * Arm the slot. [oppUid] = the game's user id (session addressing/logs);
+     * [botUid] = the BOT's own user id -- it is the 0x9090 stamp on every
+     * punch/session/capability frame the slot sends. In the working
+     * two-phone captures each side stamps ITS OWN id, and the game checks a
+     * punch response's stamp against the OPPONENT id it knows from the
+     * session -- stamping the game's own id (the 11:17 2026-10-16 bug) makes
+     * every reply self-contradictory and the crossing never completes.
+     * [announced]/[localIp]/[localPort] = the game's address (logs + the
+     * punch target from the session's address list).
      */
-    fun arm(uid: Long, announced: String, localIp: String, localPort: Int) {
+    fun arm(oppUid: Long, botUid: Long, announced: String, localIp: String, localPort: Int) {
         // Idempotent re-arm: the driver arms this slot the moment go_match
         // fires (socket live, reactive), then re-targets it once the
         // session reply carries the game's address. Never churn the socket
         // or lose the punch-watch state on the update.
-        if (armed && gameUid == uid && socket != null) {
+        if (armed && gameUid == oppUid && socket != null) {
             if (announced.isNotBlank()) gameAddress = announced
             if (localIp.isNotBlank()) gameIp = localIp
             if (localPort > 0) gamePort = localPort
@@ -116,8 +123,8 @@ object PeerSlot {
                 "announced=$gameAddress local=$gameIp:$gamePort")
             return
         }
-        engine = PeerBotEngine(uid.toString())
-        gameUid = uid
+        engine = PeerBotEngine(botUid.toString())
+        gameUid = oppUid
         gameAddress = announced
         gameIp = localIp
         gamePort = localPort
@@ -136,7 +143,7 @@ object PeerSlot {
             return
         }
         socket = s
-        AppState.appendLog("[BOT-SLOT  ] armed: game uid=$uid announced=$announced " +
+        AppState.appendLog("[BOT-SLOT  ] armed: game uid=$oppUid bot uid=$botUid " +
             (if (localIp.isNotBlank() && localPort > 0) "local=$localIp:$localPort"
              else "local address pending") +
             " -- peer slot on $LOOPBACK_PEER_IP:${BotMode.BOT_PORT}")

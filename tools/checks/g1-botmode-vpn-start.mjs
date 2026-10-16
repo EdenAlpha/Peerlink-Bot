@@ -136,9 +136,9 @@ must(/fun transient\(/.test(driver) && /_NET_FAIL/.test(driver),
   'j: transport noise is retried, not fatal');
 must(/fun already\(/.test(driver) && /startsWith\("ERR_ALREADY"\)/.test(driver),
   'j: ERR_ALREADY_* answers count as the done state');
-must(/PeerSlot\.arm\(opp, "", "", 0\)/.test(driver),
+must(/PeerSlot\.arm\(opp, gate\.uid, "", "", 0\)/.test(driver),
   'j: the peer slot arms on go_match (reactive before the ladder ends)');
-must(/PeerSlot\.arm\(opp, peerAddr, localIp, localPort\)/.test(driver),
+must(/PeerSlot\.arm\(opp, gate\.uid, peerAddr, localIp, localPort\)/.test(driver),
   'j: the slot is re-targeted with the session address');
 must(!/SEAT_TIMEOUT_MS|GO_TIMEOUT_MS/.test(driver),
   'j: the v1 seat/go deadlines are gone (no silent give-up)');
@@ -149,8 +149,10 @@ must(!/SEAT_TIMEOUT_MS|GO_TIMEOUT_MS/.test(driver),
 }
 must((driver.match(/\bstatus\("/g) || []).length >= 6,
   'j: every rung narrates its state to the notification');
-must(/if \(armed && gameUid == uid && socket != null\)/.test(peerSlot),
+must(/if \(armed && gameUid == oppUid && socket != null\)/.test(peerSlot),
   'j: PeerSlot.arm is idempotent (early arm + re-target)');
+must(/PeerBotEngine\(botUid\.toString\(\)\)/.test(peerSlot),
+  'n: the 0x9090 stamp carries the BOT uid (stamping the game uid made every reply self-contradictory)');
 
 // (k) the bot declares a TRANSLATED endpoint at the gate (2026-10-15 device
 // run: host .53.2 -- an address that exists nowhere on the wire -- got
