@@ -22,6 +22,13 @@ android {
         // User-facing name, kept separate from applicationId so existing installs keep their data.
         resValue("string", "app_displayed_name", "PeerLink")
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        // arm64 only: the shipped APK carries one .so per ABI (the OCR
+        // pipeline alone is ~40 MB across four ABIs). Phones from the last
+        // years are arm64-v8a; dropping the other three cuts the download
+        // users keep re-paying for on every fix (user complaint 2026-10-16).
+        ndk {
+            abiFilters += listOf("arm64-v8a")
+        }
     }
 
     buildTypes {

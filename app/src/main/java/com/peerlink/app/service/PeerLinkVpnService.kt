@@ -638,6 +638,9 @@ class PeerLinkVpnService : VpnService() {
      */
     private fun startBotModeVpn() {
         AppState.appendLog("[VPN-START ] Bot mode: native datapath -- peer slot at 127.0.0.1:${BotMode.BOT_PORT}, default underlay")
+        var lastNatStatLog = 0L
+        var lastTunnelOut = -1L
+        var lastTunnelIn = -1L
         try {
             BotMode.ensurePair()
 
@@ -704,7 +707,13 @@ class PeerLinkVpnService : VpnService() {
                 myFabricatedIp = AppState.myFabricatedIp,
                 peerFabricatedIp = AppState.peerFabricatedIp,
                 localLanIp = path.localIp,
-                localInterfaceIndex = path.interfaceIndex,
+                // BOT MODE: the peer destination is LOOPBACK. The native pins
+                // its peer socket's egress to this interface (IP_UNICAST_IF);
+                // pinned to a physical interface (wlan0/ccmni0), every send
+                // to 127.0.0.1 fails and all diverted frames die silently
+                // (Tunneled=0 in the 05:09 and 04:37 2026-10-16 runs -- the
+                // second on cellular). 0 = never pin; loopback routes via lo.
+                localInterfaceIndex = 0,
                 rawCapturePath = lastRawCapturePath,
             )
             nativeBackend = NativePeerLinkBackend(
@@ -733,6 +742,25 @@ class PeerLinkVpnService : VpnService() {
 
                     override fun onStats(stats: NativeBackendStats) {
                         AppState.tunneled.set(stats.totalTunneledPackets)
+                        MatchTracker.noteTunnelStats(stats.tunnelOutPackets, stats.tunnelInPackets)
+                        MatchAutomationEngine.onNativeStats(stats)
+                        // Peer-path counters every 30 s (or on movement): the
+                        // line that proves the punch crossing is alive --
+                        // tunnel_out moves when diverted game frames reach
+                        // the slot, tunnel_in when slot replies come back.
+                        val now = System.currentTimeMillis()
+                        val moved = stats.tunnelOutPackets != lastTunnelOut ||
+                            stats.tunnelInPackets != lastTunnelIn
+                        if (now - lastNatStatLog >= 30_000L || (moved && lastTunnelOut >= 0L)) {
+                            lastNatStatLog = now
+                            lastTunnelOut = stats.tunnelOutPackets
+                            lastTunnelIn = stats.tunnelInPackets
+                            AppState.appendLog(
+                                "[NATIVE-STAT] tunnelOut=${stats.tunnelOutPackets} " +
+                                    "tunnelIn=${stats.tunnelInPackets} " +
+                                    "dropped=${stats.droppedPackets} " +
+                                    "kaTx=${stats.keepaliveTx} kaRx=${stats.keepaliveRx}")
+                        }
                     }
                 },
             )
@@ -820,16 +848,12 @@ class PeerLinkVpnService : VpnService() {
                     AppState.appendLog("[VPN-UNDER ] Native peer socket protection failed")
                     false
                 } else if (BotMode.active) {
-                    // BOT MODE: no exact gameplay network exists (the underlay
-                    // is Wi-Fi OR mobile). The protected socket rides the
-                    // system default; the bind is best-effort and must never
-                    // fail the backend start (2026-10-15 fix).
-                    runCatching {
-                        val cm = getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager
-                        cm.activeNetwork?.bindSocket(pfd.fileDescriptor)
-                    }.onFailure {
-                        AppState.appendLog("[VPN-UNDER ] Bot default-network bind skipped: ${it.message}")
-                    }
+                    // BOT MODE: protect only, NO network bind. The peer
+                    // destination is loopback (127.0.0.1:1162) and a socket
+                    // bound to a physical network (Wi-Fi OR mobile) cannot
+                    // route there -- every peer-bound frame died (Tunneled=0,
+                    // 2026-10-16 runs). Protected is enough: loopback traffic
+                    // never enters the VPN.
                     true
                 } else {
                     bindSocketFdToPreferredNetwork(pfd.fileDescriptor)

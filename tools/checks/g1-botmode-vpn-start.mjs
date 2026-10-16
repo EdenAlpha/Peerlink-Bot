@@ -99,9 +99,22 @@ must(/buildInnerUdpPacket\(/.test(peerSlot), 'h: replies are complete inner IP p
 must(/parseInnerUdp\(/.test(peerSlot), 'h: inner IPv4/UDP frames parsed');
 must(/fun resolveDefaultUnderlay\(context: Context\): LanPath\?/.test(lanRes),
   'h: default-underlay resolver exists');
+// (h2) bot mode never pins/binds the peer socket to a physical interface:
+// the peer is LOOPBACK (127.0.0.1:1162) and a pinned/Network-bound socket
+// cannot route there (Tunneled=0 across the 04:37 cellular and 05:09 runs,
+// 2026-10-16; IP_UNICAST_IF + Network.bindSocket both break loopback).
+must(/localInterfaceIndex = 0,/.test(svc),
+  'h2: bot mode does not pin the peer socket to a physical interface (index 0)');
+{
+  const botPrep = svc.indexOf('} else if (BotMode.active) {');
+  const botEnd = svc.indexOf('} else {', botPrep);
+  const seg = svc.slice(botPrep, botEnd);
+  must(seg.indexOf('activeNetwork?.bindSocket') < 0 && seg.indexOf('protect(') >= 0,
+    'h2: bot-mode peer socket prep is protect-only (no Network bind)');
+}
+must(/\[NATIVE-STAT\] tunnelOut=/.test(svc) && /kaTx=/.test(svc),
+  'h2: the native peer-path counters are visible in the log');
 must(/bindSocketFdToPreferredNetwork/.test(svc), 'h: peer-mode socket bind intact');
-must(/else if \(BotMode\.active\) \{[\s\S]{0,900}activeNetwork\?\.bindSocket/.test(svc),
-  'h: bot-mode native-socket bind is default-network best-effort');
 
 // (i) the exact-gameplay-WiFi waiver stays bot-mode-only in the Kotlin engine
 // (defense in depth: the engine is no longer the bot datapath, but the waiver
