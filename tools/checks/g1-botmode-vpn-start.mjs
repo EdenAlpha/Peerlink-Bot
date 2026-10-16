@@ -106,10 +106,12 @@ must(/fun resolveDefaultUnderlay\(context: Context\): LanPath\?/.test(lanRes),
 must(/localInterfaceIndex = 0,/.test(svc),
   'h2: bot mode does not pin the peer socket to a physical interface (index 0)');
 {
-  const botPrep = svc.indexOf('} else if (BotMode.active) {');
-  const botEnd = svc.indexOf('} else {', botPrep);
-  const seg = svc.slice(botPrep, botEnd);
-  must(seg.indexOf('activeNetwork?.bindSocket') < 0 && seg.indexOf('protect(') >= 0,
+  const prep = svc.indexOf('private fun prepareNativePeerSocket');
+  const prepEnd = svc.indexOf('private fun isUsableUnderlay', prep);
+  const seg = svc.slice(prep, prepEnd);
+  must(seg.indexOf('BotMode.active') >= 0 &&
+      seg.indexOf('activeNetwork?.bindSocket') < 0 &&
+      seg.indexOf('protect(') >= 0,
     'h2: bot-mode peer socket prep is protect-only (no Network bind)');
 }
 must(/\[NATIVE-STAT\] tunnelOut=/.test(svc) && /kaTx=/.test(svc),
