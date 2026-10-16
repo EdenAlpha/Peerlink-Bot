@@ -20,6 +20,7 @@ import com.peerlink.app.core.AppState
 import com.peerlink.app.core.MatchTracker
 import com.peerlink.app.core.PeerSessionPhase
 import com.peerlink.app.godmode.GodModeManager
+import kotlin.concurrent.thread
 import com.peerlink.app.network.LanPathResolver
 import com.peerlink.app.network.LanPath
 import com.peerlink.app.network.GameplayPathPolicy
@@ -636,6 +637,29 @@ class PeerLinkVpnService : VpnService() {
      * fabricated-IP UDP frames -- which travel to 127.0.0.1:1162, where
      * PeerSlot answers as the peer. No peer LAN path, no peer probe.
      */
+    /**
+     * The moment the bot's peer slot binds: re-connect the native's peer
+     * UDP socket to the fresh listener (see PeerSlot.onArmed), then PROVE
+     * the punch loop end-to-end. Runs on its own thread -- never blocks the
+     * VPN start or the driver. The verdict line is the one bit of truth the
+     * next export needs:
+     *   UP   = diverted frames CAN reach the slot and answers come back;
+     *   DOWN = the game's punches die between the TUN and the slot, and
+     *          [NATIVE-STAT]/[NATIVE/TX] in the same log name the cause.
+     */
+    private fun verifyBotPunchLoop() {
+        val backend = nativeBackend ?: return
+        thread(name = "bot-punch-verify") {
+            val rebindOk = backend.rebindPeerSocket()
+            AppState.appendLog("[VPN-UNDER ] Bot peer socket re-bound: " +
+                (if (rebindOk) "ok" else "FAILED"))
+            val up = backend.verifyPeerPath(3_000)
+            AppState.appendLog("[VPN-UNDER ] punch loop verify: " +
+                (if (up) "UP -- diverted frames reach the slot and answers come back"
+                 else "DOWN -- the game's punches cannot reach the slot"))
+        }
+    }
+
     private fun startBotModeVpn() {
         AppState.appendLog("[VPN-START ] Bot mode: native datapath -- peer slot at 127.0.0.1:${BotMode.BOT_PORT}, default underlay")
         var lastNatStatLog = 0L
@@ -765,6 +789,7 @@ class PeerLinkVpnService : VpnService() {
                 },
             )
             val bridgeFd = nativeBackend!!.start(detachedTunFd)
+            nativeBackend!!.startPolling()   // bot mode never had this: no polls, no NATIVE-STAT, Tunneled stayed 0 forever
             val bridgePfd = ParcelFileDescriptor.adoptFd(bridgeFd)
             passthroughBridgeEngine = PassthroughBridgeEngine(
                 context = this,
@@ -779,12 +804,7 @@ class PeerLinkVpnService : VpnService() {
             // on PeerSlot.onArmed. Without this the backend keeps sending
             // diverted game punches into a poisoned socket and every frame
             // dies silently (Tunneled=0; the 04:37 2026-10-16 run).
-            PeerSlot.onArmed = {
-                val ok = nativeBackend?.rebindPeerSocket() == true
-                AppState.appendLog(
-                    "[VPN-UNDER ] Bot peer socket re-bound: " +
-                        (if (ok) "ok -- peering path live" else "FAILED"))
-            }
+            PeerSlot.onArmed = { verifyBotPunchLoop() }
 
             AppState.appendLog("[VPN-UNDER ] Bot mode: the peer slot is local -- no peer-link probe")
 

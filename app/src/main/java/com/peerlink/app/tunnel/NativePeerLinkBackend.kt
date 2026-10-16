@@ -133,6 +133,18 @@ class NativePeerLinkBackend(
     }
 
     /**
+     * End-to-end probe of the punch loop: the native sends its 1-byte 0xFC
+     * control through the SAME peer socket the diverted game frames ride,
+     * the slot answers 0xFD, the native reports the ack. UP = the loop the
+     * punches depend on is live; DOWN = frames cannot reach the slot.
+     */
+    fun verifyPeerPath(timeoutMs: Int): Boolean = handleLock.read {
+        val handle = nativeHandle
+        if (handle == 0L || stopping) return@read false
+        return@read nativeVerifyPeerPath(handle, timeoutMs)
+    }
+
+    /**
      * Kernel thread IDs (gettid) of the latency-critical native loops — the TUN
      * reader, peer RX, peer TX and TUN-inject threads. Android gives these
      * normal-process URGENT_DISPLAY priority. The TIDs are diagnostic; stock

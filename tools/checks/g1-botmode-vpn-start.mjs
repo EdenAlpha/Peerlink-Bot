@@ -116,6 +116,8 @@ must(/localInterfaceIndex = 0,/.test(svc),
 }
 must(/\[NATIVE-STAT\] tunnelOut=/.test(svc) && /kaTx=/.test(svc),
   'h2: the native peer-path counters are visible in the log');
+must(/nativeBackend!!.startPolling\(\)/.test(svc),
+  'h2: bot mode starts the native stats polling (NATIVE-STAT would never fire)');
 must(/bindSocketFdToPreferredNetwork/.test(svc), 'h: peer-mode socket bind intact');
 
 // (i) the exact-gameplay-WiFi waiver stays bot-mode-only in the Kotlin engine
@@ -218,8 +220,10 @@ must(/bot account has no usable squad -- minting a replacement/.test(roomSvc),
 // the first keepalive poisoned the connected UDP socket).
 must(/var onArmed/.test(peerSlot) && /onArmed\?\.invoke\(\)/.test(peerSlot),
   'n: the slot exposes the bind hook');
-must(/PeerSlot\.onArmed = \{/.test(svc) && /rebindPeerSocket\(\)/.test(svc),
-  'n: the arm hook re-connects the native peer socket');
+must(/PeerSlot\.onArmed = \{ verifyBotPunchLoop\(\) \}/.test(svc) &&
+     /private fun verifyBotPunchLoop\(\)/.test(svc) &&
+     /verifyPeerPath\(3_000\)/.test(svc) && /rebindPeerSocket\(\)/.test(svc),
+  'n: the arm hook re-binds and verifies the punch loop');
 
 // (g) syntax-level balance on every edited file
 for (const [name, text] of [
