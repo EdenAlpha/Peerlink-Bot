@@ -187,15 +187,12 @@ object PeerSlot {
             }
             if (n <= 0) continue
             rxCount++
-            val now = System.currentTimeMillis()
-            if (rxCount <= 3 || now - lastRxLog >= 10_000L) {
-                lastRxLog = now
-                val from = pkt.socketAddress as? InetSocketAddress
-                AppState.appendLog("[BOT-SLOT  ] rx datagram #$rxCount " +
-                    "n=$n from=${from ?: "?"} -- the native->slot hop is delivering")
-            }
             val from = pkt.socketAddress as? InetSocketAddress
             val data = buf.copyOf(n)
+            // Every datagram is visible now: head hex + where parsing goes.
+            // This is the line that ends the loopback mystery in one export.
+            val head = data.take(12).joinToString("") { "%02x".format(it) }
+            AppState.appendLog("[BOT-SLOT  ] rx #$rxCount n=$n from=$from head=$head")
 
             if (n == 1) {
                 when (data[0].toInt() and 0xFF) {
@@ -207,8 +204,17 @@ object PeerSlot {
                 continue
             }
 
-            val payload = stripDiagHeader(data) ?: continue
-            val inner = parseInnerUdp(payload) ?: continue
+            val stripped = stripDiagHeader(data)
+            if (stripped == null) {
+                AppState.appendLog("[BOT-SLOT  ] rx #$rxCount diag-strip -> null (dropped)")
+                continue
+            }
+            val inner = parseInnerUdp(stripped)
+            if (inner == null) {
+                AppState.appendLog("[BOT-SLOT  ] rx #$rxCount parse -> not IPv4/UDP " +
+                    "(len=${stripped.size} head=${stripped.take(12).joinToString("") { "%02x".format(it) }})")
+                continue
+            }
             val fromGame = inner.dstIp == AppState.peerFabricatedIp
             if (!fromGame) {
                 if (loggedClasses.add(-2)) {
