@@ -105,6 +105,12 @@ must(/fun resolveDefaultUnderlay\(context: Context\): LanPath\?/.test(lanRes),
 // 2026-10-16; IP_UNICAST_IF + Network.bindSocket both break loopback).
 must(/localInterfaceIndex = 0,/.test(svc),
   'h2: bot mode does not pin the peer socket to a physical interface (index 0)');
+must(/localLanIp = "127\.0\.0\.1",/.test(svc),
+  'h2: bot mode binds the peer socket source to loopback (WAN source cannot deliver to loopback)');
+must(/InetSocketAddress\(LOOPBACK_PEER_IP, BACKEND_PORT\)/.test(peerSlot),
+  'h2: the slot sends to the backend loopback listener');
+must(/rx datagram #/.test(peerSlot),
+  'h2: every slot datagram is counted and logged (the hop stays visible)');
 {
   const prep = svc.indexOf('private fun prepareNativePeerSocket');
   const prepEnd = svc.indexOf('private fun isUsableUnderlay', prep);

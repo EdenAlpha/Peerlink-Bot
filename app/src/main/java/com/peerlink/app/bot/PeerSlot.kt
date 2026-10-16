@@ -172,6 +172,8 @@ object PeerSlot {
      */
     private fun receiveLoop(s: DatagramSocket) {
         val buf = ByteArray(4096)
+        var rxCount = 0
+        var lastRxLog = 0L
         while (armed && !s.isClosed) {
             s.soTimeout = 250
             val pkt = DatagramPacket(buf, buf.size)
@@ -184,6 +186,14 @@ object PeerSlot {
                 if (!armed) break else continue
             }
             if (n <= 0) continue
+            rxCount++
+            val now = System.currentTimeMillis()
+            if (rxCount <= 3 || now - lastRxLog >= 10_000L) {
+                lastRxLog = now
+                val from = pkt.socketAddress as? InetSocketAddress
+                AppState.appendLog("[BOT-SLOT  ] rx datagram #$rxCount " +
+                    "n=$n from=${from ?: "?"} -- the native->slot hop is delivering")
+            }
             val from = pkt.socketAddress as? InetSocketAddress
             val data = buf.copyOf(n)
 
@@ -276,8 +286,12 @@ object PeerSlot {
     }
 
     private fun sendToGame(s: DatagramSocket, payload: ByteArray) {
-        val backendIp = AppState.localIp.get().orEmpty()
-        if (backendIp.isBlank() || gameIp.isBlank() || gamePort <= 0) return
+        // BOT MODE: the backend's peer socket now binds 127.0.0.1:BACKEND_PORT
+        // (bound peer source = loopback -- see the config note in the VPN
+        // service), so the slot's frames must go to the loopback address;
+        // the old WAN:17024 target no longer has a listener.
+        val target = InetSocketAddress(LOOPBACK_PEER_IP, BACKEND_PORT)
+        if (gameIp.isBlank() || gamePort <= 0) return
         val out = buildInnerUdpPacket(
             srcIp = AppState.peerFabricatedIp,
             dstIp = gameIp,
@@ -286,7 +300,7 @@ object PeerSlot {
             payload = payload,
         )
         runCatching {
-            s.send(DatagramPacket(out, out.size, InetSocketAddress(backendIp, BACKEND_PORT)))
+            s.send(DatagramPacket(out, out.size, target))
         }
     }
 

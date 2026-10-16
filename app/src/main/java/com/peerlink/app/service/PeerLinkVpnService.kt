@@ -730,7 +730,7 @@ class PeerLinkVpnService : VpnService() {
                 peerPort = BotMode.BOT_PORT,             // 127.0.0.1:1162
                 myFabricatedIp = AppState.myFabricatedIp,
                 peerFabricatedIp = AppState.peerFabricatedIp,
-                localLanIp = path.localIp,
+                localLanIp = "127.0.0.1",
                 // BOT MODE: the peer destination is LOOPBACK. The native pins
                 // its peer socket's egress to this interface (IP_UNICAST_IF);
                 // pinned to a physical interface (wlan0/ccmni0), every send
