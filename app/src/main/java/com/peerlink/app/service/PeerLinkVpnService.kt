@@ -746,6 +746,18 @@ class PeerLinkVpnService : VpnService() {
             )
             passthroughBridgeEngine?.start()
 
+            // BOT MODE: when the peer slot binds (the driver arms it on
+            // go_match), re-connect the native peer socket -- see the note
+            // on PeerSlot.onArmed. Without this the backend keeps sending
+            // diverted game punches into a poisoned socket and every frame
+            // dies silently (Tunneled=0; the 04:37 2026-10-16 run).
+            PeerSlot.onArmed = {
+                val ok = nativeBackend?.rebindPeerSocket() == true
+                AppState.appendLog(
+                    "[VPN-UNDER ] Bot peer socket re-bound: " +
+                        (if (ok) "ok -- peering path live" else "FAILED"))
+            }
+
             AppState.appendLog("[VPN-UNDER ] Bot mode: the peer slot is local -- no peer-link probe")
 
             AppState.sessionStartedElapsedMs.set(android.os.SystemClock.elapsedRealtime())

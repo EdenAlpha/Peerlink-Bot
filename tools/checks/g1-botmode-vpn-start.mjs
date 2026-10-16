@@ -197,6 +197,15 @@ must(/BotSquad\.ensure\(gate, identity\.entryInfoJson\)/.test(roomSvc),
 must(/bot account has no usable squad -- minting a replacement/.test(roomSvc),
   'm: a squad-less old account is replaced automatically');
 
+// (n) the peer socket re-bind (2026-10-16 04:37 run: the game's 14 punches
+// were diverted but never forwarded to the slot -- Tunneled=0; the backend
+// connected to the loopback slot at VPN start, before the slot existed, and
+// the first keepalive poisoned the connected UDP socket).
+must(/var onArmed/.test(peerSlot) && /onArmed\?\.invoke\(\)/.test(peerSlot),
+  'n: the slot exposes the bind hook');
+must(/PeerSlot\.onArmed = \{/.test(svc) && /rebindPeerSocket\(\)/.test(svc),
+  'n: the arm hook re-connects the native peer socket');
+
 // (g) syntax-level balance on every edited file
 for (const [name, text] of [
   ['PeerLinkVpnService.kt', svc],

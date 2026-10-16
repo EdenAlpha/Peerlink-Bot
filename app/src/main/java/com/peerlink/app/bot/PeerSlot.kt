@@ -79,6 +79,21 @@ object PeerSlot {
     private var originator: Thread? = null
     private val loggedClasses = java.util.Collections.synchronizedSet(HashSet<Int>())
 
+    /**
+     * Invoked the moment this slot's loopback socket exists. The VPN service
+     * uses it to RE-CONNECT the native backend's peer UDP socket: the backend
+     * connects to 127.0.0.1:1162 at VPN start -- before the slot exists --
+     * and the first keepalive against the unbound port poisons the connected
+     * socket (one ICMP port-unreachable poisons every later send on a
+     * connected UDP socket). The 2026-10-16 04:37 device run showed the
+     * result exactly: the game's 14 punches were diverted (they reached the
+     * TUN tap) but never forwarded to the slot (`Tunneled=0`, no
+     * "game knocked"). The re-bind clears the poisoned state once a real
+     * listener exists.
+     */
+    @Volatile
+    var onArmed: (() -> Unit)? = null
+
     /** TunnelEngine installs (and re-installs) the legacy injector lambda. */
     fun installInjector(fn: (ByteArray, String, Int, Int) -> Unit) {
         injector = fn
@@ -125,6 +140,9 @@ object PeerSlot {
             (if (localIp.isNotBlank() && localPort > 0) "local=$localIp:$localPort"
              else "local address pending") +
             " -- peer slot on $LOOPBACK_PEER_IP:${BotMode.BOT_PORT}")
+        // The listener now exists -- clear the backend's poisoned connected
+        // socket so its peer-TX sends reach this slot (see onArmed note).
+        runCatching { onArmed?.invoke() }
         worker = thread(name = "peer-slot-rx") { receiveLoop(s) }
         originator = thread(name = "peer-slot-tx") { originateLoop(s) }
     }
