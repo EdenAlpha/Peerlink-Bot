@@ -185,6 +185,8 @@ must(/fun check\(|fun setFromEntryInfo\(|fun ensure\(/.test(squad),
   'm: BotSquad check/bootstrap/verify ladder exists');
 must(/ERR_NOT_ENOUGH_PLAYER_IN_SQUAD/.test(squad),
   'm: the squad-less gate answer is handled');
+must(/squad_gameplan/.test(squad) && /squadData\["player_list"\] = players/.test(squad),
+  'm: the SET keeps the template squad_gameplan (dropping it = ERR_INVALIDARG)');
 must(/BotSquad\.setFromEntryInfo\(checkGate, entryInfo\)/.test(minter),
   'm: mint bootstraps the squad on its verify session');
 must(/entryInfoJson = if \(entryInfo\.isEmpty\(\)\) ""/.test(minter) ||

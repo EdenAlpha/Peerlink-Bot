@@ -58,6 +58,16 @@ object BotSquad {
         }
         val baseTeamId = entryInfo["recommend_base_team_id"]
 
+        // squad_data starts from the template (it carries squad_gameplan --
+        // the formation; dropping it reads ERR_INVALIDARG, proven on-device
+        // 2026-10-16) and only coach/player_list get replaced with this
+        // account's own roster.
+        @Suppress("UNCHECKED_CAST")
+        val squadData = LinkedHashMap(cap["squad_data"] as? Map<String, Any?>
+            ?: emptyMap<String, Any?>())
+        squadData["player_list"] = players
+        squadData["coach"] = coach
+
         val m = gate.step("CMD_SET_MYCLUB_ENTRY_INFO", linkedMapOf(
             "base_team" to linkedMapOf<String, Any?>(
                 "base_team_id" to baseTeamId,
@@ -68,10 +78,7 @@ object BotSquad {
             "check_status" to (cap["check_status"] ?: linkedMapOf<String, Any?>(
                 "skip_check_team_name" to "YES",
                 "skip_check_team_name_short" to "YES")),
-            "squad_data" to linkedMapOf<String, Any?>(
-                "player_list" to players,
-                "coach" to coach,
-            ),
+            "squad_data" to squadData,
             "squad_name" to (cap["squad_name"] ?: "Game Plan"),
         ))
         val res = m["result"]?.toString() ?: "null"
