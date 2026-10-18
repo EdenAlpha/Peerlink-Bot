@@ -3,6 +3,7 @@ package com.peerlink.app.godmode
 import android.content.Context
 import com.peerlink.app.core.AppState
 import org.json.JSONObject
+import java.io.File
 import java.net.InetSocketAddress
 import java.net.Socket
 
@@ -17,7 +18,12 @@ object PrimeClient {
     @Volatile var protocolVersion: Int = 0
         private set
 
-    fun init(context: Context) = PrimeAuth.init(context)
+    @Volatile private var appContext: Context? = null
+
+    fun init(context: Context) {
+        PrimeAuth.init(context)
+        appContext = context.applicationContext
+    }
 
     private fun request(command: String, timeoutMs: Int): JSONObject? {
         val token = PrimeAuth.tokenOrNull() ?: return null
@@ -67,6 +73,63 @@ object PrimeClient {
         if (!response.optBoolean("ok", false)) return null
         return response.optString("output", "")
     }
+
+    /**
+     * First stage of the engine bridge.
+     *
+     * Runs `libpeerlinkengine.so` as the shell-uid helper.  The probe:
+     *   1. locates the installed eFootball's extracted native library dir
+     *   2. reports the engine's path and size, and its SHA-256
+     *      (this pins the exact build on this phone, so our notes can be
+     *       re-anchored to the build that is really there)
+     *   3. stages a copy the helper owns
+     *   4. attempts to LOAD the engine inside a forked child, so that a crash
+     *      during the engine's ~11,900 load-time registrations is reported as
+     *      a signal instead of killing the probe
+     *
+     * Returns the probe's raw `KEY=value` report, or null if Prime is not up.
+     */
+    fun engineProbe(
+        stageDir: String = DEFAULT_ENGINE_STAGE_DIR,
+        noLoad: Boolean = false,
+        timeoutMs: Int = 120_000,
+    ): String? {
+        val ctx = appContext ?: return null
+        val exe = File(ctx.applicationInfo.nativeLibraryDir, "libpeerlinkengine.so")
+        if (!exe.isFile) {
+            AppState.appendLog("[ENGINE-PROBE] probe binary missing: ${exe.absolutePath}")
+            return null
+        }
+        val cmd = buildString {
+            append(shellQuote(exe.absolutePath))
+            append(" --out ")
+            append(shellQuote(stageDir))
+            if (noLoad) append(" --no-load")
+        }
+        val out = execute(cmd, timeoutMs)
+        if (out != null) {
+            for (line in out.lineSequence()) {
+                if (line.startsWith("RESULT=") || line.startsWith("UE4_SHA256=") ||
+                    line.startsWith("UE4_ROM_SIZE=") || line.startsWith("CHILD_LOAD=") ||
+                    line.startsWith("CHILD_LOAD_ERROR=") || line.startsWith("CHILD_BASE=") ||
+                    line.startsWith("LOAD_SIGNAL=") || line.startsWith("LOAD_EXIT=")
+                ) {
+                    AppState.appendLog("[ENGINE-PROBE] $line")
+                }
+            }
+        }
+        return out
+    }
+
+    private fun shellQuote(value: String): String =
+        "'" + value.replace("'", "'\\''") + "'"
+
+    /**
+     * Where the helper keeps its copy of the engine.  Deliberately outside the
+     * app sandbox: the helper runs as uid 2000, and /data/local/tmp is the one
+     * place it can both write and load code from.
+     */
+    const val DEFAULT_ENGINE_STAGE_DIR = "/data/local/tmp/peerlink_engine"
 
 
 

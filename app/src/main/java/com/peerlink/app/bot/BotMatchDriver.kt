@@ -92,6 +92,12 @@ object BotMatchDriver {
         val flow = BotMatchFlow(gate, gate, BotMatchFlow.SquadSource { emptyList() })
         val self = gate.uid
         try {
+            // The bridge's front door: find the game's own engine, pin which
+            // build it is, and find out whether it loads here.  Runs once per
+            // process, in the background, while the room is still empty -- the
+            // answer decides everything that comes after.
+            EngineBridge.probeOnce()
+
             status("room $roomNumber open -- join it from eFootball now")
 
             val oppSeen = waitForSeat(flow, gate, rid, self)

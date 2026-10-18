@@ -59,3 +59,28 @@ if (NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
     add_custom_command(TARGET libpeerlinkstarter.so POST_BUILD
             COMMAND ${CMAKE_STRIP} --remove-section=.comment "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/libpeerlinkstarter.so")
 endif ()
+
+# ---------------------------------------------------------------------------
+# engine_probe -- first stone of the engine bridge.
+#
+# Built as an executable that happens to be named .so, exactly like the
+# starter above, so it ships in the same nativeLibraryDir and is reachable by
+# the shell-uid helper with no extra plumbing.
+#
+# It locates the installed game's libUE4.so, reports its size and SHA-256
+# (so we always anchor to the build actually on the phone), stages a copy the
+# bot owns, and then attempts to load it inside a forked child so that a
+# crash during the engine's ~11,900 registration functions is reported as a
+# signal rather than killing the probe.
+#
+# Needs "dl" for dlopen/dlsym/dlerror.
+# ---------------------------------------------------------------------------
+add_executable(libpeerlinkengine.so
+        engine_probe.cpp)
+
+target_link_libraries(libpeerlinkengine.so log dl)
+
+if (NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
+    add_custom_command(TARGET libpeerlinkengine.so POST_BUILD
+            COMMAND ${CMAKE_STRIP} --remove-section=.comment "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/libpeerlinkengine.so")
+endif ()
