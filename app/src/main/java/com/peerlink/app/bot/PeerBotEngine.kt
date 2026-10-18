@@ -47,7 +47,16 @@ data class Stun(
  * Pure builders/parser/[handle] are socket-free and unit-testable; [open],
  * [originate] and [pump] drive a real UDP socket for live play.
  */
-class PeerBotEngine(private val uid: String) {
+class PeerBotEngine(
+    /**
+     * The BOT's own user id -- the 0x9090 stamp on every frame this engine
+     * builds. Public so the slot can stamp the frames it originates with the
+     * same id instead of re-supplying one (see PeerSlot.originateLoop: the
+     * 14:50 2026-10-18 capture showed it stamping the GAME's id, so every
+     * frame the bot sent claimed to be the opponent).
+     */
+    val uid: String,
+) {
 
     companion object {
         private val MAGIC = byteArrayOf(0x21, 0x12, 0xA4.toByte(), 0x42)

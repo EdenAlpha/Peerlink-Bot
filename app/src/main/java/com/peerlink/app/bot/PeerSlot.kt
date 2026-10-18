@@ -269,7 +269,11 @@ object PeerSlot {
                     Thread.sleep(200)
                     continue
                 }
-                sendToGame(s, PeerBotEngine.punchReq(tid, gameUid.toString()))
+                // Stamp the BOT's own id (the engine already holds it).
+                // Was gameUid.toString() -> all 15 punches in the 14:50
+                // 2026-10-18 capture carried 1012115771, the GAME's id, so the
+                // game received its own identity back.
+                sendToGame(s, PeerBotEngine.punchReq(tid, eng.uid))
                 punches++
                 Thread.sleep(600)
             }
@@ -314,10 +318,22 @@ object PeerSlot {
     /** Strip the optional 56-byte native diag header; null when unusable. */
     private fun stripDiagHeader(data: ByteArray): ByteArray? {
         if (data.size < 1) return null
-        val magic = (data[0].toInt() and 0xFF) or
-            ((data[1].toInt() and 0xFF) shl 8) or
-            ((data[2].toInt() and 0xFF) shl 16) or
-            ((data[3].toInt() and 0xFF) shl 24)
+        // BIG-endian, like read_u32() in peerlink_backend.cpp (which writes the
+        // magic with write_u32, also big-endian) and like
+        // TunnelEngine.parseTunnelDiagMeta, whose default ByteBuffer is
+        // big-endian too. On the wire the four bytes are 50 4c 44 47 = "PLDG".
+        //
+        // The old code assembled them the other way round -- byte 0 into the
+        // LOW byte -- so it compared 0x47444C50 against 0x504C4447: never
+        // equal. PLDG frames were never stripped, so every packet the game
+        // sent died on the next line as "not IPv4/UDP". In the 14:50
+        // 2026-10-18 run the slot received 12 of the game's punches and
+        // dropped 12 ("rx #N parse -> not IPv4/UDP (len=132 ...)", where 132
+        // is the untouched frame length -- proof the strip never ran).
+        val magic = ((data[0].toInt() and 0xFF) shl 24) or
+            ((data[1].toInt() and 0xFF) shl 16) or
+            ((data[2].toInt() and 0xFF) shl 8) or
+            (data[3].toInt() and 0xFF)
         if (data.size >= DIAG_HEADER_SIZE && magic == DIAG_MAGIC &&
             (data[4].toInt() and 0xFF) == DIAG_VERSION
         ) {
