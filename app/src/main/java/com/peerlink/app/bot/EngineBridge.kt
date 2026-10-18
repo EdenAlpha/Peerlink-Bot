@@ -12,34 +12,46 @@ import java.util.concurrent.atomic.AtomicBoolean
  *
  * The bot's own P2P half is meant to become the game's own engine -- the same
  * 160 MB library the real game runs -- fed the bot's id and squad. Everything
- * downstream depends on one question that has never been answered on this
+ * downstream depends on two questions that have never been answered on this
  * phone:
  *
- *   can we reach the installed game's engine at all, and will it load?
+ *   which build of the engine is installed here?   (cheap, safe)
+ *   will the loader open it?                       (heavy, risky)
  *
- * This runs the native probe and puts the answer in the app log.
+ * THEY ARE SPLIT, AND ONLY THE CHEAP ONE RUNS BY ITSELF.
  *
- * It runs it TWO ways, because "can we read the game's files" is exactly the
- * kind of thing that is only true in one of them, and guessing has cost us
- * before:
+ * The first version of this ran the whole thing -- locate, hash, copy 161 MB,
+ * then load a 161 MB library, twice -- and it was wired to fire when a room
+ * opened and when bot mode started. That is the worst possible moment: the
+ * bot is mid-handshake and the phone is already running eFootball. It cost
+ * memory, disk and CPU exactly where they were needed, and the bot stopped
+ * reaching match. That was a bad decision on my part and it is reversed here.
  *
- *   1. as this app itself -- always available, needs nothing else running,
- *      but Android may refuse to let an app read another app's files
- *   2. as the privileged helper -- the uid 2000 (or root) process the app's
- *      other shell commands run in, which certainly can read them, but which
- *      is only up when the user's Prime side is up
+ * [identifyOnce] is what runs on its own. It reads the engine file in 1 MB
+ * chunks, prints its size and SHA-256, and stops. It writes nothing, forks
+ * nothing, allocates nothing of size. It is safe to run while a match is in
+ * progress, so it no longer matters exactly when it fires.
  *
- * The probe prints `UID=` so the two results can never be confused. Whichever
- * one works is the one the bridge is built on.
+ * [loadTest] is the heavy half. It is NOT called from anywhere automatically.
+ * It may only be run deliberately, when the phone is idle and no match is
+ * running, because it will pull a 161 MB library into the process and run the
+ * engine's ~11,900 registration functions.
  *
- * The probe only looks, hashes, copies and tries to open. It never writes to
- * the game's storage.
+ * Both routes are kept, and both print `UID=`, because "can we read another
+ * app's files" is exactly the kind of thing that is only true in one of them:
+ *
+ *   1. as this app itself -- always available, nothing else needed
+ *   2. as the privileged helper -- the uid 2000 / root process the shell
+ *      commands run in, when the user's Prime side is up
  */
 object EngineBridge {
 
-    private val started = AtomicBoolean(false)
+    private val identified = AtomicBoolean(false)
+    private val loadTestStarted = AtomicBoolean(false)
 
     @Volatile private var appContext: Context? = null
+
+    // ---- facts, from whichever route answered last ------------------------
 
     /** Raw `KEY=value` report from the route that got furthest, or null. */
     @Volatile
@@ -66,97 +78,50 @@ object EngineBridge {
     var enginePath: String? = null
         private set
 
-    /** `load_ok` | `load_failed` | `engine_crashed_on_load` | ... | null. */
+    /** `engine_identified` | `load_ok` | `load_failed` | ... | null. */
     @Volatile
     var verdict: String? = null
         private set
 
-    /** Load base address as text (`0x...`), when the load succeeded. */
+    /** Load base address as text (`0x...`), from the heavy test only. */
     @Volatile
     var loadBase: String? = null
         private set
 
-    /** Result of the app-uid route, raw. */
     @Volatile
     var appReport: String? = null
         private set
 
-    /** Result of the helper route, raw. Null when the helper was not up. */
     @Volatile
     var helperReport: String? = null
         private set
 
     /**
-     * Ask for the probe to be run, supplying a context. Safe to call from
-     * anywhere, any number of times: only the first call in this process does
-     * work.
+     * The cheap half. Runs once per process, in the background, and is safe at
+     * any time -- including in the middle of a match.
      */
-    fun probeOnce(context: Context) {
+    fun identifyOnce(context: Context) {
         appContext = context.applicationContext
         PrimeClient.init(context.applicationContext)
-        probeOnce()
-    }
-
-    /**
-     * Ask for the probe to be run. Does nothing if no context has been
-     * supplied yet. Safe to call any number of times.
-     */
-    fun probeOnce() {
-        if (appContext == null) {
-            AppState.appendLog("[ENGINE-BRIDGE] no context yet -- probe not started")
-            return
-        }
-        if (!started.compareAndSet(false, true)) return
-        Thread({ runProbe() }, "engine-probe").apply { isDaemon = true }.start()
+        if (!identified.compareAndSet(false, true)) return
+        Thread({ identify() }, "engine-identify").apply { isDaemon = true }.start()
     }
 
     private fun log(line: String) = AppState.appendLog("[ENGINE-BRIDGE] $line")
 
-    /** One run of the privileged helper. Never throws. */
-    private fun probeViaHelper(): String = try {
-        PrimeClient.engineProbe() ?: ""
-    } catch (t: Throwable) {
-        log("helper route threw ${t.javaClass.simpleName}: ${t.message}")
-        ""
-    }
-
-    /**
-     * One run of the probe as this app. Uses the same runner the shell
-     * commands use, so the timeout and output handling are identical.
-     */
-    private fun probeAsApp(context: Context): String = try {
-        val exe = File(context.applicationInfo.nativeLibraryDir, "libpeerlinkengine.so")
-        if (!exe.isFile) {
-            log("probe program is missing from this APK: ${exe.absolutePath}")
-            ""
-        } else {
-            val stage = File(context.filesDir, "engine").absolutePath
-            PrimeShellRunner.run(
-                listOf(exe.absolutePath, "--out", stage),
-                90_000L,
-                512 * 1024,
-            )
-        }
-    } catch (t: Throwable) {
-        log("app route threw ${t.javaClass.simpleName}: ${t.message}")
-        ""
-    }
-
-    private fun runProbe() {
+    private fun identify() {
         val context = appContext ?: return
         log("looking for the game's engine")
 
-        // Route 1 -- as this app. Always possible, so it goes first.
-        val asApp = probeAsApp(context)
+        val asApp = probeAsApp(context, hashOnly = true, timeoutMs = 45_000L)
         appReport = asApp
         if (asApp.isNotBlank()) {
             log("--- as this app ---")
             absorb(asApp)
         }
 
-        // Route 2 -- as the privileged helper, if it is up.
         if (PrimeClient.isAlive(timeoutMs = 800)) {
-            val viaHelper = probeViaHelper()
+            val viaHelper = probeViaHelper(hashOnly = true, timeoutMs = 45_000, stageDir = null)
             helperReport = viaHelper
             if (viaHelper.isNotBlank()) {
                 log("--- as the privileged helper ---")
@@ -168,9 +133,7 @@ object EngineBridge {
 
         log(
             when (verdict) {
-                "load_ok" -> "the game's engine LOADS on this phone (route=$lastRoute, base=$loadBase)"
-                "engine_crashed_on_load" -> "the engine was opened but died loading (route=$lastRoute)"
-                "load_failed" -> "the loader refused the engine -- see the error above"
+                "engine_identified" -> "the engine here is ${engineSize} bytes, sha256 ${engineSha256} (route=$lastRoute)"
                 "no_game_library_found" -> "the game's library was not found (route=$lastRoute)"
                 "engine_file_missing" -> "the engine file the game lists is missing"
                 null -> "the probe produced no verdict -- see the lines above"
@@ -180,8 +143,88 @@ object EngineBridge {
     }
 
     /**
-     * Take one route's report: pull the facts out of it and echo the lines
-     * that matter into the app log. The last route to answer wins the shared
+     * The heavy half: actually try to load the engine. NOT called from
+     * anywhere automatically, and it must not be -- it copies the engine
+     * (161 MB), forks a child, and has that child dlopen the library, which
+     * runs the engine's ~11,900 registration functions. Only run this when no
+     * match is in progress.
+     */
+    fun loadTest(context: Context) {
+        appContext = context.applicationContext
+        PrimeClient.init(context.applicationContext)
+        if (!loadTestStarted.compareAndSet(false, true)) return
+        Thread({ runLoadTest() }, "engine-load-test").apply { isDaemon = true }.start()
+    }
+
+    private fun runLoadTest() {
+        val context = appContext ?: return
+        log("LOAD TEST -- heavy; no match should be running")
+        val asApp = probeAsApp(context, hashOnly = false, timeoutMs = 90_000L)
+        appReport = asApp
+        if (asApp.isNotBlank()) {
+            log("--- as this app ---")
+            absorb(asApp)
+        }
+        if (PrimeClient.isAlive(timeoutMs = 800)) {
+            val viaHelper = probeViaHelper(
+                hashOnly = false,
+                timeoutMs = 110_000,
+                stageDir = PrimeClient.DEFAULT_ENGINE_STAGE_DIR,
+            )
+            helperReport = viaHelper
+            if (viaHelper.isNotBlank()) {
+                log("--- as the privileged helper ---")
+                absorb(viaHelper)
+            }
+        }
+        log(
+            when (verdict) {
+                "load_ok" -> "the game's engine LOADS on this phone (route=$lastRoute, base=$loadBase)"
+                "engine_crashed_on_load" -> "the engine was opened but died loading (route=$lastRoute)"
+                "load_failed" -> "the loader refused the engine -- see the error above"
+                else -> "load test finished with $verdict"
+            }
+        )
+    }
+
+    // ---- the two routes ---------------------------------------------------
+
+    /** One run of the privileged helper. Never throws. */
+    private fun probeViaHelper(hashOnly: Boolean, timeoutMs: Int, stageDir: String?): String = try {
+        PrimeClient.engineProbe(
+            stageDir = stageDir ?: PrimeClient.DEFAULT_ENGINE_STAGE_DIR,
+            hashOnly = hashOnly,
+            timeoutMs = timeoutMs,
+        ) ?: ""
+    } catch (t: Throwable) {
+        log("helper route threw ${t.javaClass.simpleName}: ${t.message}")
+        ""
+    }
+
+    /** One run of the probe as this app, using the same runner the shell commands use. */
+    private fun probeAsApp(context: Context, hashOnly: Boolean, timeoutMs: Long): String = try {
+        val exe = File(context.applicationInfo.nativeLibraryDir, "libpeerlinkengine.so")
+        if (!exe.isFile) {
+            log("probe program is missing from this APK: ${exe.absolutePath}")
+            ""
+        } else {
+            val stage = File(context.filesDir, "engine").absolutePath
+            val command = buildList {
+                add(exe.absolutePath)
+                add("--out")
+                add(stage)
+                if (hashOnly) add("--hash-only")
+            }
+            PrimeShellRunner.run(command, timeoutMs, 512 * 1024)
+        }
+    } catch (t: Throwable) {
+        log("app route threw ${t.javaClass.simpleName}: ${t.message}")
+        ""
+    }
+
+    /**
+     * Take one route's report: pull the facts out and echo the lines that
+     * matter into the app log. The last route to answer wins the shared
      * fields, which is fine -- if both answer they must agree, and if they
      * disagree that disagreement is itself the finding.
      */

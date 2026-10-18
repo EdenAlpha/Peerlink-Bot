@@ -498,6 +498,7 @@ void childTryLoad(const std::vector<std::string> &enginePaths, const std::string
 int main(int argc, char **argv) {
     std::string outDir = "/data/local/tmp/peerlink_engine";
     bool doLoad = true;
+    bool hashOnly = false;
 
     for (int i = 1; i < argc; ++i) {
         const char *a = argv[i];
@@ -505,10 +506,18 @@ int main(int argc, char **argv) {
             outDir = argv[++i];
         } else if (strcmp(a, "--no-load") == 0) {
             doLoad = false;
+        } else if (strcmp(a, "--hash-only") == 0) {
+            // Find the engine and fingerprint it, and stop.  No copy, no
+            // child, no load.  This is the mode that is safe to run while the
+            // phone is busy -- it reads 161 MB in 1 MB chunks and writes
+            // nothing, so it costs no meaningful memory and cannot disturb a
+            // match in progress.  The load test is the heavy half and is only
+            // ever run on purpose.
+            hashOnly = true;
         } else if (strcmp(a, "--keep") == 0) {
             // copy always happens; flag kept for symmetry with later stages
         } else if (strcmp(a, "--help") == 0) {
-            say("engine_probe [--out <dir>] [--no-load]");
+            say("engine_probe [--out <dir>] [--no-load] [--hash-only]");
             return 0;
         }
     }
@@ -546,6 +555,13 @@ int main(int argc, char **argv) {
 
     const std::string adRom = libDir + "/" + kAdLibName;
     say("GADSME_PATH=%s", fileExists(adRom) ? adRom.c_str() : "(absent)");
+
+    if (hashOnly) {
+        // Everything this mode was asked for has been reported. Stop here --
+        // before the copy, before the child, before anything heavy.
+        say("RESULT=engine_identified");
+        return 0;
+    }
 
     // ---- take a copy the bot owns -----------------------------------------
     mkdir(outDir.c_str(), 0700);

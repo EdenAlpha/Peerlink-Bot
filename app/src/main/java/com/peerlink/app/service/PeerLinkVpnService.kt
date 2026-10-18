@@ -15,7 +15,6 @@ import android.os.Build
 import android.os.ParcelFileDescriptor
 import android.os.SystemClock
 import com.peerlink.app.bot.BotMode
-import com.peerlink.app.bot.EngineBridge
 import com.peerlink.app.bot.PeerSlot
 import com.peerlink.app.core.AppState
 import com.peerlink.app.core.MatchTracker
@@ -663,12 +662,6 @@ class PeerLinkVpnService : VpnService() {
 
     private fun startBotModeVpn() {
         AppState.appendLog("[VPN-START ] Bot mode: native datapath -- peer slot at 127.0.0.1:${BotMode.BOT_PORT}, default underlay")
-        // Engine bridge, step one: find the game's own engine, pin exactly
-        // which build it is, and find out whether the loader will open it.
-        // Triggered here, at the moment bot mode starts, so a room is not
-        // needed to answer that question -- it runs in the background and
-        // puts its verdict in the log as [ENGINE-BRIDGE] lines.
-        EngineBridge.probeOnce(this)
         var lastNatStatLog = 0L
         var lastTunnelOut = -1L
         var lastTunnelIn = -1L

@@ -92,6 +92,7 @@ object PrimeClient {
     fun engineProbe(
         stageDir: String = DEFAULT_ENGINE_STAGE_DIR,
         noLoad: Boolean = false,
+        hashOnly: Boolean = false,
         timeoutMs: Int = 120_000,
     ): String? {
         val ctx = appContext ?: return null
@@ -105,6 +106,7 @@ object PrimeClient {
             append(" --out ")
             append(shellQuote(stageDir))
             if (noLoad) append(" --no-load")
+            if (hashOnly) append(" --hash-only")
         }
         val out = execute(cmd, timeoutMs)
         if (out != null) {

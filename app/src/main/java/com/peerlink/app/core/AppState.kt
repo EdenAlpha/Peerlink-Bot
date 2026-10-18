@@ -38,6 +38,23 @@ class PeerLinkApp : Application() {
         } catch (_: Throwable) {
         }
 
+        // Engine bridge, first step -- and the ONLY one that happens on its
+        // own. It finds the game's own engine and fingerprints it (size +
+        // SHA-256), which is what pins every address we hold to the build
+        // actually installed on this phone. It reads the file in 1 MB chunks
+        // and writes nothing, so it costs no meaningful memory and is safe
+        // even if it lands while a match is running.
+        //
+        // It is deliberately NOT triggered from the match path or from bot
+        // mode start. An earlier version did exactly that and ran a 161 MB
+        // copy plus a 161 MB library load during the handshake, which stopped
+        // the bot reaching match. The heavy half (actually loading the
+        // engine) now lives in EngineBridge.loadTest and is never automatic.
+        try {
+            com.peerlink.app.bot.EngineBridge.identifyOnce(this)
+        } catch (_: Throwable) {
+        }
+
         // NOTE: We intentionally do NOT auto-start LanLinkForegroundService or
         // request the battery-optimisation exemption from here. On Android 12+
         // (and especially 13/14) the system considers the app "in the
