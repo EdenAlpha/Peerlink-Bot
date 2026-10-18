@@ -511,9 +511,12 @@ int main(int argc, char **argv) {
     }
     say("LOAD_CHILD_PID=%d", static_cast<int>(pid));
     int status = 0;
-    // The engine's registration pass is heavy; give it room, but never forever.
+    // The engine's registration pass is heavy, but the caller is a shell
+    // command whose own cap is 120 s, and the staging above already spent
+    // part of it.  Cap the load well inside that: a hang must never be
+    // reported as silence.
     const int waited = [] (pid_t p, int *st) {
-        for (int i = 0; i < 600; ++i) {
+        for (int i = 0; i < 450; ++i) {
             const pid_t r = waitpid(p, st, WNOHANG);
             if (r == p) return 0;
             if (r < 0) return -1;

@@ -121,9 +121,6 @@ object PrimeClient {
         return out
     }
 
-    private fun shellQuote(value: String): String =
-        "'" + value.replace("'", "'\\''") + "'"
-
     /**
      * Where the helper keeps its copy of the engine.  Deliberately outside the
      * app sandbox: the helper runs as uid 2000, and /data/local/tmp is the one

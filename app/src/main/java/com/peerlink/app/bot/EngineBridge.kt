@@ -76,15 +76,26 @@ object EngineBridge {
 
     private fun log(line: String) = AppState.appendLog("[ENGINE-BRIDGE] $line")
 
+    /** One run of the helper. Never throws; an empty string means it did not run. */
+    private fun probe(): String = try {
+        PrimeClient.engineProbe() ?: ""
+    } catch (t: Throwable) {
+        log("probe threw ${t.javaClass.simpleName}: ${t.message}")
+        ""
+    }
+
     private fun runProbe() {
         log("looking for the game's engine")
-        val report = try {
-            PrimeClient.engineProbe()
-        } catch (t: Throwable) {
-            log("probe threw ${t.javaClass.simpleName}: ${t.message}")
-            null
+        var report = probe()
+        // A first pass can be cut short by the helper's own outer deadline
+        // (it hashes 161 MB and copies it before it gets to the load).  The
+        // copy it made survives, so a second pass is cheap and usually
+        // complete.  Only worth one retry.
+        if (!report.contains("RESULT=")) {
+            log("the first pass did not finish -- trying once more (its copy is reused)")
+            report = probe()
         }
-        if (report.isNullOrBlank()) {
+        if (report.isBlank()) {
             log("probe did not run -- the privileged helper is not up")
             return
         }
