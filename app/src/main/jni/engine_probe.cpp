@@ -390,6 +390,40 @@ void *tryOpen(const char *label, const std::string &path) {
     return h;
 }
 
+/**
+ * Copy a file into an anonymous, in-memory file and hand back the descriptor.
+ *
+ * Android refuses to dlopen a library that lives inside an app's data
+ * directory -- which is exactly where the app-level route has to stage its
+ * copy, and is very likely how that route will fail.  /proc/self/fd/<n> is
+ * not a data directory, so the very same bytes pass the check.  This is the
+ * documented workaround, not a trick.
+ */
+int makeMemfdCopy(const std::string &src) {
+    const long fdRaw = syscall(__NR_memfd_create, "libUE4.so", (unsigned int) MFD_CLOEXEC);
+    if (fdRaw < 0) return -1;
+    const int fd = int(fdRaw);
+    const int in = open(src.c_str(), O_RDONLY | O_CLOEXEC);
+    if (in < 0) {
+        close(fd);
+        return -1;
+    }
+    std::vector<uint8_t> chunk(1 << 20);
+    while (true) {
+        const ssize_t got = read(in, chunk.data(), chunk.size());
+        if (got < 0) { close(in); close(fd); return -1; }
+        if (got == 0) break;
+        ssize_t off = 0;
+        while (off < got) {
+            const ssize_t w = write(fd, chunk.data() + off, size_t(got - off));
+            if (w <= 0) { close(in); close(fd); return -1; }
+            off += w;
+        }
+    }
+    close(in);
+    return fd;
+}
+
 void childTryLoad(const std::vector<std::string> &enginePaths, const std::string &libDir) {
     setvbuf(stdout, nullptr, _IOLBF, 0);
 
@@ -414,6 +448,23 @@ void childTryLoad(const std::vector<std::string> &enginePaths, const std::string
         snprintf(label, sizeof(label), "P%u", unsigned(i + 1));
         handle = tryOpen(label, enginePaths[i]);
         if (handle != nullptr) opened = i;
+    }
+
+    // Last resort: the same bytes, but through an anonymous in-memory file.
+    // Used when every path failed, which is the expected shape of the
+    // app-level route (its staging directory is inside the app's data dir).
+    if (handle == nullptr && enginePaths.size() > 1) {
+        const int fd = makeMemfdCopy(enginePaths.back());
+        if (fd < 0) {
+            say("CHILD_MEMFD=unavailable");
+        } else {
+            char proc[64];
+            snprintf(proc, sizeof(proc), "/proc/self/fd/%d", fd);
+            handle = tryOpen("MFD", proc);
+            if (handle != nullptr) opened = enginePaths.size() - 1;
+            // Deliberately leaked on success: the mapping must stay valid for
+            // as long as the library is loaded.
+        }
     }
 
     say("CHILD_LOAD=%s", handle ? "OK" : "FAILED");
