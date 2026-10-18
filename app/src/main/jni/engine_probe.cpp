@@ -33,7 +33,6 @@
 #include <dlfcn.h>
 #include <elf.h>
 #include <fcntl.h>
-#include <glob.h>
 #include <signal.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
@@ -229,6 +228,48 @@ std::vector<std::string> packagePaths(const char *pkg) {
     return paths;
 }
 
+bool existsDir(const std::string &path) {
+    struct stat st {};
+    return stat(path.c_str(), &st) == 0 && S_ISDIR(st.st_mode);
+}
+
+std::vector<std::string> listDir(const std::string &path) {
+    std::vector<std::string> names;
+    DIR *d = opendir(path.c_str());
+    if (d == nullptr) return names;
+    while (struct dirent *e = readdir(d)) {
+        const char *n = e->d_name;
+        if (strcmp(n, ".") == 0 || strcmp(n, "..") == 0) continue;
+        names.push_back(n);
+    }
+    closedir(d);
+    return names;
+}
+
+/**
+ * Fallback for when `pm path` cannot be used: walk the install tree by hand.
+ *
+ * NOT glob(3) -- bionic does not provide it, which is exactly how the first
+ * build of this file failed.  The installed layout is
+ *   /data/app/~~<random>==/<package>-<random>==/lib/arm64/libUE4.so
+ * so the package directory is matched by name prefix and the library is then
+ * looked for at the fixed relative path beneath it.
+ */
+std::string scanInstallTree() {
+    const size_t prefixLen = strlen(kGamePackage);
+    for (const std::string &top : listDir("/data/app")) {
+        const std::string topPath = "/data/app/" + top;
+        if (!existsDir(topPath)) continue;
+        for (const std::string &pkgDir : listDir(topPath)) {
+            if (pkgDir.size() < prefixLen) continue;
+            if (pkgDir.compare(0, prefixLen, kGamePackage) != 0) continue;
+            const std::string libDir = topPath + "/" + pkgDir + "/lib/arm64";
+            if (fileExists(libDir + "/" + kEngineName)) return libDir;
+        }
+    }
+    return std::string();
+}
+
 std::string findLibDir() {
     // Preferred: derive from the package's own installed location.
     const std::vector<std::string> paths = packagePaths(kGamePackage);
@@ -238,20 +279,8 @@ std::string findLibDir() {
         const std::string candidate = dir + "/lib/arm64";
         if (fileExists(candidate + "/" + kEngineName)) return candidate;
     }
-    // Fallback: scan the app install tree.
-    glob_t g;
-    memset(&g, 0, sizeof(g));
-    if (glob("/data/app/*/*/lib/arm64/libUE4.so", 0, nullptr, &g) == 0) {
-        for (size_t i = 0; i < g.gl_pathc; ++i) {
-            const std::string dir = dirName(g.gl_pathv[i]);
-            if (!dir.empty()) {
-                globfree(&g);
-                return dir;
-            }
-        }
-    }
-    globfree(&g);
-    return std::string();
+    // Fallback: walk the install tree directly.
+    return scanInstallTree();
 }
 
 // ------------------------------------------------------------------- copying
