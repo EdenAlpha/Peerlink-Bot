@@ -40,6 +40,12 @@ object EngineHost {
     /** The engine's own punch (FUN_07eb9b40's dispatch). */
     const val PUNCH = 0x7db9b40L
 
+    /** One address block, as the engine's own builder writes it. */
+    const val BLOCK_SIZE = 0x80
+
+    /** The peer record, as the engine's SetPeers reads it. */
+    const val RECORD_SIZE = 0x218
+
     // ---- loading ---------------------------------------------------------
 
     /**
@@ -228,12 +234,4 @@ object EngineHost {
         port: Int,
     ): Long
     private external fun nativeRead(addr: Long, bytes: ByteArray)
-
-    companion object {
-        /** One address block, as the engine's own builder writes it. */
-        const val BLOCK_SIZE = 0x80
-
-        /** The peer record, as the engine's SetPeers reads it. */
-        const val RECORD_SIZE = 0x218
-    }
 }
