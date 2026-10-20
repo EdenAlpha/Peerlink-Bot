@@ -139,6 +139,31 @@ between the current bot and an engine-driven connect.
       +0x208  peer IPv6 NAT word
       +0x20c  the transport's peer id (the engine writes -1 itself)
 
+## 6. The app-side engine host
+
+The engine runs **in the bot app's own process**, so its packets travel the
+app's tunnel to the other phone and come back the same way.  The engine
+exports almost nothing, so the way in is the load base plus a fixed
+offset - the same trick the lab driver uses on the PC.
+
+`EngineHost` (Kotlin) and `engine_host.cpp` (native) provide that:
+
+    load(stagedEnginePath)      dlopen the engine, keep its base (dladdr)
+    start()                     the engine's own start: it makes the client
+                                and its own threads
+    setMyId(id)                 the engine stamps this on every frame
+    buildPeerRecord(...)        the peer's record, with the address blocks
+                                written by the ENGINE's own builder
+    setPeers(record)            the engine's own SetPeers
+    punch()                     the engine's own punch
+    check()                     the engine's own verdict on the exchange
+
+The order is the one the lab proved: start, id, peer record, punch - and
+from the punch on the engine's own threads carry the exchange.
+
+Because the engine is the one punching, the bot's fabricated answers
+(`PeerSlot`, `PeerBotEngine`) are not needed and are removed.
+
 ## 7. Where the evidence lives
 
     work/qemu/NOTES_engine_p2p_state.md      the lab findings, in order
