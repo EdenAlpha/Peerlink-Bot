@@ -167,7 +167,32 @@ from the punch on the engine's own threads carry the exchange.
 Because the engine is the one punching, the bot's fabricated answers
 (`PeerSlot`, `PeerBotEngine`) are not needed and are removed.
 
-## 7. Where the evidence lives
+## 7. The device test
+
+The last proof needs the phone. The app must be reachable from the phone's
+network: this PC is at 100.72.241.70 over Tailscale.
+
+1. Install the lean APK (the release build, arm64-v8a only) on both phones.
+2. Start bot mode on the phone that plays the opponent. The app logs, in
+   this order:
+   - `[ENGINE-BRIDGE] engine staged for the app: ...` - the helper put the
+     engine where the app can load it.
+   - `[ENGINE-HOST] engine loaded at 0x...` - the engine is in the app's
+     process, on the app's sockets and the app's tunnel.
+   - `[ENGINE-HOST] started, client=0x...` - the engine made its client and
+     its own threads.
+   - `[ENGINE-HOST] set my id <uid> -> 1` - the engine knows which player
+     it is.
+   - `[BOT-FLOW  ] engine got the peer: <uid> v4nat=... v6nat=... -> 1` -
+     the peer arrived in the engine's own record, with both families.
+3. Then the engine's own punch goes out and the two engines answer each
+   other. The check that matters is the engine's own verdict:
+   `EngineHost.check()` returning 1 (the transport's state 6).
+4. If the verdict stays 0, the log line that says why is the one to read:
+   the NAT words the peer declared (`v4nat`/`v6nat`), and whether the
+   engine had an IPv6 channel at all.
+
+## 8. Where the evidence lives
 
     work/qemu/NOTES_engine_p2p_state.md      the lab findings, in order
     work/qemu/byte_compare_verdict.txt       the byte-for-byte verdict
