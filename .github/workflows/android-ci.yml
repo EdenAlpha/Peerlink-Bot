@@ -45,6 +45,10 @@ jobs:
           cp app/build/outputs/apk/release/app-release.apk peerlink.apk
 
       - name: Upload the APK as a build artifact
+        # The repository's artifact storage is shared with older builds and
+        # can be full; the APK itself is what matters, and it is published
+        # as a release on main.
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: peerlink-apk
