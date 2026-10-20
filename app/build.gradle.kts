@@ -39,6 +39,11 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            // The shipped APK is this one: R8 and the resource shrinker take
+            // it from the debug build's 50 MB to the lean size.  It is signed
+            // with the same key the debug builds use, so the app installs
+            // and updates exactly as it always has.
+            signingConfig = signingConfigs.getByName("debug")
         }
         debug {
             isDebuggable = true
