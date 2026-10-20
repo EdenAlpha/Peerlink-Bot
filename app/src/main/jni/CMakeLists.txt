@@ -40,7 +40,8 @@ else ()
 endif ()
 
 add_library(peerlinkbackend SHARED
-        peerlink_backend.cpp)
+        peerlink_backend.cpp
+        engine_host.cpp)
 
 target_link_libraries(peerlinkbackend log android)
 
