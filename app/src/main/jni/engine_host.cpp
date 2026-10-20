@@ -14,7 +14,6 @@
 
 #include <jni.h>
 #include <dlfcn.h>
-#include <android/dlext.h>
 #include <android/log.h>
 #include <link.h>
 #include <cstdint>
@@ -49,13 +48,17 @@ Java_com_peerlink_app_bot_EngineHost_nativeLoad(JNIEnv *env, jobject,
     const char *p = env->GetStringUTFChars(path, nullptr);
     if (!p) return 0;
     // The engine's ad-library dependency sits beside it in the staged
-    // directory, so that directory is the dependency search path.
+    // directory.  Loading that first, by its absolute path, means the
+    // engine's own dependency resolves when it is loaded.
     std::string full(p);
     std::string dir = full;
     size_t slash = dir.find_last_of('/');
     if (slash != std::string::npos) dir = dir.substr(0, slash);
-    void *h = android_dlopen_ext(p, RTLD_NOW | RTLD_GLOBAL,
-                                  dir.empty() ? nullptr : dir.c_str());
+    if (!dir.empty()) {
+        std::string dep = dir + "/libgadsme.so";
+        dlopen(dep.c_str(), RTLD_NOW | RTLD_GLOBAL);
+    }
+    void *h = dlopen(p, RTLD_NOW | RTLD_GLOBAL);
     if (!h) {
         __android_log_print(ANDROID_LOG_ERROR, TAG, "dlopen failed: %s",
                             dlerror());
