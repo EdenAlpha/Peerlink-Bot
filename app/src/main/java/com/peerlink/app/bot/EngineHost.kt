@@ -243,23 +243,36 @@ object EngineHost {
     ): ByteArray? {
         if (base == 0L) return null
         val rec = ByteArray(RECORD_SIZE)
-        // +0x000: the peer's id, the engine's own uint32
-        rec[0] = (peerId and 0xFF).toByte()
-        rec[1] = ((peerId shr 8) and 0xFF).toByte()
-        rec[2] = ((peerId shr 16) and 0xFF).toByte()
-        rec[3] = ((peerId shr 24) and 0xFF).toByte()
-        // +0x004 / +0x084: the peer's IPv4 host and reflexive blocks
-        buildBlock(1, v4Host, v4HostPort)?.let { copyInto(rec, 0x004, it) }
-        buildBlock(1, v4Reflexive, v4ReflexivePort)?.let { copyInto(rec, 0x084, it) }
-        // +0x104: the peer's IPv4 NAT word
-        putLong(rec, 0x104, v4NatType)
-        // +0x108 / +0x188: the peer's IPv6 host and reflexive blocks
-        buildBlock(2, v6Host, v6HostPort)?.let { copyInto(rec, 0x108, it) }
-        buildBlock(2, v6Reflexive, v6ReflexivePort)?.let { copyInto(rec, 0x188, it) }
-        // +0x208: the peer's IPv6 NAT word
-        putLong(rec, 0x208, v6NatType)
-        // +0x20c: the transport's peer id -- the engine writes -1 itself
-        putLong(rec, 0x20C, -1L)
+        // The layout is the engine's own, measured in the lab: eight bytes of
+        // header, then the peer's id, then the four address blocks, then the
+        // two NAT words, then the transport's id (which the engine writes
+        // itself).
+        //
+        //   +0x000 header (8 bytes)
+        //   +0x008 peer id (uint32)
+        //   +0x00c peer IPv4 host block      (0x80)
+        //   +0x08c peer IPv4 reflexive block  (0x80)
+        //   +0x10c peer IPv4 NAT word
+        //   +0x110 peer IPv6 host block      (0x80)
+        //   +0x190 peer IPv6 reflexive block  (0x80)
+        //   +0x210 peer IPv6 NAT word
+        //   +0x214 the transport's peer id (the engine writes -1 itself)
+        rec[8] = (peerId and 0xFF).toByte()
+        rec[9] = ((peerId shr 8) and 0xFF).toByte()
+        rec[10] = ((peerId shr 16) and 0xFF).toByte()
+        rec[11] = ((peerId shr 24) and 0xFF).toByte()
+        // +0x00c / +0x08c: the peer's IPv4 host and reflexive blocks
+        buildBlock(1, v4Host, v4HostPort)?.let { copyInto(rec, 0x00C, it) }
+        buildBlock(1, v4Reflexive, v4ReflexivePort)?.let { copyInto(rec, 0x08C, it) }
+        // +0x10c: the peer's IPv4 NAT word
+        putLong(rec, 0x10C, v4NatType)
+        // +0x110 / +0x190: the peer's IPv6 host and reflexive blocks
+        buildBlock(2, v6Host, v6HostPort)?.let { copyInto(rec, 0x110, it) }
+        buildBlock(2, v6Reflexive, v6ReflexivePort)?.let { copyInto(rec, 0x190, it) }
+        // +0x210: the peer's IPv6 NAT word
+        putLong(rec, 0x210, v6NatType)
+        // +0x214: the transport's peer id -- the engine writes -1 itself
+        putLong(rec, 0x214, -1L)
         return rec
     }
 

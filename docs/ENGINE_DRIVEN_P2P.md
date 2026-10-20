@@ -128,16 +128,19 @@ between the current bot and an engine-driven connect.
   every frame (`client+0x8bc`).
 - The peer record goes in through the engine's own `SetPeers`
   (`0x7db96b4`), which copies the record field for field and writes the
-  peer's id from the record's first dword. The record is 0x218 bytes:
+  peer's id from the record. The record is 0x218 bytes, and its layout was
+  measured in the lab (the engine copies it from the record's own header
+  to the client's peer slot):
 
-      +0x000  peer id (uint32)
-      +0x004  peer IPv4 host block      (0x80)
-      +0x084  peer IPv4 reflexive block  (0x80)
-      +0x104  peer IPv4 NAT word
-      +0x108  peer IPv6 host block      (0x80)
-      +0x188  peer IPv6 reflexive block  (0x80)
-      +0x208  peer IPv6 NAT word
-      +0x20c  the transport's peer id (the engine writes -1 itself)
+      +0x000  header (8 bytes)
+      +0x008  peer id (uint32)
+      +0x00c  peer IPv4 host block      (0x80)
+      +0x08c  peer IPv4 reflexive block  (0x80)
+      +0x10c  peer IPv4 NAT word
+      +0x110  peer IPv6 host block      (0x80)
+      +0x190  peer IPv6 reflexive block  (0x80)
+      +0x210  peer IPv6 NAT word
+      +0x214  the transport's peer id (the engine writes -1 itself)
 
 ## 6. The app-side engine host
 
