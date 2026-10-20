@@ -130,6 +130,20 @@
 
 
 # ══════════════════════════════════════════════════════════
+# CONSCRYPT
+#
+# The conscrypt library that ships with Android references a class that
+# only exists on the platform, so R8 stops the release build with
+# "Missing class com.android.org.conscrypt.SSLParametersImpl".  The class
+# is never reached on a normal device; the warning is what has to be
+# silenced.
+# ══════════════════════════════════════════════════════════
+
+-dontwarn com.android.org.conscrypt.**
+-dontwarn org.conscrypt.**
+
+
+# ══════════════════════════════════════════════════════════
 # JETPACK COMPOSE
 # ══════════════════════════════════════════════════════════
 
