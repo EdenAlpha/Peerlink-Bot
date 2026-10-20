@@ -14,11 +14,13 @@
 
 #include <jni.h>
 #include <dlfcn.h>
+#include <android/dlext.h>
 #include <android/log.h>
 #include <link.h>
 #include <cstdint>
 #include <cstring>
 #include <cstdlib>
+#include <string>
 
 #define TAG "PeerlinkEngineHost"
 
@@ -46,7 +48,14 @@ Java_com_peerlink_app_bot_EngineHost_nativeLoad(JNIEnv *env, jobject,
     if (g_base) return (jlong) g_base;
     const char *p = env->GetStringUTFChars(path, nullptr);
     if (!p) return 0;
-    void *h = dlopen(p, RTLD_NOW | RTLD_GLOBAL);
+    // The engine's ad-library dependency sits beside it in the staged
+    // directory, so that directory is the dependency search path.
+    std::string full(p);
+    std::string dir = full;
+    size_t slash = dir.find_last_of('/');
+    if (slash != std::string::npos) dir = dir.substr(0, slash);
+    void *h = android_dlopen_ext(p, RTLD_NOW | RTLD_GLOBAL,
+                                  dir.empty() ? nullptr : dir.c_str());
     if (!h) {
         __android_log_print(ANDROID_LOG_ERROR, TAG, "dlopen failed: %s",
                             dlerror());

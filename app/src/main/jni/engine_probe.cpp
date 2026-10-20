@@ -564,7 +564,11 @@ int main(int argc, char **argv) {
     }
 
     // ---- take a copy the bot owns -----------------------------------------
-    mkdir(outDir.c_str(), 0700);
+    // The bot app loads this staged engine in its own process, so the
+    // directory and the file have to be readable by the app: readable and
+    // searchable, not writable.
+    mkdir(outDir.c_str(), 0755);
+    chmod(outDir.c_str(), 0755);
     say("STAGE_DIR=%s", outDir.c_str());
     const std::string staged = outDir + "/" + kEngineName;
     if (fileExists(staged) && fileSize(staged) == romSize) {
@@ -581,7 +585,11 @@ int main(int argc, char **argv) {
         } else {
             say("STAGE_GADSME=%s", copyFile(adRom, adStage) ? "copied" : "copy_failed");
         }
+        // The app loads the engine with this directory as its dependency
+        // search path, so the ad library beside it has to be readable too.
+        chmod(adStage.c_str(), 0644);
     }
+    chmod(staged.c_str(), 0644);
 
     if (!doLoad) {
         say("RESULT=stopped_before_load");
