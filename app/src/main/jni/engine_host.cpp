@@ -41,7 +41,7 @@ extern "C" {
  * @return the load base, or 0 when the engine could not be loaded
  */
 JNIEXPORT jlong JNICALL
-Java_com_peerlink_app_bot_EngineHost_nativeLoad(JNIEnv *env, jclass,
+Java_com_peerlink_app_bot_EngineHost_nativeLoad(JNIEnv *env, jobject,
                                                 jstring path) {
     if (g_base) return (jlong) g_base;
     const char *p = env->GetStringUTFChars(path, nullptr);
@@ -77,7 +77,7 @@ Java_com_peerlink_app_bot_EngineHost_nativeLoad(JNIEnv *env, jclass,
  * integer arguments, returning its result.
  */
 JNIEXPORT jlong JNICALL
-Java_com_peerlink_app_bot_EngineHost_nativeCall(JNIEnv *env, jclass,
+Java_com_peerlink_app_bot_EngineHost_nativeCall(JNIEnv *env, jobject,
                                                 jlong base, jlong offset,
                                                 jlong a0, jlong a1,
                                                 jlong a2) {
@@ -98,7 +98,7 @@ Java_com_peerlink_app_bot_EngineHost_nativeCall(JNIEnv *env, jclass,
 
 /** The engine's load base, or 0 when it is not loaded. */
 JNIEXPORT jlong JNICALL
-Java_com_peerlink_app_bot_EngineHost_nativeBase(JNIEnv *env, jclass) {
+Java_com_peerlink_app_bot_EngineHost_nativeBase(JNIEnv *env, jobject) {
     return (jlong) g_base;
 }
 
@@ -107,7 +107,7 @@ Java_com_peerlink_app_bot_EngineHost_nativeBase(JNIEnv *env, jclass) {
  * Plain app memory: the engine reads it and copies what it needs.
  */
 JNIEXPORT jlong JNICALL
-Java_com_peerlink_app_bot_EngineHost_nativeAlloc(JNIEnv *env, jclass,
+Java_com_peerlink_app_bot_EngineHost_nativeAlloc(JNIEnv *env, jobject,
                                                  jint size) {
     if (size <= 0) return 0;
     void *p = malloc((size_t) size);
@@ -117,7 +117,7 @@ Java_com_peerlink_app_bot_EngineHost_nativeAlloc(JNIEnv *env, jclass,
 
 /** Copy bytes into a buffer the engine will read. */
 JNIEXPORT void JNICALL
-Java_com_peerlink_app_bot_EngineHost_nativeWrite(JNIEnv *env, jclass,
+Java_com_peerlink_app_bot_EngineHost_nativeWrite(JNIEnv *env, jobject,
                                                  jlong addr,
                                                  jbyteArray bytes) {
     if (!addr || !bytes) return;
@@ -131,9 +131,46 @@ Java_com_peerlink_app_bot_EngineHost_nativeWrite(JNIEnv *env, jclass,
 
 /** Release a buffer made by nativeAlloc. */
 JNIEXPORT void JNICALL
-Java_com_peerlink_app_bot_EngineHost_nativeFree(JNIEnv *env, jclass,
+Java_com_peerlink_app_bot_EngineHost_nativeFree(JNIEnv *env, jobject,
                                                 jlong addr) {
     if (addr) free((void *) (uintptr_t) addr);
+}
+
+/**
+ * Build one address block with the ENGINE's own builder (0x7e04330):
+ * family, destination, address string, port.  The engine writes the
+ * 0x80-byte block, so the block the peer record carries is the engine's
+ * own shape, not a copy of it.
+ */
+JNIEXPORT jlong JNICALL
+Java_com_peerlink_app_bot_EngineHost_nativeBuildBlock(JNIEnv *env, jobject,
+                                                      jlong base,
+                                                      jlong dst,
+                                                      jint family,
+                                                      jstring address,
+                                                      jint port) {
+    if (!base || !dst) return 0;
+    const char *a = env->GetStringUTFChars(address, nullptr);
+    if (!a) return 0;
+    void *fn = (void *) (uintptr_t) ((uint64_t) base + 0x7e04330ULL);
+    typedef long (*Fn)(long, void *, const char *, long);
+    long r = ((Fn) fn)((long) family, (void *) (uintptr_t) dst, a, (long) port);
+    env->ReleaseStringUTFChars(address, a);
+    return (jlong) r;
+}
+
+/** Read bytes back out of a buffer the engine wrote. */
+JNIEXPORT void JNICALL
+Java_com_peerlink_app_bot_EngineHost_nativeRead(JNIEnv *env, jobject,
+                                                jlong addr,
+                                                jbyteArray bytes) {
+    if (!addr || !bytes) return;
+    jsize n = env->GetArrayLength(bytes);
+    if (n <= 0) return;
+    jbyte *b = env->GetByteArrayElements(bytes, nullptr);
+    if (!b) return;
+    memcpy(b, (void *) (uintptr_t) addr, (size_t) n);
+    env->ReleaseByteArrayElements(bytes, b, 0);
 }
 
 }  // extern "C"

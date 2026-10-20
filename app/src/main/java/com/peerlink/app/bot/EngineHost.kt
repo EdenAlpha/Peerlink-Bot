@@ -133,12 +133,82 @@ object EngineHost {
     /** The engine's own verdict on the exchange: 1 = connected. */
     fun check(): Long = call(CLIENT_CHECK, 0L, 0L, 0L)
 
+    /**
+     * One address block, built by the ENGINE's own builder (0x7e04330) so
+     * the block in the peer record is the engine's own shape and not a copy
+     * of it.  0x80 bytes.
+     */
+    fun buildBlock(family: Int, address: String, port: Int): ByteArray? {
+        if (base == 0L) return null
+        val p = nativeAlloc(BLOCK_SIZE)
+        if (p == 0L) return null
+        try {
+            val r = nativeBuildBlock(base, p, family, address, port)
+            if (r == 0L) return null
+            val out = ByteArray(BLOCK_SIZE)
+            nativeRead(p, out)
+            return out
+        } finally {
+            nativeFree(p)
+        }
+    }
+
+    /**
+     * The peer's record, in the engine's own layout, ready for SetPeers.
+     *
+     * The four address blocks are built by the engine's own builder; the
+     * two NAT words are the server's own, with bit 4 set so the engine
+     * treats the peer as punchable on both families (the capture's own
+     * open-NAT value is 0x102000b3).
+     */
+    fun buildPeerRecord(
+        peerId: Long,
+        v4Host: String,
+        v4HostPort: Int,
+        v4Reflexive: String,
+        v4ReflexivePort: Int,
+        v4NatType: Long,
+        v6Host: String,
+        v6HostPort: Int,
+        v6Reflexive: String,
+        v6ReflexivePort: Int,
+        v6NatType: Long,
+    ): ByteArray? {
+        if (base == 0L) return null
+        val rec = ByteArray(RECORD_SIZE)
+        // +0x000: the peer's id, the engine's own uint32
+        rec[0] = (peerId and 0xFF).toByte()
+        rec[1] = ((peerId shr 8) and 0xFF).toByte()
+        rec[2] = ((peerId shr 16) and 0xFF).toByte()
+        rec[3] = ((peerId shr 24) and 0xFF).toByte()
+        // +0x004 / +0x084: the peer's IPv4 host and reflexive blocks
+        buildBlock(1, v4Host, v4HostPort)?.let { copyInto(rec, 0x004, it) }
+        buildBlock(1, v4Reflexive, v4ReflexivePort)?.let { copyInto(rec, 0x084, it) }
+        // +0x104: the peer's IPv4 NAT word
+        putLong(rec, 0x104, v4NatType)
+        // +0x108 / +0x188: the peer's IPv6 host and reflexive blocks
+        buildBlock(2, v6Host, v6HostPort)?.let { copyInto(rec, 0x108, it) }
+        buildBlock(2, v6Reflexive, v6ReflexivePort)?.let { copyInto(rec, 0x188, it) }
+        // +0x208: the peer's IPv6 NAT word
+        putLong(rec, 0x208, v6NatType)
+        // +0x20c: the transport's peer id -- the engine writes -1 itself
+        putLong(rec, 0x20C, -1L)
+        return rec
+    }
+
+    private fun copyInto(dst: ByteArray, at: Int, src: ByteArray) {
+        val n = minOf(src.size, dst.size - at)
+        System.arraycopy(src, 0, dst, at, n)
+    }
+
+    private fun putLong(dst: ByteArray, at: Int, v: Long) {
+        for (i in 0 until 8) {
+            dst[at + i] = ((v shr (8 * i)) and 0xFF).toByte()
+        }
+    }
+
     // ---- native -----------------------------------------------------------
-
-    @JvmStatic
     private external fun nativeLoad(path: String): Long
-
-    @JvmStatic
     private external fun nativeCall(
         base: Long,
         offset: Long,
@@ -146,16 +216,24 @@ object EngineHost {
         a1: Long,
         a2: Long,
     ): Long
-
-    @JvmStatic
     private external fun nativeBase(): Long
-
-    @JvmStatic
     private external fun nativeAlloc(size: Int): Long
-
-    @JvmStatic
     private external fun nativeWrite(addr: Long, bytes: ByteArray)
-
-    @JvmStatic
     private external fun nativeFree(addr: Long)
+    private external fun nativeBuildBlock(
+        base: Long,
+        dst: Long,
+        family: Int,
+        address: String,
+        port: Int,
+    ): Long
+    private external fun nativeRead(addr: Long, bytes: ByteArray)
+
+    companion object {
+        /** One address block, as the engine's own builder writes it. */
+        const val BLOCK_SIZE = 0x80
+
+        /** The peer record, as the engine's SetPeers reads it. */
+        const val RECORD_SIZE = 0x218
+    }
 }
