@@ -173,6 +173,33 @@ object EngineHost {
     /** The engine's own verdict on the exchange: 1 = connected. */
     fun check(): Long = call(CLIENT_CHECK, 0L, 0L, 0L)
 
+    /** The engine's own punch: from here the engine drives the exchange. */
+    fun punch(): Long = call(PUNCH, 0L, 0L, 0L)
+
+    /** The engine's own step, for the times the app wants to move it on. */
+    fun step(client: Long): Long = call(CLIENT_STEP, client, 0L, 0L)
+
+    /**
+     * Load the engine, start it, and tell it which player it is.
+     *
+     * The engine is loaded in this process, so it uses this app's sockets and
+     * this app's tunnel; its own threads then carry the exchange.  The load
+     * is heavy (the engine is 161 MB and registers ~11,900 functions), so it
+     * belongs to a moment when the phone is idle -- before a match, not
+     * during one.
+     */
+    fun prepare(ctx: android.content.Context, uid: Long): Boolean {
+        val staged = java.io.File(ctx.filesDir, "engine/libUE4.so")
+        if (!staged.exists()) {
+            AppState.appendLog("[ENGINE-HOST] no staged engine at " +
+                "${staged.absolutePath}")
+            return false
+        }
+        if (!load(staged.absolutePath)) return false
+        if (start() == 0L) return false
+        return setMyId(uid)
+    }
+
     /**
      * One address block, built by the ENGINE's own builder (0x7e04330) so
      * the block in the peer record is the engine's own shape and not a copy

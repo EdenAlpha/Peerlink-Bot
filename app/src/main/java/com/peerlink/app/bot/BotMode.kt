@@ -135,6 +135,21 @@ object BotMode {
             .putLong("uid", uid)
             .apply()
         startBeats(uid)
+        // The engine, when it is driving the exchange, is loaded in this
+        // process: it gets this app's sockets and this app's tunnel, and
+        // its own threads carry the punch.  The load is heavy, so it happens
+        // here -- when the bot mode starts, not in the middle of a match.
+        Thread({
+            try {
+                EngineBridge.stageEngine(ctx)
+                if (EngineHost.prepare(ctx, uid)) {
+                    AppState.appendLog("[BOT-MODE  ] the engine is driving " +
+                        "the exchange from now on")
+                }
+            } catch (t: Throwable) {
+                AppState.appendLog("[BOT-MODE  ] engine not loaded: $t")
+            }
+        }, "engine-host-load").apply { isDaemon = true }.start()
     }
 
     /**

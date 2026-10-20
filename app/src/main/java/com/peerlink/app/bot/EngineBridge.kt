@@ -109,6 +109,38 @@ object EngineBridge {
 
     private fun log(line: String) = AppState.appendLog("[ENGINE-BRIDGE] $line")
 
+    /**
+     * Where the engine is staged so that THIS app can load it.
+     *
+     * The privileged helper does the copying (it can read the game's
+     * library), but the engine has to end up where the app can dlopen it:
+     * the app's own files directory.  The helper writes there as root, the
+     * app reads it back, and the staged files are readable and not
+     * writable.
+     */
+    fun stageDir(context: Context): String =
+        java.io.File(context.filesDir, "engine").absolutePath
+
+    /**
+     * Have the privileged helper stage the engine where this app can load
+     * it.  The helper can read the game's library; the app cannot.
+     */
+    fun stageEngine(context: Context): Boolean {
+        if (!PrimeClient.isAlive(timeoutMs = 800)) {
+            log("the privileged helper is not running -- the engine stays unstaged")
+            return false
+        }
+        val r = probeViaHelper(
+            hashOnly = false,
+            timeoutMs = 110_000,
+            stageDir = stageDir(context),
+        )
+        helperReport = r
+        if (r.isNotBlank()) absorb(r)
+        log("engine staged for the app: ${stageDir(context)}")
+        return true
+    }
+
     private fun identify() {
         val context = appContext ?: return
         log("looking for the game's engine")
@@ -169,7 +201,7 @@ object EngineBridge {
             val viaHelper = probeViaHelper(
                 hashOnly = false,
                 timeoutMs = 110_000,
-                stageDir = PrimeClient.DEFAULT_ENGINE_STAGE_DIR,
+                stageDir = stageDir(context),
             )
             helperReport = viaHelper
             if (viaHelper.isNotBlank()) {
