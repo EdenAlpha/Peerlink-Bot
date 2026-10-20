@@ -1,5 +1,7 @@
 package com.peerlink.app.bot
 
+import com.peerlink.app.core.AppState
+
 /**
  * The full match ladder -- the Kotlin port of the bundle's `chain3.py` live
  * sequence, reconstructed from the ground-truth record. The CLI proved this
@@ -470,6 +472,47 @@ class BotMatchFlow(
             if (uid != selfU) return m
         }
         return null
+    }
+
+    /**
+     * Hand the engine the opponent, in the engine's own record layout.
+     *
+     * The session reply carries the opponent's address blocks for BOTH
+     * families and their NAT types, which is exactly what the engine's peer
+     * record is made of.  The blocks are written by the engine's own
+     * builder, so the record is the engine's own shape and not a copy.
+     *
+     * Both NAT words must say the peer is punchable.  The engine's
+     * transport adds the peer to the IPv4 channel AND the IPv6 channel and
+     * keeps the peer's id only when both succeed; without the IPv6 half
+     * the id is thrown away and the connect stops at the punch.
+     */
+    fun handPeerToEngine(entry: Map<*, *>, peerId: Long): Boolean {
+        if (EngineHost.base == 0L) return false
+        val a4 = entry["address_ipv4"] as? Map<*, *> ?: return false
+        val a6 = entry["address_ipv6"] as? Map<*, *>
+        fun s(m: Map<*, *>?, k: String): String =
+            (m?.get(k) as? String).orEmpty()
+        fun p(m: Map<*, *>?, k: String): Int =
+            (m?.get(k) as? Number)?.toInt() ?: 0
+        fun n(m: Map<*, *>?, k: String): Long =
+            (m?.get(k) as? Number)?.toLong() ?: 0L
+
+        val v4Nat = n(a4, "nat_type")
+        val v6Nat = n(a6, "nat_type")
+        val rec = EngineHost.buildPeerRecord(
+            peerId = peerId,
+            v4Host = s(a4, "host_address"), v4HostPort = p(a4, "host_port"),
+            v4Reflexive = s(a4, "reflexive_address"),
+            v4ReflexivePort = p(a4, "reflexive_port"), v4NatType = v4Nat,
+            v6Host = s(a6, "host_address"), v6HostPort = p(a6, "host_port"),
+            v6Reflexive = s(a6, "reflexive_address"),
+            v6ReflexivePort = p(a6, "reflexive_port"), v6NatType = v6Nat,
+        ) ?: return false
+        val ok = EngineHost.setPeers(rec)
+        AppState.appendLog("[BOT-FLOW  ] engine got the peer: $peerId " +
+            "v4nat=$v4Nat v6nat=$v6Nat -> $ok")
+        return ok
     }
 
     /** CMD_GET_GAME_ID -- builder form first, then the server-side fallbacks. */

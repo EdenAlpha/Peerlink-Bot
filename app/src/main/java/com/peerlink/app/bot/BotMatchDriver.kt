@@ -251,6 +251,15 @@ object BotMatchDriver {
                 "declared=$reflIp:$reflPort")
             PeerSlot.arm(opp, gate.uid, "$reflIp:$reflPort", localIp, localPort)
 
+            // -- the engine, when it is loaded and driving the exchange,
+            //    gets the opponent in the engine's own record.  Everything
+            //    the engine needs for both families comes from this same
+            //    session reply; the bot does not answer the engine's P2P
+            //    frames at all.
+            if (EngineHost.base != 0L) {
+                flow.handPeerToEngine(oppBlock!!, opp)
+            }
+
             // -- check-res echo (capture block 105 body); retried on noise,
             //    otherwise logged and carried on (the game sends its own).
             var chkDone = false
