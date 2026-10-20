@@ -37,6 +37,27 @@ class BotMatchFlow(
             "reflexive_address" to "::", "reflexive_port" to 0, "nat_type" to 0,
         )
 
+        /**
+         * The IPv6 block the engine is given.
+         *
+         * The capture's block was inert because that session was IPv4-only.
+         * The engine reads the block and, with no IPv6 for the peer, has no
+         * IPv6 channel -- and the transport's add-peer only keeps a peer's id
+         * when the IPv4 add and the IPv6 add both succeed, so the engine
+         * throws the id away and stops at the punch (docs/ENGINE_DRIVEN_P2P.md).
+         * So the real block goes out whenever this device has a real IPv6.
+         */
+        fun net6Block(nat6: KgsGate.NatProfile?): LinkedHashMap<String, Any?> {
+            if (nat6 == null || nat6.hostAddress.isBlank() || nat6.reflexiveAddress.isBlank()) {
+                return NET6
+            }
+            return linkedMapOf(
+                "host_address" to nat6.hostAddress, "host_port" to nat6.hostPort,
+                "reflexive_address" to nat6.reflexiveAddress,
+                "reflexive_port" to nat6.reflexivePort, "nat_type" to nat6.natType,
+            )
+        }
+
         /** Capture phase->match-clock (blocks 114-125); monotonic, verbatim. */
         val PHASE_GT = linkedMapOf(
             "1ST_15MIN" to 2921, "1ST_30MIN" to 5264, "BREAK1" to 9098,
@@ -218,7 +239,7 @@ class BotMatchFlow(
     }
 
     /** CMD_JOIN_ROOM (room2.join_body verbatim; probe sets mode CUSTOM). */
-    fun joinRoom(g: KgsGate, rid: Long, nat4: KgsGate.NatProfile) =
+    fun joinRoom(g: KgsGate, rid: Long, nat4: KgsGate.NatProfile, nat6: KgsGate.NatProfile? = null) =
         g.step("CMD_JOIN_ROOM", linkedMapOf(
             "mode" to "CUSTOM",
             "room_id" to linkedMapOf("id" to rid),
@@ -227,7 +248,7 @@ class BotMatchFlow(
                 "host_address" to nat4.hostAddress, "host_port" to nat4.hostPort,
                 "reflexive_address" to nat4.reflexiveAddress,
                 "reflexive_port" to nat4.reflexivePort, "nat_type" to nat4.natType),
-            "address_ipv6" to NET6,
+            "address_ipv6" to net6Block(nat6),
             "platform_session_id_info" to linkedMapOf(
                 "ps_session_id" to "", "xb_session_id" to ""),
             "event_account_type" to "GAME_PLAYER",
@@ -238,7 +259,12 @@ class BotMatchFlow(
         ))
 
     /** The full join ladder; returns final seat count (2 = both seated). */
-    fun runJoinLadder(rid: Long, ownerNat: KgsGate.NatProfile, botNat: KgsGate.NatProfile): Long {
+    fun runJoinLadder(
+        rid: Long,
+        ownerNat: KgsGate.NatProfile,
+        botNat: KgsGate.NatProfile,
+        botNat6: KgsGate.NatProfile? = null,
+    ): Long {
         sendJoinRoomRequest(bot, 0L, rid)
         pace()
         val n1 = seatedCount(owner, rid)
@@ -251,7 +277,7 @@ class BotMatchFlow(
         pace()
         getRequestedJoinRoomInfo(owner, bot.uid)
         pace()
-        joinRoom(bot, rid, botNat)
+        joinRoom(bot, rid, botNat, botNat6)
         pace()
         val n2 = seatedCount(owner, rid)
         pace()
@@ -300,7 +326,7 @@ class BotMatchFlow(
      * NOERR: is_single_matching "NO", gamerelay_measure_result "COMPLETE"
      * -- "MEASUREING" was a server-reached state we declared too early.
      */
-    fun matchReady(g: KgsGate, rid: Long, nat4: KgsGate.NatProfile) =
+    fun matchReady(g: KgsGate, rid: Long, nat4: KgsGate.NatProfile, nat6: KgsGate.NatProfile? = null) =
         g.step("CMD_SET_ROOM_MATCH_READY", linkedMapOf(
             "room_id" to linkedMapOf("id" to rid),
             "is_single_matching" to "NO",
@@ -310,7 +336,7 @@ class BotMatchFlow(
                 "reflexive_address" to nat4.reflexiveAddress,
                 "reflexive_port" to nat4.reflexivePort,
                 "nat_type" to nat4.natType),
-            "address_ipv6" to NET6,
+            "address_ipv6" to net6Block(nat6),
         ))
 
     /**
