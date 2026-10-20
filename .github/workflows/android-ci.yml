@@ -44,6 +44,13 @@ jobs:
           ls -lh app/build/outputs/apk/release/app-release.apk
           cp app/build/outputs/apk/release/app-release.apk peerlink.apk
 
+      - name: Upload the APK as a build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: peerlink-apk
+          path: peerlink.apk
+          retention-days: 14
+
       - name: Publish APK to GitHub Releases
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         env:
