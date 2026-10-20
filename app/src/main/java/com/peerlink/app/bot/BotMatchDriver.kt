@@ -173,8 +173,7 @@ object BotMatchDriver {
             while (running && !go) {
                 val now = System.currentTimeMillis()
                 if (firstReady || now >= nextReadyAt) {
-                    val mr = flow.matchReady(
-                        gate, rid, BotMode.declaredProfile(), BotMode.declaredProfile6())
+                    val mr = flow.matchReady(gate, rid, BotMode.declaredProfile())
                     val r = mr["result"]?.toString()
                     firstReady = false
                     nextReadyAt = now + READY_REASSERT_MS

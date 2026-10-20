@@ -75,46 +75,6 @@ object BotMode {
         private set
 
     /**
-     * This phone's global IPv6, when it has one.
-     *
-     * The engine publishes a local address per address family, and the
-     * transport's add-peer keeps a peer's id only when the IPv4 add and the
-     * IPv6 add both succeed.  An engine with no IPv6 address has no IPv6
-     * channel, throws the peer's id away and stops at the punch -- so the
-     * bot has to declare the real IPv6 half, not an inert one
-     * (see docs/ENGINE_DRIVEN_P2P.md).
-     */
-    @Volatile
-    var hostIp6: String = ""
-        private set
-
-    /**
-     * The IPv6 mapping the game's NAT service measured for our own socket
-     * (T7's MAPPED-ADDRESS over IPv6).  Null when the device has no usable
-     * IPv6, in which case the engine cannot have an IPv6 channel either.
-     */
-    @Volatile
-    var mapped6: java.net.InetSocketAddress? = null
-        private set
-
-    /**
-     * The IPv6 half of what the bot declares at the gate: this phone's own
-     * global IPv6 as the host half, and the mapping the NAT service
-     * measured as the reflexive half.  The same measure-then-advertise rule
-     * the IPv4 half follows.
-     */
-    fun declaredProfile6(): KgsGate.NatProfile {
-        val m = mapped6
-        return KgsGate.NatProfile(
-            hostAddress = hostIp6,
-            hostPort = m?.port ?: BOT_PORT,
-            reflexiveAddress = m?.address?.hostAddress ?: "",
-            reflexivePort = m?.port ?: BOT_PORT,
-            natType = KgsGate.NatProfile.NAT_P2P_A,
-        )
-    }
-
-    /**
      * Put the fixed fabricated pair in place. Called on every room create --
      * also re-asserts the values if anything overwrote them since (say, a
      * stale peer-mode calculation at VPN start).
@@ -128,7 +88,6 @@ object BotMode {
     fun ensureStarted(ctx: Context, uid: Long) {
         ensurePair()
         hostIp = resolveHostIp(ctx)
-        hostIp6 = resolveHostIp6(ctx)
         active = true
         ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .putBoolean("active", true)
@@ -174,25 +133,6 @@ object BotMode {
         val k = T7Keepalive(listOf(uid.toString()), BOT_LOCAL_PORT)
         k.start()
         keepalive = k
-        // The IPv6 mapping arrives a moment later, from the same beating
-        // socket's first IPv6 exchange; the declarations pick it up from
-        // here.
-        Thread({
-            var waited = 0
-            while (waited < 8_000) {
-                val m6 = k.lastMapped6
-                if (m6 != null) {
-                    mapped6 = m6
-                    AppState.appendLog("[BOT-MODE  ] IPv6 mapping " +
-                        "${m6.address?.hostAddress}:${m6.port}")
-                    return@Thread
-                }
-                Thread.sleep(250)
-                waited += 250
-            }
-            AppState.appendLog("[BOT-MODE  ] no IPv6 mapping measured; " +
-                "the engine will have no IPv6 channel")
-        }, "bot-ipv6-mapping").apply { isDaemon = true }.start()
     }
 
     /** The profile the bot declares at the gate: a TRANSLATED endpoint --
@@ -235,22 +175,6 @@ object BotMode {
      * addresses are skipped: the engine needs a routable one, and the NAT
      * service can only report a mapping for an address it can see.
      */
-    private fun resolveHostIp6(ctx: Context): String = runCatching {
-        val ifaces = java.net.NetworkInterface.getNetworkInterfaces()
-        var best = ""
-        while (ifaces != null && ifaces.hasMoreElements()) {
-            val n = ifaces.nextElement()
-            if (n.isLoopback || !n.isUp) continue
-            for (a in n.inetAddresses) {
-                if (a !is java.net.Inet6Address) continue
-                if (a.isLinkLocalAddress || a.isLoopbackAddress || a.isSiteLocalAddress) continue
-                val h = a.hostAddress?.substringBefore('%') ?: continue
-                if (h.isNotEmpty() && best.isEmpty()) best = h
-            }
-        }
-        best
-    }.getOrNull().orEmpty()
-
     fun stop() {
         keepalive?.stop()
         keepalive = null

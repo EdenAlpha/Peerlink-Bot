@@ -62,10 +62,10 @@ to the next step.
 
 ## 3. What the engine needs, precisely
 
-1. **A peer record that says both families are usable.** The record's IPv4
-   and IPv6 NAT words must have bit 4 set (the capture's own open-NAT value
-   is `0x102000b3` for both). The engine's own code then adds the peer's
-   candidate addresses on both families (`FUN_07f00934`).
+1. **A peer record that says the peer is punchable over IPv4.** The
+   record's IPv4 NAT word must have bit 4 set (the capture's own open-NAT
+   value is `0x102000b3`). The engine's own code then adds the peer's IPv4
+   candidate addresses (`FUN_07f00934`).
 
 2. **A channel per family.** A channel for a family exists only once the
    engine has a local address for that family AND its own NAT traversal for
@@ -97,11 +97,14 @@ to the next step.
   `ntl_address_list` (the server distributes both sides' blocks), and the
   bot's own blocks are the ones it declares in `CMD_JOIN_ROOM` and
   `CMD_SET_ROOM_MATCH_READY`.
-- The bot hands the engine what STUN would have told it: the local address,
-  port and NAT type for **both** families. The bot already measures the
-  IPv4 mapping (`T7Keepalive`, the T7 beat and its MAPPED-ADDRESS); the
-  IPv6 half is the same measurement over an IPv6 socket, and the phone has
-  IPv6.
+- The engine's own IPv6 channel is the engine's own business: it comes
+  from the engine's own IPv6 traversal on this phone (the phone has IPv6,
+  and the game's NAT service answers over IPv6). The peer record's IPv6
+  block stays exactly as the capture has it -- "::", port 0, NAT type 0 --
+  because that is what the real game declares, and an inert peer IPv6
+  block means the engine never tries to punch the peer over IPv6: the
+  peer-to-peer traffic stays on the tunnel's IPv4 path, exactly as in the
+  capture.
 - The engine is fed its own id, team and squad so the bot's squad plays and
   the real eFootball on the same phone is the opponent.
 
@@ -183,13 +186,13 @@ network: this PC is at 100.72.241.70 over Tailscale.
      its own threads.
    - `[ENGINE-HOST] set my id <uid> -> 1` - the engine knows which player
      it is.
-   - `[BOT-FLOW  ] engine got the peer: <uid> v4nat=... v6nat=... -> 1` -
-     the peer arrived in the engine's own record, with both families.
+   - `[BOT-FLOW  ] engine got the peer: <uid> v4nat=... -> 1` -
+     the peer arrived in the engine's own record.
 3. Then the engine's own punch goes out and the two engines answer each
    other. The check that matters is the engine's own verdict:
    `EngineHost.check()` returning 1 (the transport's state 6).
 4. If the verdict stays 0, the log line that says why is the one to read:
-   the NAT words the peer declared (`v4nat`/`v6nat`), and whether the
+   the NAT word the peer declared (`v4nat`), and whether the
    engine had an IPv6 channel at all.
 
 ## 8. Where the evidence lives
