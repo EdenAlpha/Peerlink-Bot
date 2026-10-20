@@ -80,7 +80,7 @@ JNIEXPORT jlong JNICALL
 Java_com_peerlink_app_bot_EngineHost_nativeCall(JNIEnv *env, jobject,
                                                 jlong base, jlong offset,
                                                 jlong a0, jlong a1,
-                                                jlong a2) {
+                                                jlong a2, jlong a3) {
     if (!base) return 0;
     uint64_t off = (uint64_t) offset;
     if (off >= ENGINE_BUILD_B_SIZE) {
@@ -90,9 +90,9 @@ Java_com_peerlink_app_bot_EngineHost_nativeCall(JNIEnv *env, jobject,
         return 0;
     }
     void *fn = (void *) (uintptr_t) ((uint64_t) base + off);
-    typedef long (*Fn3)(long, long, long);
-    Fn3 f = (Fn3) fn;
-    long r = f((long) a0, (long) a1, (long) a2);
+    typedef long (*Fn4)(long, long, long, long);
+    Fn4 f = (Fn4) fn;
+    long r = f((long) a0, (long) a1, (long) a2, (long) a3);
     return (jlong) r;
 }
 

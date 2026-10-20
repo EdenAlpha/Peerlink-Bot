@@ -25,6 +25,15 @@ object EngineHost {
 
     // ---- the engine's own entry points, by offset from the load base ----
 
+    /** The engine's own start: it creates the client and its threads. */
+    const val START = 0x7db9294L
+
+    /** The client the start produced. */
+    const val CLIENT_GET = 0x7e02524L
+
+    /** The client's own first setter (the lab passes the client, 1, 0, 0). */
+    const val CLIENT_SET = 0x7e02878L
+
     /** The client that owns the P2P session (FUN_07eb9730's dispatch). */
     const val SET_MY_ID = 0x7db9730L
 
@@ -73,16 +82,41 @@ object EngineHost {
 
     /**
      * Call one of the engine's own functions: base + [offset], with up to
-     * three integer arguments.
+     * four integer arguments.
      */
-    fun call(offset: Long, a0: Long = 0L, a1: Long = 0L, a2: Long = 0L): Long {
+    fun call(
+        offset: Long,
+        a0: Long = 0L,
+        a1: Long = 0L,
+        a2: Long = 0L,
+        a3: Long = 0L,
+    ): Long {
         if (base == 0L) return 0L
         return try {
-            nativeCall(base, offset, a0, a1, a2)
+            nativeCall(base, offset, a0, a1, a2, a3)
         } catch (t: Throwable) {
             AppState.appendLog("[ENGINE-HOST] call 0x$offset failed: $t")
             0L
         }
+    }
+
+    /**
+     * The engine's own start, in the order the lab proved works: the start
+     * call, the client getter, the client's own first setter.  The engine
+     * creates its client and its own threads here; from this point on the
+     * engine drives the exchange by itself.
+     */
+    fun start(): Long {
+        if (base == 0L) return 0L
+        call(START, 0L, 0L, 0L)
+        val client = call(CLIENT_GET, 0L, 0L, 0L)
+        if (client == 0L) {
+            AppState.appendLog("[ENGINE-HOST] the engine made no client")
+            return 0L
+        }
+        call(CLIENT_SET, client, 1L, 0L, 0L)
+        AppState.appendLog("[ENGINE-HOST] started, client=0x$client")
+        return client
     }
 
     /**
@@ -221,6 +255,7 @@ object EngineHost {
         a0: Long,
         a1: Long,
         a2: Long,
+        a3: Long,
     ): Long
     private external fun nativeBase(): Long
     private external fun nativeAlloc(size: Int): Long
