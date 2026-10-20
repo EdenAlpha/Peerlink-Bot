@@ -130,6 +130,21 @@
 
 
 # ══════════════════════════════════════════════════════════
+# CLASSES WITH NATIVE METHODS
+#
+# A native method is found by the class name and the method name, so
+# both have to survive the shrinker.  With -repackageclasses '' and
+# -flattenpackagehierarchy '' above, a class that is not kept here is
+# moved to the default package under a single-letter name, and the JNI
+# lookup for it fails at runtime with UnsatisfiedLinkError -- the tunnel
+# and the engine host would both be dead in the release build.
+# ══════════════════════════════════════════════════════════
+
+-keep class com.peerlink.app.tunnel.NativePeerLinkBackend { *; }
+-keep class com.peerlink.app.bot.EngineHost { *; }
+
+
+# ══════════════════════════════════════════════════════════
 # CONSCRYPT
 #
 # The conscrypt library that ships with Android references a class that
