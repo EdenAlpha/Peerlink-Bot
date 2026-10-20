@@ -179,7 +179,6 @@ object BotMode {
                 "the engine will have no IPv6 channel")
         }, "bot-ipv6-mapping").apply { isDaemon = true }.start()
     }
-    }
 
     /** The profile the bot declares at the gate: a TRANSLATED endpoint --
      * host = this phone's real LAN IP, reflexive = the fabricated peer
