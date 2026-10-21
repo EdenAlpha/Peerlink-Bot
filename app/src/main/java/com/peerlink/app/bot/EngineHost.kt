@@ -18,6 +18,20 @@ import com.peerlink.app.core.AppState
  */
 object EngineHost {
 
+    init {
+        // The native half of this object lives in libpeerlinkbackend.so.  At
+        // VPN session start the engine was asked for before that library was
+        // in, and the first call died with UnsatisfiedLinkError ("No
+        // implementation found ... is the library loaded?").  Loading it here
+        // means whoever asks first still gets through; System.loadLibrary is
+        // a no-op once the library is already in, so this costs nothing.
+        try {
+            System.loadLibrary("peerlinkbackend")
+        } catch (t: Throwable) {
+            AppState.appendLog("[ENGINE-HOST] the JNI library did not load: $t")
+        }
+    }
+
     /** The engine's load base, 0 when it is not loaded. */
     @Volatile
     var base: Long = 0L

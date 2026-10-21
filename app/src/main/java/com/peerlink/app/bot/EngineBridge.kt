@@ -212,8 +212,35 @@ object EngineBridge {
             log("the bot's id is not known yet -- the engine waits")
             return false
         }
-        val up = EngineHost.prepare(context, uid)
+        val up = prepareWithRetries(context, uid)
         log(if (up) "the engine is up for this session" else "the engine did NOT come up this session")
+        return up
+    }
+
+    /**
+     * The engine's load, tried more than once.
+     *
+     * The session starts the engine within a second of the tunnel coming up,
+     * and the app's own native library is loaded as part of that same start --
+     * so the first ask can land a moment too early (that is what the phone's
+     * log showed: "No implementation found ... is the library loaded?").
+     * Three tries, five seconds apart, covers the first seconds of a session
+     * without holding anything up; every later ask is a cheap no-op.
+     */
+    private fun prepareWithRetries(context: Context, uid: Long): Boolean {
+        var up = EngineHost.prepare(context, uid)
+        var attempt = 1
+        while (!up && attempt < 3) {
+            log("the engine did not come up on try $attempt -- the app's own " +
+                "library may still be loading; trying again in five seconds")
+            try {
+                Thread.sleep(5_000)
+            } catch (_: InterruptedException) {
+                return up
+            }
+            attempt++
+            up = EngineHost.prepare(context, uid)
+        }
         return up
     }
 
