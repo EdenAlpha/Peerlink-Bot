@@ -34,6 +34,17 @@ object PeerSlot {
     /** The native backend's peer for bot mode: this very slot, on loopback. */
     const val LOOPBACK_PEER_IP = "127.0.0.1"
 
+    /**
+     * The loopback port the ENGINE is handed as its peer: its frames arrive on
+     * this slot's socket and its answers leave through the backend.  The game
+     * never sees this port -- it keeps punching the fabricated peer identity.
+     */
+    const val ENGINE_PORT = 1163
+
+    /** True once the engine holds this slot as its peer and it answered. */
+    @Volatile
+    var engineAttached: Boolean = false
+
     /** NativeBackendConfig.localPort -- the backend's bound peer socket. */
     const val BACKEND_PORT = 17024
 
@@ -150,12 +161,17 @@ object PeerSlot {
         // The listener now exists -- clear the backend's poisoned connected
         // socket so its peer-TX sends reach this slot (see onArmed note).
         runCatching { onArmed?.invoke() }
+        // The engine's own peer sockets, bound before anything is handed
+        // over: its very first punch must have somewhere to land.
+        openEngineSockets()
         worker = thread(name = "peer-slot-rx") { receiveLoop(s) }
         originator = thread(name = "peer-slot-tx") { originateLoop(s) }
     }
 
     fun disarm() {
         armed = false
+        engineAttached = false
+        closeEngineSockets()
         runCatching { socket?.close() }
         socket = null
         engine = null
@@ -227,22 +243,12 @@ object PeerSlot {
             gamePort = inner.srcPort
             gameTargetPort = inner.dstPort
 
-            // The ENGINE plays the opponent: when the engine is speaking (the
-            // backend learned its port), the game's frames go to the engine's
-            // own socket and the engine's answers go back to the game. The bot
-            // carries the bytes and nothing else.
-            val enginePort = AppState.enginePeerPort
-            if (enginePort > 0) {
-                val toEngine = engineSocket(enginePort)
-                if (toEngine != null) {
-                    runCatching {
-                        toEngine.send(DatagramPacket(inner.udpPayload, inner.udpPayload.size))
-                    }.onFailure {
-                        AppState.appendLog("[BOT-SLOT  ] engine hand-off failed: $it")
-                    }
-                    continue
-                }
-            }
+            // The ENGINE plays the opponent.  It was handed THIS slot as its
+            // peer (127.0.0.1:1163), so everything it sends arrives here and
+            // everything it must answer is sent to it: the game's frames go
+            // over unchanged and the engine's own frames go back to the game.
+            // The bot carries the bytes and nothing else.
+            if (engineAttached && sendToEngine(inner.udpPayload)) continue
 
             val eng = engine ?: continue
             val (reply, note) = eng.handle(inner.udpPayload)
@@ -269,81 +275,117 @@ object PeerSlot {
     }
 
     /**
-     * The socket that talks to the engine's own socket, and the loop that
-     * carries the engine's answers back to the game.
+     * The engine's peer on this phone is the slot itself: the engine is handed
+     * 127.0.0.1:1163 (and [::1]:1163) as the opponent, so its own frames arrive
+     * on these sockets and its answers travel back to the game over the
+     * backend.  The tunnel carries the game alone, so this is the only place
+     * the engine's half can meet the game's half.
      *
-     * The engine plays the opponent: it receives the game's punch on its own
-     * socket and answers with its own code.  The slot only moves bytes
-     * between the two.
+     * Both sockets are bound when the slot is armed -- before the engine is
+     * told anything -- so its very first punch has somewhere to land.
      */
     @Volatile
-    private var engineSock: DatagramSocket? = null
+    private var engineSock4: DatagramSocket? = null
 
     @Volatile
-    private var engineSockPort: Int = 0
+    private var engineSock6: DatagramSocket? = null
 
     @Volatile
     private var engineRxThread: Thread? = null
 
-    private fun engineSocket(port: Int): DatagramSocket? {
-        val existing = engineSock
-        if (existing != null && engineSockPort == port && !existing.isClosed) return existing
-        runCatching { engineSock?.close() }
-        val s = try {
+    private fun openEngineSockets() {
+        if (engineSock4 != null) return
+        val s4 = try {
             DatagramSocket(null).apply {
                 reuseAddress = true
-                bind(InetSocketAddress(LOOPBACK_PEER_IP, 0))
-                connect(InetSocketAddress(LOOPBACK_PEER_IP, port))
+                bind(InetSocketAddress(LOOPBACK_PEER_IP, ENGINE_PORT))
                 soTimeout = 250
             }
-        } catch (e: Throwable) {
-            AppState.appendLog("[BOT-SLOT  ] no socket to the engine on port $port: $e")
-            return null
+        } catch (t: Throwable) {
+            AppState.appendLog("[BOT-SLOT  ] cannot bind the engine's peer socket " +
+                "$LOOPBACK_PEER_IP:$ENGINE_PORT: ${t.message}")
+            return
         }
-        engineSock = s
-        engineSockPort = port
-        startEngineReplyLoop(s)
-        AppState.appendLog("[BOT-SLOT  ] the game's frames now go to the engine on " +
-            "$LOOPBACK_PEER_IP:$port")
-        return s
+        val s6 = try {
+            DatagramSocket(null).apply {
+                reuseAddress = true
+                bind(InetSocketAddress("::1", ENGINE_PORT))
+                soTimeout = 250
+            }
+        } catch (t: Throwable) {
+            AppState.appendLog("[BOT-SLOT  ] no IPv6 loopback peer: ${t.message}")
+            null
+        }
+        engineSock4 = s4
+        engineSock6 = s6
+        AppState.appendLog("[BOT-SLOT  ] the engine's peer is $LOOPBACK_PEER_IP:$ENGINE_PORT" +
+            (if (s6 != null) " and [::1]:$ENGINE_PORT" else " (IPv4 only)"))
+        startEngineReplyLoop(s4, s6)
+    }
+
+    private fun closeEngineSockets() {
+        runCatching { engineSock4?.close() }
+        runCatching { engineSock6?.close() }
+        engineSock4 = null
+        engineSock6 = null
+    }
+
+    /** The game's frame goes to the engine exactly as it arrived. */
+    private fun sendToEngine(payload: ByteArray): Boolean {
+        val s4 = engineSock4 ?: return false
+        val sent = runCatching {
+            s4.send(DatagramPacket(payload, payload.size))
+            true
+        }.getOrDefault(false)
+        engineSock6?.let { s6 ->
+            runCatching { s6.send(DatagramPacket(payload, payload.size)) }
+        }
+        return sent
     }
 
     /**
-     * The engine's answers go back to the game unchanged, in the same shape
-     * the slot's own answers had: from the peer identity, to the game's
-     * address, over the backend's peer socket.
+     * The engine's frames go back to the game, over the backend's peer socket,
+     * in the shape the game expects: from the fabricated peer, to the game.
      */
-    private fun startEngineReplyLoop(s: DatagramSocket) {
+    private fun startEngineReplyLoop(s4: DatagramSocket, s6: DatagramSocket?) {
         engineRxThread?.interrupt()
         engineRxThread = thread(name = "bot-engine-rx") {
-            val buf = ByteArray(4096)
-            while (armed && !s.isClosed) {
-                val pkt = DatagramPacket(buf, buf.size)
-                val n = try {
-                    s.receive(pkt)
-                    pkt.length
-                } catch (_: Throwable) {
-                    continue
-                }
-                if (n <= 0) continue
-                if (gameIp.isBlank() || gamePort <= 0) continue
-                val out = buildInnerUdpPacket(
-                    srcIp = AppState.peerFabricatedIp,
-                    dstIp = gameIp,
-                    srcPort = gameTargetPort,
-                    dstPort = gamePort,
-                    payload = buf.copyOf(n),
-                )
-                val to = socket ?: continue
-                runCatching {
-                    to.send(
-                        DatagramPacket(
-                            out, out.size,
-                            InetSocketAddress(LOOPBACK_PEER_IP, BACKEND_PORT)
-                        )
-                    )
+            fun pump(s: DatagramSocket) {
+                val buf = ByteArray(4096)
+                while (armed && !s.isClosed) {
+                    val pkt = DatagramPacket(buf, buf.size)
+                    val n = try {
+                        s.receive(pkt)
+                        pkt.length
+                    } catch (_: Throwable) {
+                        continue
+                    }
+                    if (n > 0) forwardEngineFrame(buf.copyOf(n))
                 }
             }
+            val t6 = if (s6 != null) thread(name = "bot-engine-rx6") { pump(s6) } else null
+            pump(s4)
+            t6?.join()
+        }
+    }
+
+    private fun forwardEngineFrame(payload: ByteArray) {
+        if (gameIp.isBlank() || gamePort <= 0) return
+        val out = buildInnerUdpPacket(
+            srcIp = AppState.peerFabricatedIp,
+            dstIp = gameIp,
+            srcPort = gameTargetPort,
+            dstPort = gamePort,
+            payload = payload,
+        )
+        val to = socket ?: return
+        runCatching {
+            to.send(
+                DatagramPacket(
+                    out, out.size,
+                    InetSocketAddress(LOOPBACK_PEER_IP, BACKEND_PORT)
+                )
+            )
         }
     }
 
@@ -365,7 +407,7 @@ object PeerSlot {
             while (armed && !sawInboundStun && punches < 15 &&
                 System.currentTimeMillis() < deadline
             ) {
-                if (AppState.enginePeerPort > 0) {
+                if (engineAttached) {
                     // The engine punches for itself.
                     AppState.appendLog("[BOT-SLOT  ] the engine is playing the " +
                         "opponent -- the bot does not punch")

@@ -33,6 +33,9 @@ class BotMatchFlow(
     companion object {
         private const val PACE_MS = 400L
 
+        /** The capture's own open-NAT word: the peer is punchable. */
+        private const val OPEN_NAT_WORD = 0x102000b3L
+
         /** Capture's inert IPv6 -- "::" / 0 everywhere (block 98). */
         private val NET6 = linkedMapOf<String, Any?>(
             "host_address" to "::", "host_port" to 0,
@@ -474,20 +477,32 @@ class BotMatchFlow(
 
         val v4Nat = n(a4, "nat_type")
         val v6Nat = n(a6, "nat_type")
+
+        // The opponent the ENGINE is given is this app's own peer slot.  The
+        // tunnel carries the game alone, so the engine's frames can only meet
+        // the game's frames on loopback: it is told its peer is
+        // 127.0.0.1:1163 (and [::1]:1163), it punches there, the slot carries
+        // its frames to the game as the fabricated peer, and the game's frames
+        // are handed back to it.  The NAT word is the capture's own open-NAT
+        // value, so the engine treats the peer as reachable, exactly as it
+        // would on a phone behind an open NAT.
         val rec = EngineHost.buildPeerRecord(
             peerId = peerId,
-            v4Host = s(a4, "host_address"), v4HostPort = p(a4, "host_port"),
-            v4Reflexive = s(a4, "reflexive_address"),
-            v4ReflexivePort = p(a4, "reflexive_port"), v4NatType = v4Nat,
-            v6Host = s(a6, "host_address"), v6HostPort = p(a6, "host_port"),
-            v6Reflexive = s(a6, "reflexive_address"),
-            v6ReflexivePort = p(a6, "reflexive_port"), v6NatType = v6Nat,
+            v4Host = PeerSlot.LOOPBACK_PEER_IP, v4HostPort = PeerSlot.ENGINE_PORT,
+            v4Reflexive = PeerSlot.LOOPBACK_PEER_IP,
+            v4ReflexivePort = PeerSlot.ENGINE_PORT, v4NatType = OPEN_NAT_WORD,
+            v6Host = "::1", v6HostPort = PeerSlot.ENGINE_PORT,
+            v6Reflexive = "::1",
+            v6ReflexivePort = PeerSlot.ENGINE_PORT, v6NatType = OPEN_NAT_WORD,
         ) ?: return false
         val ok = EngineHost.setPeers(rec)
+        if (ok) PeerSlot.engineAttached = true
         AppState.appendLog("[BOT-FLOW  ] engine got the peer: $peerId " +
-            "v4nat=$v4Nat v6nat=$v6Nat -> $ok")
+            "(session said v4nat=$v4Nat v6nat=$v6Nat) -- its opponent is now " +
+            "${PeerSlot.LOOPBACK_PEER_IP}:${PeerSlot.ENGINE_PORT} -> $ok")
         return ok
     }
+
 
     /** CMD_GET_GAME_ID -- builder form first, then the server-side fallbacks. */
     fun getGameId(g: KgsGate, rid: Long): Long? {
