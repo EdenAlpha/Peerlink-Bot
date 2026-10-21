@@ -327,6 +327,12 @@ struct BackendState {
     std::atomic<bool> peer_probe_ack{false};
     std::array<uint8_t, 4> my_fabricated_ip{};
     std::array<uint8_t, 4> peer_fabricated_ip{};
+
+    // The port the engine's own socket uses, learned from the engine's own
+    // outbound traffic (the peer identity as source).  Zero until the engine
+    // speaks; the peer slot uses it to reach the engine instead of answering
+    // the game itself.
+    std::atomic<uint16_t> engine_peer_port{0};
     std::array<uint8_t, 4> vpn_ipv4{};
     std::array<uint8_t, 16> vpn_ipv6{};
 
@@ -2866,7 +2872,22 @@ void handle_tun_ipv4(JNIEnv *env, BackendState *state, const uint8_t *packet, si
         return;
     }
 
-    enum class Action { Pass, Tunnel, Intercept, Drop };
+    // The ENGINE side of the exchange: in bot mode the engine that plays the
+    // opponent lives in this process and sends from its own socket.  Its
+    // packets carry the peer identity as their source, which is what tells
+    // them apart from the game's traffic.  Remember the port it uses, so
+    // the peer slot can hand the game's frames to the engine's own socket
+    // instead of answering them.
+    if (parsed.protocol == kProtocolUdp && arrays_equal4(parsed.source_ip, state->peer_fabricated_ip)) {
+        const uint16_t previous = state->engine_peer_port.exchange(parsed.source_port, std::memory_order_relaxed);
+        if (previous != parsed.source_port) {
+            emit_native_log(env, state, kNativeLogInfo, false,
+                           "[NATIVE/EVENT] engine socket port %u (the peer slot now talks to the engine, not to itself)",
+                           static_cast<unsigned>(parsed.source_port));
+        }
+    }
+
+    enum class Action { Pass, Tunnel, Intercept, Drop, InjectToTun };
     Action original_action = Action::Pass;
     const char *reason = "default-bridge";
     if (arrays_equal4(parsed.dest_ip, state->peer_fabricated_ip)) {
@@ -2877,6 +2898,16 @@ void handle_tun_ipv4(JNIEnv *env, BackendState *state, const uint8_t *packet, si
             original_action = Action::Drop;
             reason = "fabricated-peer-non-udp";
         }
+    } else if (parsed.protocol == kProtocolUdp &&
+               arrays_equal4(parsed.source_ip, state->peer_fabricated_ip) &&
+               arrays_equal4(parsed.dest_ip, state->my_fabricated_ip)) {
+        // The ENGINE's own half of the exchange.  The engine that plays the
+        // opponent lives in this process and speaks to the game over the
+        // fabricated identities, so its frames are the game's traffic and go
+        // back into the TUN.  The game expects them from the peer identity,
+        // which is exactly the source they carry.
+        original_action = Action::InjectToTun;
+        reason = "engine-to-game";
     } else if (parsed.protocol == kProtocolUdp && should_intercept_ipv4_stun(parsed)) {
         original_action = Action::Intercept;
         reason = "stun-intercept";
@@ -2986,6 +3017,13 @@ void handle_tun_ipv4(JNIEnv *env, BackendState *state, const uint8_t *packet, si
             maybe_log_flow_ipv4(env, state, flow_hash, parsed.source_ip, parsed.source_port, parsed.dest_ip, parsed.dest_port, action_name, reason);
             state->stats.dropped_packets.fetch_add(1, std::memory_order_relaxed);
             break;
+        case Action::InjectToTun: {
+            action_name = "ENGINE_TO_GAME";
+            maybe_log_flow_ipv4(env, state, flow_hash, parsed.source_ip, parsed.source_port, parsed.dest_ip, parsed.dest_port, action_name, reason);
+            std::vector<uint8_t> copy(packet, packet + parsed.packet_length);
+            (void) enqueue_tun_inject(state, std::move(copy), TunInjectSource::kPeer, false);
+            break;
+        }
     }
 }
 
@@ -4042,6 +4080,14 @@ Java_com_peerlink_app_tunnel_NativePeerLinkBackend_nativeVerifyPeerPath(
         }
     }
     return JNI_FALSE;
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_com_peerlink_app_tunnel_NativePeerLinkBackend_nativeEnginePeerPort(
+        JNIEnv * /*env*/, jobject /*thiz*/, jlong handle) {
+    BackendState *state = from_handle(handle);
+    if (state == nullptr) return 0;
+    return static_cast<jint>(state->engine_peer_port.load(std::memory_order_relaxed));
 }
 
 extern "C" JNIEXPORT jlongArray JNICALL

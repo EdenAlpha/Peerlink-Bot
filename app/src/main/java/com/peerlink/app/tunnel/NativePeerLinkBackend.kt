@@ -151,6 +151,20 @@ class NativePeerLinkBackend(
         return@read nativeVerifyPeerPath(handle, timeoutMs.coerceIn(500, 90_000))
     }
 
+    /**
+     * The port the engine's own socket uses, learned from the engine's own
+     * outbound traffic (the peer identity as source).  Zero until the engine
+     * has spoken.
+     *
+     * The peer slot uses it to hand the game's frames to the engine's own
+     * socket, so the engine - and not the bot - answers the game's punch.
+     */
+    fun enginePeerPort(): Int = handleLock.read {
+        val handle = nativeHandle
+        if (handle == 0L) return@read 0
+        return@read runCatching { nativeEnginePeerPort(handle) }.getOrDefault(0)
+    }
+
     private fun startStatsPolling() = synchronized(pollingLock) {
         if (stopping) return@synchronized
         stopStatsPolling()
@@ -214,6 +228,14 @@ class NativePeerLinkBackend(
     private external fun nativeRebindPeerSocket(handle: Long): Boolean
     private external fun nativeGetHotThreadTids(handle: Long): IntArray
     private external fun nativeVerifyPeerPath(handle: Long, timeoutMs: Int): Boolean
+
+    /**
+     * The port the engine's own socket uses, learned from the engine's own
+     * outbound traffic.  Zero until the engine has spoken.  The peer slot
+     * uses it to hand the game's frames to the engine instead of answering
+     * them itself.
+     */
+    private external fun nativeEnginePeerPort(handle: Long): Int
 
     companion object {
         const val LOG_LEVEL_INFO = 1

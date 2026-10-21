@@ -227,6 +227,23 @@ object PeerSlot {
             gamePort = inner.srcPort
             gameTargetPort = inner.dstPort
 
+            // The ENGINE plays the opponent: when the engine is speaking (the
+            // backend learned its port), the game's frames go to the engine's
+            // own socket and the engine's answers go back to the game. The bot
+            // carries the bytes and nothing else.
+            val enginePort = AppState.enginePeerPort
+            if (enginePort > 0) {
+                val toEngine = engineSocket(enginePort)
+                if (toEngine != null) {
+                    runCatching {
+                        toEngine.send(DatagramPacket(inner.udpPayload, inner.udpPayload.size))
+                    }.onFailure {
+                        AppState.appendLog("[BOT-SLOT  ] engine hand-off failed: $it")
+                    }
+                    continue
+                }
+            }
+
             val eng = engine ?: continue
             val (reply, note) = eng.handle(inner.udpPayload)
             if (note == "not-stun") {
@@ -252,9 +269,92 @@ object PeerSlot {
     }
 
     /**
+     * The socket that talks to the engine's own socket, and the loop that
+     * carries the engine's answers back to the game.
+     *
+     * The engine plays the opponent: it receives the game's punch on its own
+     * socket and answers with its own code.  The slot only moves bytes
+     * between the two.
+     */
+    @Volatile
+    private var engineSock: DatagramSocket? = null
+
+    @Volatile
+    private var engineSockPort: Int = 0
+
+    @Volatile
+    private var engineRxThread: Thread? = null
+
+    private fun engineSocket(port: Int): DatagramSocket? {
+        val existing = engineSock
+        if (existing != null && engineSockPort == port && !existing.isClosed) return existing
+        runCatching { engineSock?.close() }
+        val s = try {
+            DatagramSocket(null).apply {
+                reuseAddress = true
+                bind(InetSocketAddress(LOOPBACK_PEER_IP, 0))
+                connect(InetSocketAddress(LOOPBACK_PEER_IP, port))
+                soTimeout = 250
+            }
+        } catch (e: Throwable) {
+            AppState.appendLog("[BOT-SLOT  ] no socket to the engine on port $port: $e")
+            return null
+        }
+        engineSock = s
+        engineSockPort = port
+        startEngineReplyLoop(s)
+        AppState.appendLog("[BOT-SLOT  ] the game's frames now go to the engine on " +
+            "$LOOPBACK_PEER_IP:$port")
+        return s
+    }
+
+    /**
+     * The engine's answers go back to the game unchanged, in the same shape
+     * the slot's own answers had: from the peer identity, to the game's
+     * address, over the backend's peer socket.
+     */
+    private fun startEngineReplyLoop(s: DatagramSocket) {
+        engineRxThread?.interrupt()
+        engineRxThread = thread(name = "bot-engine-rx") {
+            val buf = ByteArray(4096)
+            while (armed && !s.isClosed) {
+                val pkt = DatagramPacket(buf, buf.size)
+                val n = try {
+                    s.receive(pkt)
+                    pkt.length
+                } catch (_: Throwable) {
+                    continue
+                }
+                if (n <= 0) continue
+                if (gameIp.isBlank() || gamePort <= 0) continue
+                val out = buildInnerUdpPacket(
+                    srcIp = AppState.peerFabricatedIp,
+                    dstIp = gameIp,
+                    srcPort = gameTargetPort,
+                    dstPort = gamePort,
+                    payload = buf.copyOf(n),
+                )
+                val to = socket ?: continue
+                runCatching {
+                    to.send(
+                        DatagramPacket(
+                            out, out.size,
+                            InetSocketAddress(LOOPBACK_PEER_IP, BACKEND_PORT)
+                        )
+                    )
+                }
+            }
+        }
+    }
+
+    /**
      * Punch-first originate burst (the real creator side's behaviour), sent
      * through the native backend to the game: the inner packet is addressed
      * game-ward while the DATAGRAM is addressed to the backend's socket.
+     *
+     * The bot does not punch when the ENGINE is playing the opponent: the
+     * engine sends its own punch, with its own id, from its own socket. The
+     * bot's burst is the fabricated half and it stays off.
      */
     private fun originateLoop(s: DatagramSocket) {
         try {
@@ -265,6 +365,12 @@ object PeerSlot {
             while (armed && !sawInboundStun && punches < 15 &&
                 System.currentTimeMillis() < deadline
             ) {
+                if (AppState.enginePeerPort > 0) {
+                    // The engine punches for itself.
+                    AppState.appendLog("[BOT-SLOT  ] the engine is playing the " +
+                        "opponent -- the bot does not punch")
+                    return
+                }
                 if (gameIp.isBlank() || gamePort <= 0) {
                     Thread.sleep(200)
                     continue

@@ -485,6 +485,21 @@ class PeerLinkVpnService : VpnService() {
                         AppState.tunneled.set(stats.totalTunneledPackets)
                         MatchTracker.noteTunnelStats(stats.tunnelOutPackets, stats.tunnelInPackets)
                         MatchAutomationEngine.onNativeStats(stats)
+                        // The engine that plays the opponent lives in this
+                        // process; the backend learns the port it speaks
+                        // from and publishes it, so the peer slot can hand
+                        // the game's frames to the engine instead of
+                        // answering them itself.
+                        val enginePort = nativeBackend?.enginePeerPort() ?: 0
+                        if (enginePort != AppState.enginePeerPort) {
+                            AppState.enginePeerPort = enginePort
+                            if (enginePort > 0) {
+                                AppState.appendLog(
+                                    "[VPN-UNDER ] the engine is speaking from port $enginePort -- " +
+                                        "the peer slot now passes the game's frames to it"
+                                )
+                            }
+                        }
                         if (!stats.backendRunning && !stopVpnGuard.get()) {
                             AppState.sessionError.set("The packet connection stopped. Reconnect to your player.")
                             AppState.appendLog("[VPN-UNDER ] Native packet workers stopped; closing the VPN session")

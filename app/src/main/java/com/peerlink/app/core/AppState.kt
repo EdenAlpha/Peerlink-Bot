@@ -165,6 +165,18 @@ object AppState {
     @Volatile
     var connectedPeerIp: String = ""
 
+    /**
+     * The port the engine's own socket uses, learned by the native backend
+     * from the engine's outbound traffic.
+     *
+     * Zero until the engine has spoken. When it is set, the peer slot hands
+     * the game's frames to the engine and passes the engine's answers back,
+     * instead of answering the game itself -- the engine plays the opponent
+     * with its own code.
+     */
+    @Volatile
+    var enginePeerPort: Int = 0
+
     // ═══════════════════════════════════════════════════════════════
     //  G O D   M O D E   S T A T E
     // ═══════════════════════════════════════════════════════════════
