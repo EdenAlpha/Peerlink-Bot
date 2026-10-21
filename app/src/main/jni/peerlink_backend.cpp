@@ -2881,9 +2881,11 @@ void handle_tun_ipv4(JNIEnv *env, BackendState *state, const uint8_t *packet, si
     if (parsed.protocol == kProtocolUdp && arrays_equal4(parsed.source_ip, state->peer_fabricated_ip)) {
         const uint16_t previous = state->engine_peer_port.exchange(parsed.source_port, std::memory_order_relaxed);
         if (previous != parsed.source_port) {
-            emit_native_log(env, state, kNativeLogInfo, false,
-                           "[NATIVE/EVENT] engine socket port %u (the peer slot now talks to the engine, not to itself)",
-                           static_cast<unsigned>(parsed.source_port));
+            char msg[192];
+            std::snprintf(msg, sizeof(msg),
+                          "[NATIVE/EVENT] engine socket port %u (the peer slot now talks to the engine, not to itself)",
+                          static_cast<unsigned>(parsed.source_port));
+            emit_native_log(env, state, kNativeLogInfo, false, msg);
         }
     }
 
