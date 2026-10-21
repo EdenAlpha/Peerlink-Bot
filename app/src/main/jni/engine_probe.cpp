@@ -497,6 +497,7 @@ void childTryLoad(const std::vector<std::string> &enginePaths, const std::string
 
 int main(int argc, char **argv) {
     std::string outDir = "/data/local/tmp/peerlink_engine";
+    std::string engineArg;
     bool doLoad = true;
     bool hashOnly = false;
 
@@ -504,6 +505,8 @@ int main(int argc, char **argv) {
         const char *a = argv[i];
         if (strcmp(a, "--out") == 0 && i + 1 < argc) {
             outDir = argv[++i];
+        } else if (strcmp(a, "--engine") == 0 && i + 1 < argc) {
+            engineArg = argv[++i];
         } else if (strcmp(a, "--no-load") == 0) {
             doLoad = false;
         } else if (strcmp(a, "--hash-only") == 0) {
@@ -517,7 +520,7 @@ int main(int argc, char **argv) {
         } else if (strcmp(a, "--keep") == 0) {
             // copy always happens; flag kept for symmetry with later stages
         } else if (strcmp(a, "--help") == 0) {
-            say("engine_probe [--out <dir>] [--no-load] [--hash-only]");
+            say("engine_probe [--out <dir>] [--engine <path>] [--no-load] [--hash-only]");
             return 0;
         }
     }
@@ -525,7 +528,17 @@ int main(int argc, char **argv) {
     say("PROBE=engine_probe");
     say("UID=%d", static_cast<int>(getuid()));
 
-    const std::string libDir = findLibDir();
+    // The engine file can be named outright.  A plain app cannot list
+    // /data/app, but the package manager tells it the game's library
+    // directory, and from there this is just another readable file.
+    std::string libDir;
+    if (!engineArg.empty()) {
+        const auto slash = engineArg.find_last_of('/');
+        libDir = (slash == std::string::npos) ? std::string(".") : engineArg.substr(0, slash);
+        say("ENGINE_ARG=%s", engineArg.c_str());
+    } else {
+        libDir = findLibDir();
+    }
     if (libDir.empty()) {
         say("LIB_DIR=");
         say("RESULT=no_game_library_found");
@@ -533,7 +546,7 @@ int main(int argc, char **argv) {
     }
     say("LIB_DIR=%s", libDir.c_str());
 
-    const std::string engineRom = libDir + "/" + kEngineName;
+    const std::string engineRom = engineArg.empty() ? (libDir + "/" + kEngineName) : engineArg;
     if (!fileExists(engineRom)) {
         say("UE4_ROM_PATH=%s", engineRom.c_str());
         say("RESULT=engine_file_missing");

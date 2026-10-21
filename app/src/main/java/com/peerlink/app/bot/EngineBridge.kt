@@ -121,11 +121,52 @@ object EngineBridge {
     fun stageDir(context: Context): String =
         java.io.File(context.filesDir, "engine").absolutePath
 
+    /** The engine is ~154 MiB; anything much smaller is not it. */
+    private const val MIN_ENGINE_BYTES = 100L * 1024 * 1024
+
+    private const val GAME_PACKAGE = "jp.konami.pesam"
+
     /**
-     * Have the privileged helper stage the engine where this app can load
-     * it.  The helper can read the game's library; the app cannot.
+     * Have the engine staged where this app can load it.
+     *
+     * Two routes, tried in this order:
+     *
+     *   1. this app itself.  The game's library directory under /data/app is
+     *      readable; what an app cannot do is *find* it, and that is exactly
+     *      what the package manager is for.  No helper, no root, nothing to
+     *      start first.
+     *   2. the privileged helper, which can also read the game's library and
+     *      is the older route.
+     *
+     * The old code only tried route 2 and gave up when the helper was not
+     * running, which is why the engine was never staged on the phone.
      */
     fun stageEngine(context: Context): Boolean {
+        val stage = java.io.File(stageDir(context))
+        val staged = java.io.File(stage, "libUE4.so")
+        if (staged.isFile && staged.length() >= MIN_ENGINE_BYTES) {
+            log("the engine is already staged: ${staged.absolutePath} (${staged.length()} bytes)")
+            return true
+        }
+
+        // ---- route 1: as this app -------------------------------------
+        val gameLibDir = gameLibDir(context)
+        if (gameLibDir != null) {
+            log("the game's library directory is $gameLibDir")
+            if (copyEngineFrom(java.io.File(gameLibDir), stage)) {
+                log("engine staged for the app: ${stage.absolutePath} (route=app)")
+                return true
+            }
+        } else {
+            log("the game's library directory was not found from this app")
+        }
+        val fromApk = copyEngineFromApk(context, stage)
+        if (fromApk) {
+            log("engine staged from the game's APK: ${stage.absolutePath} (route=app/apk)")
+            return true
+        }
+
+        // ---- route 2: the privileged helper ---------------------------
         if (!PrimeClient.isAlive(timeoutMs = 800)) {
             log("the privileged helper is not running -- the engine stays unstaged")
             return false
@@ -137,15 +178,114 @@ object EngineBridge {
         )
         helperReport = r
         if (r.isNotBlank()) absorb(r)
-        log("engine staged for the app: ${stageDir(context)}")
-        return true
+        if (staged.isFile && staged.length() >= MIN_ENGINE_BYTES) {
+            log("engine staged for the app: ${stage.absolutePath} (route=helper)")
+            return true
+        }
+        log("the helper ran but the engine is still not staged at ${staged.absolutePath}")
+        return false
+    }
+
+    /**
+     * The directory the installed game keeps its native libraries in, asked
+     * of the package manager -- which knows the path an app is not allowed
+     * to search for itself.
+     */
+    private fun gameLibDir(context: Context): String? = try {
+        val info = context.packageManager.getApplicationInfo(GAME_PACKAGE, 0)
+        val dir = info.nativeLibraryDir
+        when {
+            dir.isNullOrBlank() -> null
+            java.io.File(dir, "libUE4.so").isFile -> dir
+            else -> null
+        }
+    } catch (t: Throwable) {
+        log("package lookup failed: ${t.javaClass.simpleName}: ${t.message}")
+        null
+    }
+
+    /** Copy the engine (and its ad-library dependency) into [stage]. */
+    private fun copyEngineFrom(srcDir: java.io.File, stage: java.io.File): Boolean {
+        val src = java.io.File(srcDir, "libUE4.so")
+        if (!src.isFile || src.length() < MIN_ENGINE_BYTES) {
+            log("the engine is not readable at ${src.absolutePath}")
+            return false
+        }
+        return try {
+            if (!stage.isDirectory && !stage.mkdirs()) {
+                log("cannot make the staging directory ${stage.absolutePath}")
+                return false
+            }
+            copyFile(src, java.io.File(stage, "libUE4.so"))
+            val ad = java.io.File(srcDir, "libgadsme.so")
+            if (ad.isFile) copyFile(ad, java.io.File(stage, "libgadsme.so"))
+            true
+        } catch (t: Throwable) {
+            log("staging the engine failed: ${t.javaClass.simpleName}: ${t.message}")
+            false
+        }
+    }
+
+    /**
+     * Some games keep their libraries inside the APK instead of extracting
+     * them.  Same idea, read from the archive.
+     */
+    private fun copyEngineFromApk(context: Context, stage: java.io.File): Boolean = try {
+        val info = context.packageManager.getApplicationInfo(GAME_PACKAGE, 0)
+        val apk = java.io.File(info.sourceDir)
+        if (!apk.isFile) {
+            false
+        } else {
+            java.util.zip.ZipFile(apk).use { zip ->
+                val entry = zip.getEntry("lib/arm64-v8a/libUE4.so")
+                if (entry == null) {
+                    false
+                } else {
+                    if (!stage.isDirectory) stage.mkdirs()
+                    zip.getInputStream(entry).use { input ->
+                        java.io.FileOutputStream(java.io.File(stage, "libUE4.so")).use { output ->
+                            input.copyTo(output, 1024 * 1024)
+                        }
+                    }
+                    val ad = zip.getEntry("lib/arm64-v8a/libgadsme.so")
+                    if (ad != null) {
+                        zip.getInputStream(ad).use { input ->
+                            java.io.FileOutputStream(java.io.File(stage, "libgadsme.so")).use { output ->
+                                input.copyTo(output, 1024 * 1024)
+                            }
+                        }
+                    }
+                    true
+                }
+            }
+        }
+    } catch (t: Throwable) {
+        log("reading the game's APK failed: ${t.javaClass.simpleName}: ${t.message}")
+        false
+    }
+
+    /** Copy one file, then make it readable and not writable. */
+    private fun copyFile(src: java.io.File, dst: java.io.File) {
+        java.io.FileInputStream(src).use { input ->
+            java.io.FileOutputStream(dst).use { output ->
+                input.copyTo(output, 1024 * 1024)
+            }
+        }
+        dst.setReadable(true, false)
+        dst.setWritable(false, false)
+        dst.setExecutable(false, false)
     }
 
     private fun identify() {
         val context = appContext ?: return
         log("looking for the game's engine")
 
-        val asApp = probeAsApp(context, hashOnly = true, timeoutMs = 45_000L)
+        val asApp = probeAsApp(
+            context,
+            hashOnly = true,
+            timeoutMs = 45_000L,
+            engine = gameLibDir(context)?.let { "$it/libUE4.so" },
+        )
         appReport = asApp
         if (asApp.isNotBlank()) {
             log("--- as this app ---")
@@ -234,7 +374,12 @@ object EngineBridge {
     }
 
     /** One run of the probe as this app, using the same runner the shell commands use. */
-    private fun probeAsApp(context: Context, hashOnly: Boolean, timeoutMs: Long): String = try {
+    private fun probeAsApp(
+        context: Context,
+        hashOnly: Boolean,
+        timeoutMs: Long,
+        engine: String? = null,
+    ): String = try {
         val exe = File(context.applicationInfo.nativeLibraryDir, "libpeerlinkengine.so")
         if (!exe.isFile) {
             log("probe program is missing from this APK: ${exe.absolutePath}")
@@ -245,6 +390,10 @@ object EngineBridge {
                 add(exe.absolutePath)
                 add("--out")
                 add(stage)
+                if (!engine.isNullOrBlank()) {
+                    add("--engine")
+                    add(engine)
+                }
                 if (hashOnly) add("--hash-only")
             }
             PrimeShellRunner.run(command, timeoutMs, 512 * 1024)
