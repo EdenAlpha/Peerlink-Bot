@@ -19,6 +19,7 @@
 #include <cstdint>
 #include <cstring>
 #include <cstdlib>
+#include <cstdio>
 #include <string>
 
 #define TAG "PeerlinkEngineHost"
@@ -30,6 +31,127 @@ namespace {
 
 uint64_t g_base = 0;
 void *g_handle = nullptr;
+
+// ---- the lab's "no Java attached" activity -----------------------------
+//
+// The engine's own startup expects the activity the game's Java side hands
+// it: an ANativeActivity whose JavaVM is the game's.  The bot is not the
+// game, so that field was null, and the engine's start walked into it and
+// died -- on the phone that took the whole app down the moment a room was
+// made.
+//
+// The lab's driver solves it the way the engine's own code allows: it calls
+// the engine's own activity setter (base + 0x2f4ebc0) with a REAL
+// ANativeActivity whose JavaVM is a fake whose every function answers
+// JNI_EDETACHED ("this thread is not attached").  The engine then takes its
+// no-Java path and carries on -- proven in the lab, on this same build.
+//
+// The block lives in THIS library's memory, not the engine's heap: the
+// engine must not be able to free what the JavaVM's function table is in.
+
+volatile unsigned long g_jni_calls = 0;
+bool g_no_java_ready = false;
+
+// Page-aligned so it can never share a page with engine data.
+unsigned long g_jni_block[0x800] __attribute__((aligned(4096)));
+
+long jni_stub(void) {
+    unsigned long n = ++g_jni_calls;
+    if (n <= 8) {
+        __android_log_print(ANDROID_LOG_INFO, TAG,
+                            "jni stub call %lu -> JNI_EDETACHED", n);
+    }
+    return -2;  // JNI_EDETACHED
+}
+
+/** Decode an "adrp x8, <page>" instruction into the page it names. */
+bool adrp_target(uintptr_t pc, uint32_t word, uintptr_t *result) {
+    if ((word & 0x9f00001fu) != 0x90000008u) return false;
+    long immlo = (long) ((word >> 29) & 3);
+    long immhi = (long) ((word >> 5) & 0x7ffff);
+    long imm = (immhi << 2) | immlo;
+    if (imm & (1L << 20)) imm -= (1L << 21);
+    *result = (pc & ~(uintptr_t) 0xfff) + ((uintptr_t) imm << 12);
+    return true;
+}
+
+/**
+ * Find the global the engine's own startup stores the activity in, from the
+ * instructions of the engine's own setter:
+ *
+ *     adrp x8, <page> ; str x0, [x8, #0x10] ; ret
+ *
+ * The lab's own check, so a different build is refused instead of poked.
+ */
+bool activity_global(uintptr_t base, uintptr_t *global) {
+    uintptr_t setter = base + 0x2f4ebc0u;
+    uint32_t w0 = ((const uint32_t *) setter)[0];
+    uint32_t w1 = ((const uint32_t *) setter)[1];
+    uint32_t w2 = ((const uint32_t *) setter)[2];
+    if (w1 != 0xf9000900u || w2 != 0xd65f03c0u) return false;
+    if (!adrp_target(setter, w0, global)) return false;
+    *global += 0x10;
+    return true;
+}
+
+/** Whether [addr] falls in a writable mapping of this process. */
+bool writable_at(uintptr_t addr) {
+    FILE *f = fopen("/proc/self/maps", "r");
+    if (!f) return false;
+    char line[512];
+    bool ok = false;
+    while (fgets(line, sizeof(line), f)) {
+        unsigned long lo = 0, hi = 0;
+        char perms[8] = {0};
+        if (sscanf(line, "%lx-%lx %7s", &lo, &hi, perms) != 3) continue;
+        if (addr >= (uintptr_t) lo && addr < (uintptr_t) hi) {
+            ok = (perms[1] == 'w');
+            break;
+        }
+    }
+    fclose(f);
+    return ok;
+}
+
+/** Install the fake "no Java attached" activity, exactly like the lab. */
+void install_no_java_activity(uintptr_t base) {
+    uintptr_t global = 0;
+    if (!activity_global(base, &global)) {
+        __android_log_print(ANDROID_LOG_ERROR, TAG,
+                            "the activity setter at base+0x2f4ebc0 is not the "
+                            "expected code; refusing to install the no-Java "
+                            "activity");
+        return;
+    }
+    if (!writable_at(global)) {
+        __android_log_print(ANDROID_LOG_ERROR, TAG,
+                            "the activity global 0x%llx is not writable; "
+                            "refusing to install the no-Java activity",
+                            (unsigned long long) global);
+        return;
+    }
+    unsigned long *act = g_jni_block;         // ANativeActivity: vm at +8
+    unsigned long *vm = g_jni_block + 0x100;  // JavaVM:           vtable at +0
+    unsigned long *vt = g_jni_block + 0x200;  // every slot is the stub
+    for (int i = 0; i < 16; i++) {
+        vt[i] = (unsigned long) (uintptr_t) jni_stub;
+    }
+    vm[0] = (unsigned long) (uintptr_t) vt;
+    act[1] = (unsigned long) (uintptr_t) vm;
+    ((void (*)(void *)) (uintptr_t) (base + 0x2f4ebc0u))((void *) act);
+    g_no_java_ready =
+        (*(unsigned long *) global == (unsigned long) (uintptr_t) act);
+    __android_log_print(g_no_java_ready ? ANDROID_LOG_INFO : ANDROID_LOG_ERROR,
+                        TAG,
+                        "no-Java activity: act=0x%llx vm=0x%llx vt=0x%llx "
+                        "stub=0x%llx global=0x%llx -> %s",
+                        (unsigned long long) (uintptr_t) act,
+                        (unsigned long long) (uintptr_t) vm,
+                        (unsigned long long) (uintptr_t) vt,
+                        (unsigned long long) (uintptr_t) jni_stub,
+                        (unsigned long long) global,
+                        g_no_java_ready ? "taken" : "NOT taken");
+}
 
 }  // namespace
 
@@ -78,8 +200,10 @@ Java_com_peerlink_app_bot_EngineHost_nativeLoad(JNIEnv *env, jobject,
         }
     }
     g_handle = h;
-    __android_log_print(ANDROID_LOG_INFO, TAG, "engine loaded, base=0x%llx",
-                        (unsigned long long) g_base);
+    if (g_base) install_no_java_activity((uintptr_t) g_base);
+    __android_log_print(ANDROID_LOG_INFO, TAG,
+                        "engine loaded, base=0x%llx, no_java=%d",
+                        (unsigned long long) g_base, g_no_java_ready ? 1 : 0);
     env->ReleaseStringUTFChars(path, p);
     return (jlong) g_base;
 }
@@ -183,6 +307,12 @@ Java_com_peerlink_app_bot_EngineHost_nativeRead(JNIEnv *env, jobject,
     if (!b) return;
     memcpy(b, (void *) (uintptr_t) addr, (size_t) n);
     env->ReleaseByteArrayElements(bytes, b, 0);
+}
+
+/** Whether the engine has the lab's no-Java activity installed. */
+JNIEXPORT jboolean JNICALL
+Java_com_peerlink_app_bot_EngineHost_nativeNoJavaActivity(JNIEnv *, jobject) {
+    return g_no_java_ready ? JNI_TRUE : JNI_FALSE;
 }
 
 }  // extern "C"

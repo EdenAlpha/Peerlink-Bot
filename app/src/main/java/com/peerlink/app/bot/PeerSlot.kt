@@ -306,6 +306,18 @@ object PeerSlot {
     @Volatile
     private var engineSock6: DatagramSocket? = null
 
+    /**
+     * Where the engine's own packets come from: the engine binds its own UDP
+     * port when it starts, so the address is not known in advance.  It is
+     * learned from its first datagram -- that source address:port is the
+     * engine's own socket, and it is where the game's frames must be sent.
+     */
+    @Volatile
+    private var enginePeer4: InetSocketAddress? = null
+
+    @Volatile
+    private var enginePeer6: InetSocketAddress? = null
+
     @Volatile
     private var engineRxThread: Thread? = null
 
@@ -344,19 +356,35 @@ object PeerSlot {
         runCatching { engineSock6?.close() }
         engineSock4 = null
         engineSock6 = null
+        enginePeer4 = null
+        enginePeer6 = null
     }
 
-    /** The game's frame goes to the engine exactly as it arrived. */
+    /**
+     * The game's frame goes to the engine exactly as it arrived, addressed to
+     * the engine's OWN socket -- the address its own packets come from (see
+     * [enginePeer4]).  Until the engine has spoken there is nowhere to send,
+     * and the bot's own answers are still carrying the game, so nothing is
+     * lost.
+     */
     private fun sendToEngine(payload: ByteArray): Boolean {
-        val s4 = engineSock4 ?: return false
-        val sent = runCatching {
-            s4.send(DatagramPacket(payload, payload.size))
-            true
-        }.getOrDefault(false)
-        engineSock6?.let { s6 ->
-            runCatching { s6.send(DatagramPacket(payload, payload.size)) }
+        val a4 = enginePeer4
+        val s4 = engineSock4
+        if (a4 != null && s4 != null) {
+            return runCatching {
+                s4.send(DatagramPacket(payload, payload.size, a4))
+                true
+            }.getOrDefault(false)
         }
-        return sent
+        val a6 = enginePeer6
+        val s6 = engineSock6
+        if (a6 != null && s6 != null) {
+            return runCatching {
+                s6.send(DatagramPacket(payload, payload.size, a6))
+                true
+            }.getOrDefault(false)
+        }
+        return false
     }
 
     /**
@@ -366,7 +394,7 @@ object PeerSlot {
     private fun startEngineReplyLoop(s4: DatagramSocket, s6: DatagramSocket?) {
         engineRxThread?.interrupt()
         engineRxThread = thread(name = "bot-engine-rx") {
-            fun pump(s: DatagramSocket) {
+            fun pump(s: DatagramSocket, isV6: Boolean) {
                 val buf = ByteArray(4096)
                 while (armed && !s.isClosed) {
                     val pkt = DatagramPacket(buf, buf.size)
@@ -376,11 +404,23 @@ object PeerSlot {
                     } catch (_: Throwable) {
                         continue
                     }
-                    if (n > 0) forwardEngineFrame(buf.copyOf(n))
+                    if (n > 0) {
+                        val from = pkt.socketAddress as? InetSocketAddress
+                        if (from != null) {
+                            val known = if (isV6) enginePeer6 != null else enginePeer4 != null
+                            if (isV6) enginePeer6 = from else enginePeer4 = from
+                            if (!known) {
+                                AppState.appendLog("[BOT-SLOT  ] the engine's own socket " +
+                                    "is $from (${if (isV6) "IPv6" else "IPv4"}) -- " +
+                                    "the game's frames go there")
+                            }
+                        }
+                        forwardEngineFrame(buf.copyOf(n))
+                    }
                 }
             }
-            val t6 = if (s6 != null) thread(name = "bot-engine-rx6") { pump(s6) } else null
-            pump(s4)
+            val t6 = if (s6 != null) thread(name = "bot-engine-rx6") { pump(s6, true) } else null
+            pump(s4, false)
             t6?.join()
         }
     }

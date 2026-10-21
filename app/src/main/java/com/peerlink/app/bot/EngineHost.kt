@@ -63,6 +63,13 @@ object EngineHost {
     /** The engine's own punch (FUN_07eb9b40's dispatch). */
     const val PUNCH = 0x7db9b40L
 
+    /**
+     * The engine's own app-language setter.  Every lab run hands the engine
+     * the app's language (1 = US) through it before the start; the engine's
+     * startup reads it and builds its own blocks from it.
+     */
+    const val APP_LANGUAGE = 0x822ee30L
+
     /** One address block, as the engine's own builder writes it. */
     const val BLOCK_SIZE = 0x80
 
@@ -122,6 +129,9 @@ object EngineHost {
      */
     fun start(): Long {
         if (base == 0L) return 0L
+        AppState.appendLog("[ENGINE-HOST] calling the engine's own start")
+        // The lab's order, every run: the app's language, then the start.
+        call(APP_LANGUAGE, 1L, 0L, 0L, 0L)
         call(START, 0L, 0L, 0L)
         val client = call(CLIENT_GET, 0L, 0L, 0L)
         if (client == 0L) {
@@ -211,6 +221,16 @@ object EngineHost {
             return false
         }
         if (!load(staged.absolutePath)) return false
+        if (!nativeNoJavaActivity()) {
+            // The lab installs a fake "no Java attached" activity before it
+            // starts the engine; without one the engine's start walks into a
+            // null activity and dies, taking this whole process with it.  A
+            // build whose setter did not verify is refused here, so the app
+            // stays up and the slot's own answers keep the match alive.
+            AppState.appendLog("[ENGINE-HOST] the engine's no-Java activity is " +
+                "not in -- the start would die on it, so it is not called")
+            return false
+        }
         if (start() == 0L) return false
         return setMyId(uid)
     }
@@ -313,6 +333,7 @@ object EngineHost {
         a3: Long,
     ): Long
     private external fun nativeBase(): Long
+    private external fun nativeNoJavaActivity(): Boolean
     private external fun nativeAlloc(size: Int): Long
     private external fun nativeWrite(addr: Long, bytes: ByteArray)
     private external fun nativeFree(addr: Long)
