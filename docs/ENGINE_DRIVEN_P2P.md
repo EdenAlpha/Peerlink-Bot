@@ -186,17 +186,29 @@ release. Check the commit shown under the title: the work starts at
 
 **What the log must show, in this order:**
 
-    [ENGINE-BRIDGE] engine staged for the app: ...
+    [ENGINE-BRIDGE] engine status: staged=<bytes> loaded=false
+    [ENGINE-BRIDGE] engine staged for the app: ... (route=app)
     [ENGINE-HOST] engine loaded at 0x...
     [ENGINE-HOST] started, client=0x...
     [ENGINE-HOST] set my id ... -> 1
-    [BOT-FLOW  ] engine got the peer: <uid> v4nat=... -> 1
-    [NATIVE/EVENT] engine socket port <port> ...
-    [VPN-UNDER ] the engine is speaking from port <port> ...
-    [BOT-SLOT  ] the game's frames now go to the engine on 127.0.0.1:<port>
+    [BOT-SLOT  ] the engine's peer is 127.0.0.1:1163 and [::1]:1163
+    [BOT-FLOW  ] engine got the peer: <uid> ... -> true
+    [BOT-FLOW  ] engine punch -> ...
+    [BOT-FLOW  ] engine verdict=... heard=...
+    [BOT-SLOT  ] the engine answered (<n> bytes) -- the bot stops answering
+                 the game itself
 
 The engine's own verdict is the finish line: `EngineHost.check()` = 1 (the
-transport's state 6).
+transport's state 6).  Until the engine's frames are actually seen, the bot
+keeps answering the game as it always did, so this build is never worse than
+the one before it.
+
+**Where the two halves meet:** the tunnel carries the game alone, so the
+engine's frames could never enter it.  The engine is therefore handed this
+slot as its opponent -- `127.0.0.1:1163` (and `[::1]:1163`) with the capture's
+own open-NAT word.  Its frames arrive on the slot's sockets and travel to the
+game through the backend, exactly as the bot's answers did; the game's frames
+are handed back to it unchanged.
 
 **The one thing to watch:** the engine keeps the peer's id only when it
 has an IPv6 channel as well as an IPv4 one, and that needs the phone's
