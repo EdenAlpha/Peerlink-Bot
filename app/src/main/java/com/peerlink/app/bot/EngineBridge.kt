@@ -187,6 +187,37 @@ object EngineBridge {
     }
 
     /**
+     * Called when a bot-mode session starts.
+     *
+     * The engine belongs to the app's process, and the export's log only
+     * covers the session, so this both reports the engine's state and, when
+     * it is not up yet, gets it up -- in the log window, where the story can
+     * be read afterwards.
+     */
+    fun ensureEngineForSession(context: Context): Boolean {
+        val staged = File(stageDir(context), "libUE4.so")
+        val stagedBytes = if (staged.isFile) staged.length() else 0L
+        val loaded = EngineHost.base != 0L
+        log("engine status: staged=$stagedBytes bytes loaded=$loaded")
+
+        if (loaded) return true
+        if (!stageEngine(context)) {
+            log("the engine is not staged -- the bot answers the game itself this session")
+            return false
+        }
+        val uid = context
+            .getSharedPreferences("bot_mode_prefs", Context.MODE_PRIVATE)
+            .getLong("uid", 0L)
+        if (uid == 0L) {
+            log("the bot's id is not known yet -- the engine waits")
+            return false
+        }
+        val up = EngineHost.prepare(context, uid)
+        log(if (up) "the engine is up for this session" else "the engine did NOT come up this session")
+        return up
+    }
+
+    /**
      * The directory the installed game keeps its native libraries in, asked
      * of the package manager -- which knows the path an app is not allowed
      * to search for itself.

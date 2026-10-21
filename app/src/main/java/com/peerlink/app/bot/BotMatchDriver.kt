@@ -312,6 +312,10 @@ object BotMatchDriver {
 
             PeerSlot.arm(opp, gate.uid, peerAddr, localIp, localPort)
             log("connection phase ARMED -- the bot answers .53.2 traffic from here")
+            // The decisive moment: whether the engine is up decides whether
+            // the engine or the bot's own answers carry this connection.
+            log("engine at the connection phase: loaded=${EngineHost.base != 0L} " +
+                "peerPort=${com.peerlink.app.core.AppState.enginePeerPort}")
             status("CONNECTED -- answering the game's connection packets")
 
             // Mid-match liveness: re-push the antenna echo on a cadence.

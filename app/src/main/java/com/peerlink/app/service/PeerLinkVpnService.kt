@@ -15,6 +15,7 @@ import android.os.Build
 import android.os.ParcelFileDescriptor
 import android.os.SystemClock
 import com.peerlink.app.bot.BotMode
+import com.peerlink.app.bot.EngineBridge
 import com.peerlink.app.bot.PeerSlot
 import com.peerlink.app.core.AppState
 import com.peerlink.app.core.MatchTracker
@@ -677,6 +678,11 @@ class PeerLinkVpnService : VpnService() {
 
     private fun startBotModeVpn() {
         AppState.appendLog("[VPN-START ] Bot mode: native datapath -- peer slot at 127.0.0.1:${BotMode.BOT_PORT}, default underlay")
+        // The engine belongs to this process and this session: report its
+        // state now, and get it up now if it is not -- the export's log
+        // starts here, so the engine's story has to be inside it.
+        Thread({ EngineBridge.ensureEngineForSession(this) }, "engine-session")
+            .apply { isDaemon = true }.start()
         var lastNatStatLog = 0L
         var lastTunnelOut = -1L
         var lastTunnelIn = -1L
