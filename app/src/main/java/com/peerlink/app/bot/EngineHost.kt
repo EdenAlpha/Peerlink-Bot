@@ -188,6 +188,7 @@ object EngineHost {
      * belongs to a moment when the phone is idle -- before a match, not
      * during one.
      */
+    @Synchronized
     fun prepare(ctx: android.content.Context, uid: Long): Boolean {
         val staged = java.io.File(ctx.filesDir, "engine/libUE4.so")
         if (!staged.exists()) {
