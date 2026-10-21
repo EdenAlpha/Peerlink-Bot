@@ -41,9 +41,20 @@ object PeerSlot {
      */
     const val ENGINE_PORT = 1163
 
-    /** True once the engine holds this slot as its peer and it answered. */
+    /**
+     * True once the engine holds this slot as its peer (the peer record was
+     * accepted).  Its frames are then carried to the game.
+     */
     @Volatile
     var engineAttached: Boolean = false
+
+    /**
+     * True once the engine's own frames have been seen on this slot.  Until
+     * that moment the bot keeps answering the game itself, so the connection
+     * is never worse than it was before the engine existed.
+     */
+    @Volatile
+    var engineHeard: Boolean = false
 
     /** NativeBackendConfig.localPort -- the backend's bound peer socket. */
     const val BACKEND_PORT = 17024
@@ -171,6 +182,7 @@ object PeerSlot {
     fun disarm() {
         armed = false
         engineAttached = false
+        engineHeard = false
         closeEngineSockets()
         runCatching { socket?.close() }
         socket = null
@@ -247,8 +259,12 @@ object PeerSlot {
             // peer (127.0.0.1:1163), so everything it sends arrives here and
             // everything it must answer is sent to it: the game's frames go
             // over unchanged and the engine's own frames go back to the game.
-            // The bot carries the bytes and nothing else.
-            if (engineAttached && sendToEngine(inner.udpPayload)) continue
+            // Until the engine has actually spoken, the bot's own answers keep
+            // the connection alive exactly as before.
+            if (engineAttached) {
+                sendToEngine(inner.udpPayload)
+                if (engineHeard) continue
+            }
 
             val eng = engine ?: continue
             val (reply, note) = eng.handle(inner.udpPayload)
@@ -370,6 +386,11 @@ object PeerSlot {
     }
 
     private fun forwardEngineFrame(payload: ByteArray) {
+        if (!engineHeard) {
+            engineHeard = true
+            AppState.appendLog("[BOT-SLOT  ] the engine answered " +
+                "(${payload.size} bytes) -- the bot stops answering the game itself")
+        }
         if (gameIp.isBlank() || gamePort <= 0) return
         val out = buildInnerUdpPacket(
             srcIp = AppState.peerFabricatedIp,
@@ -407,7 +428,7 @@ object PeerSlot {
             while (armed && !sawInboundStun && punches < 15 &&
                 System.currentTimeMillis() < deadline
             ) {
-                if (engineAttached) {
+                if (engineHeard) {
                     // The engine punches for itself.
                     AppState.appendLog("[BOT-SLOT  ] the engine is playing the " +
                         "opponent -- the bot does not punch")

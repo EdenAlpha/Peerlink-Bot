@@ -496,11 +496,44 @@ class BotMatchFlow(
             v6ReflexivePort = PeerSlot.ENGINE_PORT, v6NatType = OPEN_NAT_WORD,
         ) ?: return false
         val ok = EngineHost.setPeers(rec)
-        if (ok) PeerSlot.engineAttached = true
+        if (ok) {
+            PeerSlot.engineAttached = true
+            // The engine's own punch (0x7db9b40 in the lab): the entry that
+            // makes it speak.  Without it the engine may hold the record and
+            // sit still, and the game would get nothing.
+            AppState.appendLog("[BOT-FLOW  ] engine punch -> ${EngineHost.punch()}")
+            watchEngineVerdict()
+        }
         AppState.appendLog("[BOT-FLOW  ] engine got the peer: $peerId " +
             "(session said v4nat=$v4Nat v6nat=$v6Nat) -- its opponent is now " +
             "${PeerSlot.LOOPBACK_PEER_IP}:${PeerSlot.ENGINE_PORT} -> $ok")
         return ok
+    }
+
+    /**
+     * Report the engine's own verdict for a while.  Its check returns 1 when
+     * its transport says the peer is connected -- that number, and whether the
+     * engine has actually been heard from, is the whole answer to "did the
+     * engine take over".
+     */
+    private fun watchEngineVerdict() {
+        Thread({
+            var last = -1L
+            for (i in 1..20) {
+                Thread.sleep(1_000)
+                val v = try {
+                    EngineHost.check()
+                } catch (_: Throwable) {
+                    -1L
+                }
+                if (v != last) {
+                    AppState.appendLog("[BOT-FLOW  ] engine verdict=$v " +
+                        "heard=${PeerSlot.engineHeard}")
+                    last = v
+                }
+                if (v == 1L) break
+            }
+        }, "engine-verdict").apply { isDaemon = true }.start()
     }
 
 
