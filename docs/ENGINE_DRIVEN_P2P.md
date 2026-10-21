@@ -172,30 +172,55 @@ Because the engine is the one punching, the bot's fabricated answers
 
 ## 7. The device test
 
-The last proof needs the phone. The app must be reachable from the phone's
-network: this PC is at 100.72.241.70 over Tailscale.
+The lab is done; the proof that matters is on the phone. The app now loads
+the real engine in its own process, hands it the opponent, and moves the
+bytes between the game and the engine - the engine plays the opponent with
+its own code.
 
-1. Install the lean APK (the release build, arm64-v8a only) on both phones.
-2. Start bot mode on the phone that plays the opponent. The app logs, in
-   this order:
-   - `[ENGINE-BRIDGE] engine staged for the app: ...` - the helper put the
-     engine where the app can load it.
-   - `[ENGINE-HOST] engine loaded at 0x...` - the engine is in the app's
-     process, on the app's sockets and the app's tunnel.
-   - `[ENGINE-HOST] started, client=0x...` - the engine made its client and
-     its own threads.
-   - `[ENGINE-HOST] set my id <uid> -> 1` - the engine knows which player
-     it is.
-   - `[BOT-FLOW  ] engine got the peer: <uid> v4nat=... -> 1` -
-     the peer arrived in the engine's own record.
-3. Then the engine's own punch goes out and the two engines answer each
-   other. The check that matters is the engine's own verdict:
-   `EngineHost.check()` returning 1 (the transport's state 6).
-4. If the verdict stays 0, the log line that says why is the one to read:
-   the NAT word the peer declared (`v4nat`), and whether the
-   engine had an IPv6 channel at all.
+**The build:** https://github.com/EdenAlpha/Peerlink-Bot/releases -
+`peerlink-debug-latest` (the rolling release) or a permanent `build-*`
+release. Check the commit shown under the title: the work starts at
+`c0366bf`, and the byte-moving wiring is `a255b07`. The pre-work code is
+`36f08df` and does NOT contain the engine host - if the log has no
+`[ENGINE-HOST]` line at all, that is the build you ran.
 
-## 8. Where the evidence lives
+**What the log must show, in this order:**
+
+    [ENGINE-BRIDGE] engine staged for the app: ...
+    [ENGINE-HOST] engine loaded at 0x...
+    [ENGINE-HOST] started, client=0x...
+    [ENGINE-HOST] set my id ... -> 1
+    [BOT-FLOW  ] engine got the peer: <uid> v4nat=... -> 1
+    [NATIVE/EVENT] engine socket port <port> ...
+    [VPN-UNDER ] the engine is speaking from port <port> ...
+    [BOT-SLOT  ] the game's frames now go to the engine on 127.0.0.1:<port>
+
+The engine's own verdict is the finish line: `EngineHost.check()` = 1 (the
+transport's state 6).
+
+**The one thing to watch:** the engine keeps the peer's id only when it
+has an IPv6 channel as well as an IPv4 one, and that needs the phone's
+IPv6 to reach the game's NAT service. The phone's IPv4 clearly does (the
+T7 beat works: `10.140.9.154:59234` from `54.64.79.140:3478`). If the
+IPv6 path does not, the engine will keep its punch but never connect, and
+the bot has to hand the engine that half instead - the engine's own
+client setter for it is mapped.
+
+## 8. What gets deleted once the device test passes
+
+Removed, not fixed - the fabricated P2P the bot does today:
+
+* `PeerBotEngine.kt`: `punchReq`, `punchRes`, `capReq`, `capRes`,
+  `sessReqLong`, `sessResLong`, `sessReqShort`, `sessResShort`, and the
+  `handle()` dispatcher that answers the game.
+* `PeerSlot.kt`: the answering path (the `eng.handle(...)` reply), the
+  bot's own punch burst (`originateLoop`), and the second `handle()` call
+  in the game's own frame path.
+
+What stays: the slot as a forwarder, the NAT/T7 measurement, the gate
+ladder, the room, the ready, the session, the score.
+
+## 9. Where the evidence lives
 
     work/qemu/NOTES_engine_p2p_state.md      the lab findings, in order
     work/qemu/byte_compare_verdict.txt       the byte-for-byte verdict
