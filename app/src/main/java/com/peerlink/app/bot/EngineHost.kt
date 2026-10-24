@@ -306,8 +306,11 @@ object EngineHost {
         buildBlock(2, v6Reflexive, v6ReflexivePort)?.let { copyInto(rec, 0x190, it) }
         // +0x210: the peer's IPv6 NAT word
         putLong(rec, 0x210, v6NatType)
-        // +0x214: the transport's peer id -- the engine writes -1 itself
-        putLong(rec, 0x214, -1L)
+        // +0x214: the transport's peer id -- the engine writes -1 itself.
+        // FOUR bytes: the record ends at 0x218, and an 8-byte write here
+        // runs past the end of the array -- that crashed the app at the
+        // hand-off before this fix.
+        putInt(rec, 0x214, -1)
         return rec
     }
 
@@ -318,6 +321,12 @@ object EngineHost {
 
     private fun putLong(dst: ByteArray, at: Int, v: Long) {
         for (i in 0 until 8) {
+            dst[at + i] = ((v shr (8 * i)) and 0xFF).toByte()
+        }
+    }
+
+    private fun putInt(dst: ByteArray, at: Int, v: Int) {
+        for (i in 0 until 4) {
             dst[at + i] = ((v shr (8 * i)) and 0xFF).toByte()
         }
     }

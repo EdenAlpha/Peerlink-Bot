@@ -466,48 +466,52 @@ class BotMatchFlow(
      */
     fun handPeerToEngine(entry: Map<*, *>, peerId: Long): Boolean {
         if (EngineHost.base == 0L) return false
-        val a4 = entry["address_ipv4"] as? Map<*, *> ?: return false
-        val a6 = entry["address_ipv6"] as? Map<*, *>
-        fun s(m: Map<*, *>?, k: String): String =
-            (m?.get(k) as? String).orEmpty()
-        fun p(m: Map<*, *>?, k: String): Int =
-            (m?.get(k) as? Number)?.toInt() ?: 0
-        fun n(m: Map<*, *>?, k: String): Long =
-            (m?.get(k) as? Number)?.toLong() ?: 0L
+        AppState.appendLog("[BOT-FLOW  ] engine hand off: building the peer record")
+        try {
+            val a4 = entry["address_ipv4"] as? Map<*, *> ?: return false
+            val a6 = entry["address_ipv6"] as? Map<*, *>
+            fun n(m: Map<*, *>?, k: String): Long =
+                (m?.get(k) as? Number)?.toLong() ?: 0L
 
-        val v4Nat = n(a4, "nat_type")
-        val v6Nat = n(a6, "nat_type")
+            val v4Nat = n(a4, "nat_type")
+            val v6Nat = n(a6, "nat_type")
 
-        // The opponent the ENGINE is given is this app's own peer slot.  The
-        // tunnel carries the game alone, so the engine's frames can only meet
-        // the game's frames on loopback: it is told its peer is
-        // 127.0.0.1:1163 (and [::1]:1163), it punches there, the slot carries
-        // its frames to the game as the fabricated peer, and the game's frames
-        // are handed back to it.  The NAT word is the capture's own open-NAT
-        // value, so the engine treats the peer as reachable, exactly as it
-        // would on a phone behind an open NAT.
-        val rec = EngineHost.buildPeerRecord(
-            peerId = peerId,
-            v4Host = PeerSlot.LOOPBACK_PEER_IP, v4HostPort = PeerSlot.ENGINE_PORT,
-            v4Reflexive = PeerSlot.LOOPBACK_PEER_IP,
-            v4ReflexivePort = PeerSlot.ENGINE_PORT, v4NatType = OPEN_NAT_WORD,
-            v6Host = "::1", v6HostPort = PeerSlot.ENGINE_PORT,
-            v6Reflexive = "::1",
-            v6ReflexivePort = PeerSlot.ENGINE_PORT, v6NatType = OPEN_NAT_WORD,
-        ) ?: return false
-        val ok = EngineHost.setPeers(rec)
-        if (ok) {
-            PeerSlot.engineAttached = true
-            // The engine's own punch (0x7db9b40 in the lab): the entry that
-            // makes it speak.  Without it the engine may hold the record and
-            // sit still, and the game would get nothing.
-            AppState.appendLog("[BOT-FLOW  ] engine punch -> ${EngineHost.punch()}")
-            watchEngineVerdict()
+            // The opponent the ENGINE is given is this app's own peer slot.  The
+            // tunnel carries the game alone, so the engine's frames can only meet
+            // the game's frames on loopback: it is told its peer is
+            // 127.0.0.1:1163 (and [::1]:1163), it punches there, the slot carries
+            // its frames to the game as the fabricated peer, and the game's frames
+            // are handed back to it.  The NAT word is the capture's own open-NAT
+            // value, so the engine treats the peer as reachable, exactly as it
+            // would on a phone behind an open NAT.
+            val rec = EngineHost.buildPeerRecord(
+                peerId = peerId,
+                v4Host = PeerSlot.LOOPBACK_PEER_IP, v4HostPort = PeerSlot.ENGINE_PORT,
+                v4Reflexive = PeerSlot.LOOPBACK_PEER_IP,
+                v4ReflexivePort = PeerSlot.ENGINE_PORT, v4NatType = OPEN_NAT_WORD,
+                v6Host = "::1", v6HostPort = PeerSlot.ENGINE_PORT,
+                v6Reflexive = "::1",
+                v6ReflexivePort = PeerSlot.ENGINE_PORT, v6NatType = OPEN_NAT_WORD,
+            ) ?: return false
+            val ok = EngineHost.setPeers(rec)
+            if (ok) {
+                PeerSlot.engineAttached = true
+                // The engine's own punch (0x7db9b40 in the lab): the entry that
+                // makes it speak.  Without it the engine may hold the record and
+                // sit still, and the game would get nothing.
+                AppState.appendLog("[BOT-FLOW  ] engine punch -> ${EngineHost.punch()}")
+                watchEngineVerdict()
+            }
+            AppState.appendLog("[BOT-FLOW  ] engine got the peer: $peerId " +
+                "(session said v4nat=$v4Nat v6nat=$v6Nat) -- its opponent is now " +
+                "${PeerSlot.LOOPBACK_PEER_IP}:${PeerSlot.ENGINE_PORT} -> $ok")
+            return ok
+        } catch (t: Throwable) {
+            // Anything failing in the hand-off must leave the app alive and
+            // say so -- the app must never die in the middle of a match.
+            AppState.appendLog("[BOT-FLOW  ] engine hand off failed: $t")
+            return false
         }
-        AppState.appendLog("[BOT-FLOW  ] engine got the peer: $peerId " +
-            "(session said v4nat=$v4Nat v6nat=$v6Nat) -- its opponent is now " +
-            "${PeerSlot.LOOPBACK_PEER_IP}:${PeerSlot.ENGINE_PORT} -> $ok")
-        return ok
     }
 
     /**
