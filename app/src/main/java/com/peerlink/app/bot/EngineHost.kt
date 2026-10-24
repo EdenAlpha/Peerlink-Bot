@@ -37,6 +37,11 @@ object EngineHost {
     var base: Long = 0L
         private set
 
+    /** The client the engine's own start produced (0 before the start). */
+    @Volatile
+    var client: Long = 0L
+        private set
+
     // ---- the engine's own entry points, by offset from the load base ----
 
     /** The engine's own start: it creates the client and its threads. */
@@ -59,6 +64,15 @@ object EngineHost {
 
     /** The client's own check: the verdict on the P2P exchange. */
     const val CLIENT_CHECK = 0x7e013acL
+
+    /**
+     * The client's own per-frame update (FUN_07efe9e4).  The real game calls
+     * this every frame while the connection phase runs: it marks the peer's
+     * candidate addresses per record and walks the client's own state.  The
+     * lab showed the readiness chain hangs off exactly this call -- without
+     * it the engine's promoted connection never becomes answer-ready.
+     */
+    const val CLIENT_POLL = 0x7dfe9e4L
 
     /** The engine's own punch (FUN_07eb9b40's dispatch). */
     const val PUNCH = 0x7db9b40L
@@ -139,6 +153,7 @@ object EngineHost {
             return 0L
         }
         call(CLIENT_SET, client, 1L, 0L, 0L)
+        this.client = client
         AppState.appendLog("[ENGINE-HOST] started, client=0x$client")
         return client
     }
@@ -195,7 +210,14 @@ object EngineHost {
     }
 
     /** The engine's own verdict on the exchange: 1 = connected. */
-    fun check(): Long = call(CLIENT_CHECK, 0L, 0L, 0L)
+    fun check(): Long = if (client != 0L) call(CLIENT_CHECK, client, 0L, 0L) else 0L
+
+    /**
+     * The engine's own per-frame update -- the call the real game makes every
+     * frame of the connection phase.  Returns its own status; harmless to
+     * call while the client is still punching (the lab's runs).
+     */
+    fun poll(): Long = if (client != 0L) call(CLIENT_POLL, client, 0L, 0L) else 0L
 
     /** The engine's own punch: from here the engine drives the exchange. */
     fun punch(): Long = call(PUNCH, 0L, 0L, 0L)

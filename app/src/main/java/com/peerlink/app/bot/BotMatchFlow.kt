@@ -515,27 +515,37 @@ class BotMatchFlow(
     }
 
     /**
-     * Report the engine's own verdict for a while.  Its check returns 1 when
-     * its transport says the peer is connected -- that number, and whether the
-     * engine has actually been heard from, is the whole answer to "did the
-     * engine take over".
+     * Drive the engine the way the real game does -- its per-frame update
+     * (the poll) every ~100 ms -- and report its own verdict for a while.
+     * Its check returns 1 when its transport says the peer is connected;
+     * that number, and whether the engine has actually been heard from, is
+     * the whole answer to "did the engine take over".
      */
     private fun watchEngineVerdict() {
         Thread({
             var last = -1L
-            for (i in 1..20) {
-                Thread.sleep(1_000)
-                val v = try {
-                    EngineHost.check()
+            var polls = 0L
+            val until = System.currentTimeMillis() + 60_000L
+            while (System.currentTimeMillis() < until) {
+                try {
+                    EngineHost.poll()
                 } catch (_: Throwable) {
-                    -1L
                 }
-                if (v != last) {
-                    AppState.appendLog("[BOT-FLOW  ] engine verdict=$v " +
-                        "heard=${PeerSlot.engineHeard}")
-                    last = v
+                polls++
+                if (polls % 10L == 0L) {
+                    val v = try {
+                        EngineHost.check()
+                    } catch (_: Throwable) {
+                        -1L
+                    }
+                    if (v != last) {
+                        AppState.appendLog("[BOT-FLOW  ] engine verdict=$v " +
+                            "heard=${PeerSlot.engineHeard} polls=$polls")
+                        last = v
+                    }
+                    if (v == 1L) break
                 }
-                if (v == 1L) break
+                Thread.sleep(100)
             }
         }, "engine-verdict").apply { isDaemon = true }.start()
     }
