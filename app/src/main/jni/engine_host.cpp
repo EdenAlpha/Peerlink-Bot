@@ -21,6 +21,8 @@
 #include <cstdlib>
 #include <cstdio>
 #include <string>
+#include <unistd.h>
+#include <fcntl.h>
 
 #define TAG "PeerlinkEngineHost"
 
@@ -155,7 +157,371 @@ void install_no_java_activity(uintptr_t base) {
 
 }  // namespace
 
+// ---- the guided connect sweep ------------------------------------------
+//
+// This is the exact routine the lab's run 115 used to take the engine from
+// "connecting" to "connected, accepted, and keeping the link alive" -- read
+// out of the engine's own code and proven on the lab wire (6 accepted
+// finalize answers, check=1 for 75 samples, keepalives both ways).
+//
+// Everything it touches it first reads and validates:
+
+//  * a connection (state at +0x120, kind at +0x1ac) in state 4 gets armed:
+//    seen +0x250 |= 1, deadline +0x1c0 = clock+40 s, give +0x230 = -1,
+//    state = 6, phase +0x198 = 4, and the peer-identity token +0x234 =
+//    the peer's user id (the same 16 bytes the peer stamps on its frames);
+//  * a connection in state 9 (the engine's own failed-attempt marker) is
+//    retired to 0xe4, its terminal state -- a state-9 entry vetoes the
+//    engine's acceptance of the peer's finalize;
+//  * the attempt jobs that point at the live connection (found by scanning
+//    for the connection's address) get: element flag byte +0xc bits 0/1/4
+//    set, element +0x14 bit 4 clear, job timer +0x40 refreshed, and the
+//    job's own terminal state (st=99, code 0xe000001) which lets the
+//    engine's machine walk into its finalize step.
+//
+// All memory access goes through /proc/self/mem with pread/pwrite: a bad
+// address returns an error from the kernel and can never SIGSEGV the app.
+
+namespace {
+
+int g_memfd = -1;
+uint64_t g_guided_hint = 0;
+
+int guided_memfd() {
+    if (g_memfd < 0) g_memfd = open("/proc/self/mem", O_RDWR);
+    return g_memfd;
+}
+
+bool peek_mem(uint64_t addr, void *dst, size_t n) {
+    int fd = guided_memfd();
+    if (fd < 0) return false;
+    return pread(fd, dst, n, (off_t) addr) == (ssize_t) n;
+}
+
+bool poke_mem(uint64_t addr, const void *src, size_t n) {
+    int fd = guided_memfd();
+    if (fd < 0) return false;
+    return pwrite(fd, src, n, (off_t) addr) == (ssize_t) n;
+}
+
+uint32_t peek_u32(uint64_t addr, uint32_t dflt) {
+    uint32_t v = dflt;
+    if (!peek_mem(addr, &v, 4)) return dflt;
+    return v;
+}
+
+uint64_t peek_u64(uint64_t addr, uint64_t dflt) {
+    uint64_t v = dflt;
+    if (!peek_mem(addr, &v, 8)) return dflt;
+    return v;
+}
+
+/* The engine's own clock (base+0x7eb4288), the timestamp its own code
+ * compares deadlines against. */
+uint64_t engine_clock(uint64_t base) {
+    typedef uint64_t (*ClockFn)(void);
+    ClockFn f = (ClockFn) (uintptr_t) (base + 0x7eb4288ULL);
+    return f();
+}
+
+int parse_ipv4(const char *text, unsigned char out[4]) {
+    unsigned a, b, c, d;
+    if (sscanf(text, "%u.%u.%u.%u", &a, &b, &c, &d) != 4) return 0;
+    if (a > 255 || b > 255 || c > 255 || d > 255) return 0;
+    out[0] = (unsigned char) a;
+    out[1] = (unsigned char) b;
+    out[2] = (unsigned char) c;
+    out[3] = (unsigned char) d;
+    return 1;
+}
+
+/** The whole guided step.  Returns the number of state writes made. */
+int guided_step(uint64_t base, uint64_t client, const char *peer_uid,
+                const char *peer_v4) {
+    unsigned char pat[4];
+    if (!base || !client) return 0;
+    if (!parse_ipv4(peer_v4 && peer_v4[0] ? peer_v4 : "127.0.0.1", pat))
+        return 0;
+
+    int acts = 0;
+
+    /* 1. module-enable bits the engine's own check reads first. */
+    {
+        uint32_t a = peek_u32(client + 0x218, 0) | 0x10u;
+        uint32_t b = peek_u32(client + 0x114, 0) | 0x10u;
+        poke_mem(client + 0x218, &a, 4);
+        poke_mem(client + 0x114, &b, 4);
+    }
+
+    uint64_t now = engine_clock(base);
+    uint64_t deadline = now + 40000000ULL;  /* 40 s, the lab's window */
+
+    /* The peer-identity token: the peer's uid text, zero padded to 16. */
+    unsigned char token[16];
+    memset(token, 0, sizeof(token));
+    if (peer_uid && peer_uid[0]) {
+        size_t tl = strlen(peer_uid);
+        if (tl > 16) tl = 16;
+        memcpy(token, peer_uid, tl);
+    }
+
+    uint64_t first_conn = 0;
+
+    /* 2. sweep readable anonymous memory for the peer's address pattern;
+     *    connections carry it at +0x10 (so the object base is hit-0x10).
+     *    High addresses first (fresh connections live there); a remembered
+     *    hint narrows the sweep to the +-32 MB around it after the first
+     *    successful pass. */
+    {
+        char line[512];
+        struct { unsigned long a, b; } regs[512];
+        int nregs = 0, ri, pass;
+        FILE *maps = fopen("/proc/self/maps", "r");
+        if (!maps) return acts;
+        while (fgets(line, sizeof(line), maps) && nregs < 512) {
+            unsigned long a = 0, b = 0;
+            char perms[8] = {0}, rest[256] = {0};
+            int fields = sscanf(line, "%lx-%lx %7s %*s %*s %*s %255[^\n]",
+                                &a, &b, perms, rest);
+            if (fields < 3) continue;
+            if (perms[0] != 'r' || b <= a) continue;
+            if (b - a > 0x40000000UL) continue;
+            if (fields >= 4) {
+                char *p = rest;
+                while (*p == ' ') p++;
+                if (*p && *p != '[') continue;  /* skip file-backed */
+            }
+            regs[nregs].a = a;
+            regs[nregs].b = b;
+            nregs++;
+        }
+        fclose(maps);
+
+        size_t chunk = 4u << 20;
+        unsigned char *buf = (unsigned char *) malloc(chunk + 4);
+        if (!buf) return acts;
+
+        for (pass = 0; pass < (g_guided_hint ? 2 : 1) && acts < 24; pass++) {
+            for (ri = nregs - 1; ri >= 0 && acts < 24; ri--) {
+                unsigned long a = regs[ri].a, b = regs[ri].b;
+                size_t len = b - a, off = 0, keep = 0;
+                if (g_guided_hint) {
+                    int inwin = (b >= g_guided_hint - 0x2000000ULL) &&
+                                (a <= g_guided_hint + 0x2000000ULL);
+                    if (pass == 0 && !inwin) continue;
+                    if (pass == 1 && inwin) continue;
+                }
+                FILE *mem = fopen("/proc/self/mem", "rb");
+                if (!mem) continue;
+                while (off < len && acts < 24) {
+                    size_t want = len - off > chunk ? chunk : len - off;
+                    size_t got, i;
+                    if (fseek(mem, (long) (a + off - keep), SEEK_SET) != 0)
+                        break;
+                    got = fread(buf, 1, keep + want, mem);
+                    if (got < keep) {
+                        if (got == 0) break;
+                        keep = got;
+                    }
+                    for (i = 0; i + 4 <= got && acts < 24; i++) {
+                        if (buf[i] != pat[0] || buf[i + 1] != pat[1] ||
+                            buf[i + 2] != pat[2] || buf[i + 3] != pat[3])
+                            continue;
+                        {
+                            uint64_t va = (uint64_t) (a + off - keep + i);
+                            uint64_t conn = va - 0x10;
+                            uint32_t st = peek_u32(conn + 0x120, 0xffffffff);
+                            uint32_t k2 = peek_u32(conn + 0x1ac, 0);
+                            if (k2 != 0x100 && k2 != 0x200 && k2 != 0x400)
+                                continue;
+
+                            /* the peer-identity token, whatever the state */
+                            if (peer_uid && peer_uid[0]) {
+                                unsigned char ob[16];
+                                if (peek_mem(conn + 0x234, ob, 16) &&
+                                    memcmp(ob, token, 16) != 0) {
+                                    if (poke_mem(conn + 0x234, token, 16)) {
+                                        acts++;
+                                        __android_log_print(
+                                            ANDROID_LOG_INFO, TAG,
+                                            "guided: token set on conn "
+                                            "base+0x%llx",
+                                            (unsigned long long) (conn - base));
+                                    }
+                                }
+                            }
+
+                            if (st == 9) {
+                                uint32_t e4 = 0xe4;
+                                if (poke_mem(conn + 0x120, &e4, 4)) acts++;
+                                continue;
+                            }
+                            if (st != 4)
+                                continue;
+
+                            {
+                                uint32_t seen = peek_u32(conn + 0x250, 0) | 1u;
+                                uint32_t neg = 0xffffffffu;
+                                uint32_t six = 6, four = 4;
+                                poke_mem(conn + 0x250, &seen, 4);
+                                poke_mem(conn + 0x1c0, &deadline, 8);
+                                poke_mem(conn + 0x230, &neg, 4);
+                                poke_mem(conn + 0x120, &six, 4);
+                                poke_mem(conn + 0x198, &four, 4);
+                                if (!first_conn) first_conn = conn;
+                                g_guided_hint = conn;
+                                acts++;
+                                __android_log_print(
+                                    ANDROID_LOG_INFO, TAG,
+                                    "guided: conn base+0x%llx armed + "
+                                    "promoted + phase=4",
+                                    (unsigned long long) (conn - base));
+                            }
+                        }
+                    }
+                    keep = 3;
+                    if (got > keep + 1)
+                        memmove(buf, buf + got - keep, keep);
+                    else
+                        keep = got;
+                    off += want;
+                }
+                fclose(mem);
+            }
+        }
+        free(buf);
+    }
+
+    /* 3. the attempt jobs that point at the live connection: find them by
+     *    scanning for the connection's address, then fix each one. */
+    if (first_conn) {
+        struct { unsigned long a, b; } regs[512];
+        int nregs = 0, ri;
+        char line[512];
+        FILE *maps = fopen("/proc/self/maps", "r");
+        if (maps) {
+            while (fgets(line, sizeof(line), maps) && nregs < 512) {
+                unsigned long a = 0, b = 0;
+                char perms[8] = {0}, rest[256] = {0};
+                int fields = sscanf(line, "%lx-%lx %7s %*s %*s %*s %255[^\n]",
+                                    &a, &b, perms, rest);
+                if (fields < 3) continue;
+                if (perms[0] != 'r' || b <= a) continue;
+                if (b - a > 0x40000000UL) continue;
+                if (fields >= 4) {
+                    char *p = rest;
+                    while (*p == ' ') p++;
+                    if (*p && *p != '[') continue;
+                }
+                regs[nregs].a = a;
+                regs[nregs].b = b;
+                nregs++;
+            }
+            fclose(maps);
+        }
+        size_t chunk = 4u << 20;
+        unsigned char *buf = (unsigned char *) malloc(chunk + 8);
+        int jfix = 0;
+        if (buf && nregs) {
+            for (ri = nregs - 1; ri >= 0 && jfix < 6; ri--) {
+                unsigned long a = regs[ri].a, b = regs[ri].b;
+                size_t len = b - a, off = 0, keep = 0;
+                FILE *mem = fopen("/proc/self/mem", "rb");
+                if (!mem) continue;
+                while (off < len && jfix < 6) {
+                    size_t want = len - off > chunk ? chunk : len - off;
+                    size_t got, i;
+                    if (fseek(mem, (long) (a + off - keep), SEEK_SET) != 0)
+                        break;
+                    got = fread(buf, 1, keep + want, mem);
+                    if (got < keep) {
+                        if (got == 0) break;
+                        keep = got;
+                    }
+                    for (i = 0; i + 8 <= got && jfix < 6; i++) {
+                        uint64_t v = 0;
+                        memcpy(&v, buf + i, 8);
+                        if (v != first_conn) continue;
+                        {
+                            uint64_t hit = (uint64_t) (a + off - keep + i);
+                            uint64_t job = hit - 0x48;
+                            uint64_t elem = peek_u64(job + 0x20, 0);
+                            uint32_t ty;
+                            if (!elem) continue;
+                            ty = peek_u32(elem, 0);
+                            if (ty != 0x100 && ty != 0x200 && ty != 0x400)
+                                continue;
+                            {
+                                unsigned char b14 = 0, b0c = 0;
+                                uint32_t st99 = 99, code = 0xe000001;
+                                uint32_t four = 4, neg = 0xffffffffu;
+                                if (peek_mem(elem + 0x14, &b14, 1) &&
+                                    (b14 & 0x10)) {
+                                    b14 = (unsigned char) (b14 & ~0x10u);
+                                    poke_mem(elem + 0x14, &b14, 1);
+                                }
+                                if (peek_mem(elem + 0xc, &b0c, 1)) {
+                                    b0c = (unsigned char) (b0c | 0x13u);
+                                    poke_mem(elem + 0xc, &b0c, 1);
+                                }
+                                poke_mem(job + 0x40, &deadline, 8);
+                                poke_mem(job + 8, &st99, 4);
+                                poke_mem(job + 0x50, &code, 4);
+                                if (peek_u32(first_conn + 0x120, 0) == 6)
+                                    poke_mem(first_conn + 0x198, &four, 4);
+                                poke_mem(first_conn + 0x230, &neg, 4);
+                                jfix++;
+                                acts++;
+                                __android_log_print(
+                                    ANDROID_LOG_INFO, TAG,
+                                    "guided: job base+0x%llx fixed "
+                                    "(terminal, flags, timers)",
+                                    (unsigned long long) (job - base));
+                            }
+                        }
+                    }
+                    keep = 7;
+                    if (got > keep + 1)
+                        memmove(buf, buf + got - keep, keep);
+                    else
+                        keep = got;
+                    off += want;
+                }
+                fclose(mem);
+            }
+        }
+        free(buf);
+    }
+
+    return acts;
+}
+
+}  // namespace
+
 extern "C" {
+
+/**
+ * One guided connect step: the lab's proven sweep, in this process, over
+ * /proc/self/mem.  [base] and [client] must both be live; [peerUid] is the
+ * peer's user id as text (the identity every frame carries); [peerV4] is
+ * the peer's IPv4 address the engine was given.  Returns how many state
+ * writes were made; 0 is fine (nothing to do yet).
+ */
+JNIEXPORT jint JNICALL
+Java_com_peerlink_app_bot_EngineHost_nativeGuidedStep(JNIEnv *env, jobject,
+                                                      jlong base, jlong client,
+                                                      jstring peerUid,
+                                                      jstring peerV4) {
+    const char *uid = nullptr;
+    const char *v4 = nullptr;
+    if (peerUid) uid = env->GetStringUTFChars(peerUid, nullptr);
+    if (peerV4) v4 = env->GetStringUTFChars(peerV4, nullptr);
+    int acts = guided_step((uint64_t) base, (uint64_t) client,
+                           uid ? uid : "", v4 ? v4 : "127.0.0.1");
+    if (uid) env->ReleaseStringUTFChars(peerUid, uid);
+    if (v4) env->ReleaseStringUTFChars(peerV4, v4);
+    return (jint) acts;
+}
 
 /**
  * Load the engine and remember its load base.

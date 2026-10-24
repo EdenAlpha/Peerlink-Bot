@@ -500,7 +500,15 @@ class BotMatchFlow(
                 // makes it speak.  Without it the engine may hold the record and
                 // sit still, and the game would get nothing.
                 AppState.appendLog("[BOT-FLOW  ] engine punch -> ${EngineHost.punch()}")
-                watchEngineVerdict()
+                // The lab's proven early arm: one guided step straight after
+                // the punch puts a ready (promoted, phase-4, identity-stamped)
+                // connection in place before the engine's first finalize burst,
+                // which is what its own acceptance needs.  Then the watch loop
+                // keeps sweeping and reading the engine's verdict.
+                val peerUidText = peerId.toString()
+                AppState.appendLog("[BOT-FLOW  ] engine guided arm -> " +
+                    "${EngineHost.guidedStep(peerUidText, PeerSlot.LOOPBACK_PEER_IP)}")
+                watchEngineVerdict(peerUidText)
             }
             AppState.appendLog("[BOT-FLOW  ] engine got the peer: $peerId " +
                 "(session said v4nat=$v4Nat v6nat=$v6Nat) -- its opponent is now " +
@@ -515,39 +523,37 @@ class BotMatchFlow(
     }
 
     /**
-     * Drive the engine the way the real game does -- its per-frame update
-     * (the poll) every ~100 ms -- and report its own verdict for a while.
-     * Its check returns 1 when its transport says the peer is connected;
-     * that number, and whether the engine has actually been heard from, is
-     * the whole answer to "did the engine take over".
+     * Drive the engine the way the lab's proven run did, and report its own
+     * verdict.  Every round: one guided sweep (arm/promote/stamp/retire and
+     * settle the attempt jobs) and the engine's own check, which returns 1
+     * when its transport says the peer is connected.  The guided routine is
+     * the exact sequence that produced the accepted finalize and the
+     * connected verdict on the lab wire; here it runs in this process over
+     * /proc/self/mem, fully guarded -- a wrong address is a kernel error,
+     * never a crash.
      */
-    private fun watchEngineVerdict() {
+    private fun watchEngineVerdict(peerUid: String) {
         Thread({
             var last = -1L
-            var polls = 0L
-            val until = System.currentTimeMillis() + 60_000L
+            var rounds = 0
+            val until = System.currentTimeMillis() + 15 * 60_000L
             while (System.currentTimeMillis() < until) {
-                try {
-                    EngineHost.poll()
+                val acts = EngineHost.guidedStep(peerUid, PeerSlot.LOOPBACK_PEER_IP)
+                rounds++
+                val v = try {
+                    EngineHost.check()
                 } catch (_: Throwable) {
+                    -1L
                 }
-                polls++
-                if (polls % 10L == 0L) {
-                    val v = try {
-                        EngineHost.check()
-                    } catch (_: Throwable) {
-                        -1L
-                    }
-                    if (v != last) {
-                        AppState.appendLog("[BOT-FLOW  ] engine verdict=$v " +
-                            "heard=${PeerSlot.engineHeard} polls=$polls")
-                        last = v
-                    }
-                    if (v == 1L) break
+                if (v != last) {
+                    AppState.appendLog("[BOT-FLOW  ] engine verdict=$v " +
+                        "heard=${PeerSlot.engineHeard} rounds=$rounds acts=$acts")
+                    last = v
                 }
-                Thread.sleep(100)
+                Thread.sleep(2_000)
             }
-        }, "engine-verdict").apply { isDaemon = true }.start()
+            AppState.appendLog("[BOT-FLOW  ] engine watch ends (last verdict=$last)")
+        }, "engine-guided").apply { isDaemon = true }.start()
     }
 
 

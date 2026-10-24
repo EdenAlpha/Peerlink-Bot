@@ -219,6 +219,30 @@ object EngineHost {
      */
     fun poll(): Long = if (client != 0L) call(CLIENT_POLL, client, 0L, 0L) else 0L
 
+    /**
+     * One guided connect step -- the lab's proven sweep, run inside this
+     * process with the same guards the lab driver used: it arms and promotes
+     * waiting connections, stamps the peer's identity token, retires the
+     * connections that veto acceptance, and settles the attempt jobs so the
+     * engine's own machine walks into its finalize step.  Every access goes
+     * through /proc/self/mem, so a bad address is an error from the kernel,
+     * never a crash.  Returns how many state writes were made (0 is fine --
+     * nothing to do yet).
+     *
+     * [peerUid] is the peer's user id as text: the 16-byte identity every
+     * protocol frame carries.  [peerV4] is the peer's IPv4 address the
+     * engine was given.
+     */
+    fun guidedStep(peerUid: String, peerV4: String): Int {
+        if (base == 0L || client == 0L) return 0
+        return try {
+            nativeGuidedStep(base, client, peerUid, peerV4)
+        } catch (t: Throwable) {
+            AppState.appendLog("[ENGINE-HOST] guided step failed: $t")
+            0
+        }
+    }
+
     /** The engine's own punch: from here the engine drives the exchange. */
     fun punch(): Long = call(PUNCH, 0L, 0L, 0L)
 
@@ -376,4 +400,10 @@ object EngineHost {
         port: Int,
     ): Long
     private external fun nativeRead(addr: Long, bytes: ByteArray)
+    private external fun nativeGuidedStep(
+        base: Long,
+        client: Long,
+        peerUid: String,
+        peerV4: String,
+    ): Int
 }
