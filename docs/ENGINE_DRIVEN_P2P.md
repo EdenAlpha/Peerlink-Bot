@@ -40,7 +40,26 @@ keeps the peer's id only when both succeed
     }
     *out_id = id;
 
-`0xe000012` means "this family has no channel". The id is what the engine's
+`0xe000012` means "this family has no channel".
+
+**CORRECTED 2026-10-23 (from the function's own decompile,
+`work/fun_07eee9fc.txt`): the earlier text said "the id is only kept when
+both adds succeed and agree." That over-stated the rule.** The function's
+real condition is:
+
+    drop the peer only when BOTH adds got past the "no channel for this
+    family" code (neither returned 0xe000012) AND either
+      - the two codes are not the same soft-pending code
+        (not both 0xe00002b and not both 0xe000001), or
+      - the two returned ids disagree.
+
+So when the IPv6 side answers `0xe000012` ("no IPv6 channel here"), the peer
+is **not dropped**: the id that passes out is the IPv4 id. The IPv6 status
+code is returned to the CALLER as the function's own result -- the caller's
+reaction to it is the still-untraced piece, not this function's drop. The
+lab's `client working id = -1` is produced by the STEP's own per-tick reset
+(`FUN_07f016ec` zeroes its two family slots to -1 every step), not by this
+drop. The id is what the engine's
 own connect path uses to find the peer (the checker matches the entry id
 against `peer+4` in `FUN_07ef85b0`), and only then can the job reach the
 stage that sends the next packet of the protocol, `0x80a UHP_FINALIZE`

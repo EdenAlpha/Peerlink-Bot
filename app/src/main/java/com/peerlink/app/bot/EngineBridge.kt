@@ -10,10 +10,13 @@ import java.util.concurrent.atomic.AtomicBoolean
 /**
  * The bridge's front door.
  *
- * The bot's own P2P half is meant to become the game's own engine -- the same
- * 160 MB library the real game runs -- fed the bot's id and squad. Everything
- * downstream depends on two questions that have never been answered on this
- * phone:
+ * The bot's own P2P half is the game's own engine -- the same 160 MB library
+ * the real game runs.  (CORRECTED 2026-10-24: the old comment here said "fed
+ * the bot's id and squad" -- that was wrong.  There is no squad path into the
+ * engine; what the engine gets is its identity (my-id) and the PEER record
+ * (the opponent's real server-issued blocks) -- and then it plays the whole
+ * exchange by itself.)  Everything downstream depends on two questions that
+ * have never been answered on this phone:
  *
  *   which build of the engine is installed here?   (cheap, safe)
  *   will the loader open it?                       (heavy, risky)

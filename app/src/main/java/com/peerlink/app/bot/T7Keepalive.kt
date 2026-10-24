@@ -32,9 +32,28 @@ object T7 {
     const val STUN_PORT = 3478
     const val INTERVAL_MS = 5_000L
 
+    /** 8-byte constant prefix of the 0x9090 attribute value (capture rule). */
+    private val P2P_PREFIX =
+        byteArrayOf(0x02, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00)
+
+    /**
+     * 0x9090 value: 8-byte prefix + own user_id as ASCII, NUL-padded to 16.
+     * Lives here (it was in the deleted fabricated-answer engine): this is a
+     * pure byte builder for REAL Konami-facing liveness, never a game-facing
+     * P2P answer.
+     */
+    fun p2pHeader(id: String): ByteArray {
+        val s = id.toByteArray(Charsets.US_ASCII)
+        require(s.size <= 16) { "user_id too long" }
+        val out = ByteArray(8 + 16)
+        System.arraycopy(P2P_PREFIX, 0, out, 0, 8)
+        System.arraycopy(s, 0, out, 8, s.size)
+        return out
+    }
+
     /** T7 Signal: BINDING(0x0001) + attr 0x9090 (own user_id). */
     fun t7(uid: String): ByteArray {
-        val attr = PeerBotEngine.p2pHeader(uid)   // 24-byte 0x9090 value
+        val attr = p2pHeader(uid)   // 24-byte 0x9090 value
         val buf = ByteBuffer.allocate(20 + 4 + attr.size).order(ByteOrder.BIG_ENDIAN)
         buf.putShort(0x0001)
         buf.putShort(attr.size.toShort())

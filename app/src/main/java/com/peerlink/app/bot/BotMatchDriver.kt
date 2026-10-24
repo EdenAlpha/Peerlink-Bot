@@ -311,12 +311,14 @@ object BotMatchDriver {
                 "finished=${getR["is_check_finished"]}")
 
             PeerSlot.arm(opp, gate.uid, peerAddr, localIp, localPort)
-            log("connection phase ARMED -- the bot answers .53.2 traffic from here")
-            // The decisive moment: whether the engine is up decides whether
-            // the engine or the bot's own answers carry this connection.
+            log("connection phase ARMED -- the ferry is live; the ENGINE owns " +
+                "every answer from here, the bot answers nothing")
+            // The decisive moment: whether the engine is up.  With the
+            // fabricated answerers DELETED (2026-10-24), an engine that is
+            // not loaded means an honest dead connection -- never a fake one.
             log("engine at the connection phase: loaded=${EngineHost.base != 0L} " +
                 "peerPort=${com.peerlink.app.core.AppState.enginePeerPort}")
-            status("CONNECTED -- answering the game's connection packets")
+            status("CONNECTED -- the engine owns the game's connection packets")
 
             // Mid-match liveness: re-push the antenna echo on a cadence.
             while (running) {

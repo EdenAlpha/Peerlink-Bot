@@ -8,26 +8,26 @@ import java.net.SocketTimeoutException
 import kotlin.concurrent.thread
 
 /**
- * Bot mode -- the local peer, wired into the SAME datapath peer mode uses.
+ * Bot mode -- the on-device FERRY between the game's P2P socket and the
+ * ENGINE's own P2P socket. Nothing else.
  *
- * The user's architecture (corrected 2026-10-15): bot mode must behave like
- * peer mode in every way -- the NATIVE backend owns the TUN and passes
- * everything through (login, Konami, DNS all work there), diverting only the
- * game's fabricated-IP UDP frames. The single difference: those frames travel
- * to a peer that is LOCAL instead of a remote phone.
- *
- * That is exactly what this object is: the native backend is configured with
- * `peerLanIp = 127.0.0.1, peerPort = 1162`, so its tunnel-out frames
- * (`[56B TunnelDiagMeta][inner IP packet]` -- or header-less, both accepted)
- * land on this slot's loopback socket; the slot answers as the fabricated
- * peer, and the native side injects the replies straight into the game.
+ * Rewritten 2026-10-24: the fabricated answering code (PeerBotEngine -- the
+ * punch/session/capability answerers and the punch originate burst) is
+ * DELETED, not neutered. The bot answers the game's P2P frames never. The
+ * engine inside this app owns the whole P2P exchange: its own punch, its
+ * own session/capability bytes, its own protocol. What this slot does is
+ * pure transport on one phone: the game's frames travel to the engine's
+ * socket, the engine's frames travel back to the game through the native
+ * backend. The fabricated identities (197.210.53.x) are the ADDRESSING
+ * plate the server hands both sides so that two P2P stacks on one phone
+ * can find each other -- they are routing, not answers.
  *
  * Wire details taken from `peerlink_backend.cpp`:
  *  - tunnel-out frames: sendto(peer_addr), diag header is OPTIONAL to parse
  *    (`parse_tunnel_diag_meta` failure -> whole datagram is the payload);
  *  - 1-byte control codes: 0xFC -> reply 0xFD (peer probe), 0xFF -> keepalive;
- *  - replies are written to the TUN as-is, so the slot builds a complete
- *    inner IPv4/UDP packet (src = the fabricated peer identity).
+ *  - replies are written to the TUN as-is, so this ferry builds a complete
+ *    inner IPv4/UDP packet (src = the game-side identity).
  */
 object PeerSlot {
 
@@ -36,22 +36,22 @@ object PeerSlot {
 
     /**
      * The loopback port the ENGINE is handed as its peer: its frames arrive on
-     * this slot's socket and its answers leave through the backend.  The game
+     * this slot's sockets and its answers travel back to the game. The game
      * never sees this port -- it keeps punching the fabricated peer identity.
      */
     const val ENGINE_PORT = 1163
 
     /**
      * True once the engine holds this slot as its peer (the peer record was
-     * accepted).  Its frames are then carried to the game.
+     * accepted). Its frames are then carried to the game -- and ONLY its
+     * frames; the bot never answers anything itself.
      */
     @Volatile
     var engineAttached: Boolean = false
 
     /**
-     * True once the engine's own frames have been seen on this slot.  Until
-     * that moment the bot keeps answering the game itself, so the connection
-     * is never worse than it was before the engine existed.
+     * True once the engine's own frames have been seen on this ferry. From
+     * that moment the exchange is entirely the engine's bytes.
      */
     @Volatile
     var engineHeard: Boolean = false
@@ -62,9 +62,6 @@ object PeerSlot {
     private const val DIAG_MAGIC = 0x504C4447
     private const val DIAG_VERSION = 2
     private const val DIAG_HEADER_SIZE = 56
-
-    @Volatile
-    private var engine: PeerBotEngine? = null
 
     /** Legacy TunnelEngine path (kept for compilability; unused in bot mode). */
     @Volatile
@@ -89,16 +86,12 @@ object PeerSlot {
     @Volatile
     private var gamePort = 0
 
-    /** The fabricated port the game sent TO (our declared port = .53.2:1162). */
+    /** The port the game sent TO (our declared port = .53.2:1162). */
     @Volatile
     private var gameTargetPort = BotMode.BOT_PORT
 
-    @Volatile
-    private var sawInboundStun = false
-
     private var socket: DatagramSocket? = null
     private var worker: Thread? = null
-    private var originator: Thread? = null
     private val loggedClasses = java.util.Collections.synchronizedSet(HashSet<Int>())
 
     /**
@@ -107,11 +100,7 @@ object PeerSlot {
      * connects to 127.0.0.1:1162 at VPN start -- before the slot exists --
      * and the first keepalive against the unbound port poisons the connected
      * socket (one ICMP port-unreachable poisons every later send on a
-     * connected UDP socket). The 2026-10-16 04:37 device run showed the
-     * result exactly: the game's 14 punches were diverted (they reached the
-     * TUN tap) but never forwarded to the slot (`Tunneled=0`, no
-     * "game knocked"). The re-bind clears the poisoned state once a real
-     * listener exists.
+     * connected UDP socket).
      */
     @Volatile
     var onArmed: (() -> Unit)? = null
@@ -122,21 +111,16 @@ object PeerSlot {
     }
 
     /**
-     * Arm the slot. [oppUid] = the game's user id (session addressing/logs);
-     * [botUid] = the BOT's own user id -- it is the 0x9090 stamp on every
-     * punch/session/capability frame the slot sends. In the working
-     * two-phone captures each side stamps ITS OWN id, and the game checks a
-     * punch response's stamp against the OPPONENT id it knows from the
-     * session -- stamping the game's own id (the 11:17 2026-10-16 bug) makes
-     * every reply self-contradictory and the crossing never completes.
-     * [announced]/[localIp]/[localPort] = the game's address (logs + the
-     * punch target from the session's address list).
+     * Arm the ferry. [oppUid] = the game's user id (session addressing/logs);
+     * [botUid] = the BOT's own user id (the stamp the engine carries as its
+     * own identity). [announced]/[localIp]/[localPort] = the game's address
+     * (logs + the punch target from the session's address list).
      */
     fun arm(oppUid: Long, botUid: Long, announced: String, localIp: String, localPort: Int) {
         // Idempotent re-arm: the driver arms this slot the moment go_match
-        // fires (socket live, reactive), then re-targets it once the
-        // session reply carries the game's address. Never churn the socket
-        // or lose the punch-watch state on the update.
+        // fires (socket live, reactive), then re-targets it once the session
+        // reply carries the game's address. Never churn the socket or lose
+        // the punch-watch state on the update.
         if (armed && gameUid == oppUid && socket != null) {
             if (announced.isNotBlank()) gameAddress = announced
             if (localIp.isNotBlank()) gameIp = localIp
@@ -145,13 +129,11 @@ object PeerSlot {
                 "announced=$gameAddress local=$gameIp:$gamePort")
             return
         }
-        engine = PeerBotEngine(botUid.toString())
         gameUid = oppUid
         gameAddress = announced
         gameIp = localIp
         gamePort = localPort
         gameTargetPort = BotMode.BOT_PORT
-        sawInboundStun = false
         armed = true
 
         val s = try {
@@ -165,10 +147,11 @@ object PeerSlot {
             return
         }
         socket = s
-        AppState.appendLog("[BOT-SLOT  ] armed: game uid=$oppUid bot uid=$botUid " +
+        AppState.appendLog("[BOT-SLOT  ] ferry armed: game uid=$oppUid bot uid=$botUid " +
             (if (localIp.isNotBlank() && localPort > 0) "local=$localIp:$localPort"
              else "local address pending") +
-            " -- peer slot on $LOOPBACK_PEER_IP:${BotMode.BOT_PORT}")
+            " -- on $LOOPBACK_PEER_IP:${BotMode.BOT_PORT}; " +
+            "the ENGINE answers the game, this slot only carries the bytes")
         // The listener now exists -- clear the backend's poisoned connected
         // socket so its peer-TX sends reach this slot (see onArmed note).
         runCatching { onArmed?.invoke() }
@@ -176,7 +159,6 @@ object PeerSlot {
         // over: its very first punch must have somewhere to land.
         openEngineSockets()
         worker = thread(name = "peer-slot-rx") { receiveLoop(s) }
-        originator = thread(name = "peer-slot-tx") { originateLoop(s) }
     }
 
     fun disarm() {
@@ -186,22 +168,20 @@ object PeerSlot {
         closeEngineSockets()
         runCatching { socket?.close() }
         socket = null
-        engine = null
         worker = null
-        originator = null
         AppState.appendLog("[BOT-SLOT  ] disarmed")
     }
 
     // ------------------------------------------------ loopback transport
     /**
-     * Frames the native backend pulled out of the game's TUN arrive here.
-     * Replies go straight back through the same loopback socket; the native
-     * side injects them into the game as the fabricated peer's packets.
+     * Frames the native backend pulled out of the game's TUN arrive here and
+     * are FORWARDED to the engine's own socket -- always, unchanged. The bot
+     * answers nothing: if the engine is not attached the frame is logged and
+     * dropped, honestly.
      */
     private fun receiveLoop(s: DatagramSocket) {
         val buf = ByteArray(4096)
         var rxCount = 0
-        var lastRxLog = 0L
         while (armed && !s.isClosed) {
             s.soTimeout = 250
             val pkt = DatagramPacket(buf, buf.size)
@@ -215,18 +195,17 @@ object PeerSlot {
             }
             if (n <= 0) continue
             rxCount++
-            val from = pkt.socketAddress as? InetSocketAddress
             val data = buf.copyOf(n)
-            // Every datagram is visible now: head hex + where parsing goes.
-            // This is the line that ends the loopback mystery in one export.
             val head = data.take(12).joinToString("") { "%02x".format(it) }
-            AppState.appendLog("[BOT-SLOT  ] rx #$rxCount n=$n from=$from head=$head")
+            AppState.appendLog("[BOT-SLOT  ] rx #$rxCount n=$n head=$head")
 
             if (n == 1) {
                 when (data[0].toInt() and 0xFF) {
                     0xFC -> runCatching {
-                        s.send(DatagramPacket(byteArrayOf(0xFDu.toByte()), 1, from))
-                    } // peer probe -> acknowledge, exactly like a real peer
+                        // the native backend's own probe -- transport, not the
+                        // game's P2P; acknowledged like any local socket.
+                        s.send(DatagramPacket(byteArrayOf(0xFDu.toByte()), 1, pkt.socketAddress))
+                    }
                     0xFF -> Unit // native keepalive -- nothing to answer
                 }
                 continue
@@ -255,50 +234,28 @@ object PeerSlot {
             gamePort = inner.srcPort
             gameTargetPort = inner.dstPort
 
-            // The ENGINE plays the opponent.  It was handed THIS slot as its
-            // peer (127.0.0.1:1163), so everything it sends arrives here and
-            // everything it must answer is sent to it: the game's frames go
-            // over unchanged and the engine's own frames go back to the game.
-            // Until the engine has actually spoken, the bot's own answers keep
-            // the connection alive exactly as before.
-            if (engineAttached) {
-                sendToEngine(inner.udpPayload)
-                if (engineHeard) continue
-            }
-
-            val eng = engine ?: continue
-            val (reply, note) = eng.handle(inner.udpPayload)
-            if (note == "not-stun") {
-                noteGameFrame(inner.udpPayload)
+            // The ENGINE plays the opponent. Every game frame goes to its
+            // socket unchanged; nothing is answered from here. If the engine
+            // is not attached there is no answer at all -- that is the
+            // honest state, not a fabricated one.
+            if (!engineAttached) {
+                if (loggedClasses.add(-1)) {
+                    AppState.appendLog("[BOT-SLOT  ] the engine is not attached -- " +
+                        "the game's frame is carried nowhere; the bot answers NOTHING")
+                }
                 continue
             }
-            if (!sawInboundStun) {
-                sawInboundStun = true
-                AppState.appendLog("[BOT-SLOT  ] game knocked ($note, " +
-                    "${inner.srcIp}:${inner.srcPort}) -- answering")
-            }
-            if (reply != null && from != null) {
-                val out = buildInnerUdpPacket(
-                    srcIp = AppState.peerFabricatedIp,
-                    dstIp = inner.srcIp,
-                    srcPort = inner.dstPort,
-                    dstPort = inner.srcPort,
-                    payload = reply,
-                )
-                runCatching { s.send(DatagramPacket(out, out.size, from)) }
-            }
+            sendToEngine(inner.udpPayload)
+            noteGameFrame(inner.udpPayload)
         }
     }
 
     /**
-     * The engine's peer on this phone is the slot itself: the engine is handed
-     * 127.0.0.1:1163 (and [::1]:1163) as the opponent, so its own frames arrive
-     * on these sockets and its answers travel back to the game over the
-     * backend.  The tunnel carries the game alone, so this is the only place
-     * the engine's half can meet the game's half.
-     *
-     * Both sockets are bound when the slot is armed -- before the engine is
-     * told anything -- so its very first punch has somewhere to land.
+     * The engine's peer on this phone is the ferry itself: the engine is
+     * handed 127.0.0.1:1163 (and [::1]:1163) as the opponent, so its own
+     * frames arrive on these sockets and its answers travel back to the game
+     * over the backend. The tunnel carries the game alone, so this is the
+     * only place the engine's half can meet the game's half on one phone.
      */
     @Volatile
     private var engineSock4: DatagramSocket? = null
@@ -308,7 +265,7 @@ object PeerSlot {
 
     /**
      * Where the engine's own packets come from: the engine binds its own UDP
-     * port when it starts, so the address is not known in advance.  It is
+     * port when it starts, so the address is not known in advance. It is
      * learned from its first datagram -- that source address:port is the
      * engine's own socket, and it is where the game's frames must be sent.
      */
@@ -358,14 +315,13 @@ object PeerSlot {
         engineSock6 = null
         enginePeer4 = null
         enginePeer6 = null
+        engineRxThread = null
     }
 
     /**
      * The game's frame goes to the engine exactly as it arrived, addressed to
      * the engine's OWN socket -- the address its own packets come from (see
-     * [enginePeer4]).  Until the engine has spoken there is nowhere to send,
-     * and the bot's own answers are still carrying the game, so nothing is
-     * lost.
+     * [enginePeer4]). Until the engine has spoken there is nowhere to send.
      */
     private fun sendToEngine(payload: ByteArray): Boolean {
         val a4 = enginePeer4
@@ -388,8 +344,10 @@ object PeerSlot {
     }
 
     /**
-     * The engine's frames go back to the game, over the backend's peer socket,
-     * in the shape the game expects: from the fabricated peer, to the game.
+     * The engine's frames go back to the game, over the backend's peer
+     * socket, in the shape the game expects: from the game-side peer
+     * identity, to the game. The PAYLOAD is never touched -- the engine's
+     * own bytes, end to end.
      */
     private fun startEngineReplyLoop(s4: DatagramSocket, s6: DatagramSocket?) {
         engineRxThread?.interrupt()
@@ -428,8 +386,9 @@ object PeerSlot {
     private fun forwardEngineFrame(payload: ByteArray) {
         if (!engineHeard) {
             engineHeard = true
-            AppState.appendLog("[BOT-SLOT  ] the engine answered " +
-                "(${payload.size} bytes) -- the bot stops answering the game itself")
+            AppState.appendLog("[BOT-SLOT  ] the engine's own bytes are flowing " +
+                "(${payload.size} B first frame) -- the whole exchange is the " +
+                "engine's from here")
         }
         if (gameIp.isBlank() || gamePort <= 0) return
         val out = buildInnerUdpPacket(
@@ -450,95 +409,13 @@ object PeerSlot {
         }
     }
 
-    /**
-     * Punch-first originate burst (the real creator side's behaviour), sent
-     * through the native backend to the game: the inner packet is addressed
-     * game-ward while the DATAGRAM is addressed to the backend's socket.
-     *
-     * The bot does not punch when the ENGINE is playing the opponent: the
-     * engine sends its own punch, with its own id, from its own socket. The
-     * bot's burst is the fabricated half and it stays off.
-     */
-    private fun originateLoop(s: DatagramSocket) {
-        try {
-            val eng = engine ?: return
-            val tid = eng.freshTid()
-            val deadline = System.currentTimeMillis() + 30_000L
-            var punches = 0
-            while (armed && !sawInboundStun && punches < 15 &&
-                System.currentTimeMillis() < deadline
-            ) {
-                if (engineHeard) {
-                    // The engine punches for itself.
-                    AppState.appendLog("[BOT-SLOT  ] the engine is playing the " +
-                        "opponent -- the bot does not punch")
-                    return
-                }
-                if (gameIp.isBlank() || gamePort <= 0) {
-                    Thread.sleep(200)
-                    continue
-                }
-                // Stamp the BOT's own id (the engine already holds it).
-                // Was gameUid.toString() -> all 15 punches in the 14:50
-                // 2026-10-18 capture carried 1012115771, the GAME's id, so the
-                // game received its own identity back.
-                sendToGame(s, PeerBotEngine.punchReq(tid, eng.uid))
-                punches++
-                Thread.sleep(600)
-            }
-            if (!armed) return
-            if (!sawInboundStun) {
-                AppState.appendLog("[BOT-SLOT  ] no answer to $punches punches yet -- " +
-                    "slot stays armed and reactive")
-                return
-            }
-            for (m in eng.originateBytes(nSession = 3)) {
-                if (!armed) return
-                sendToGame(s, m)
-                Thread.sleep(120)
-            }
-            AppState.appendLog("[BOT-SLOT  ] originate burst sent " +
-                "(punch crossing seen; sessions + capability out)")
-        } catch (t: Throwable) {
-            AppState.appendLog("[BOT-SLOT  ] originate stopped: ${t.javaClass.simpleName}")
-        }
-    }
-
-    private fun sendToGame(s: DatagramSocket, payload: ByteArray) {
-        // BOT MODE: the backend's peer socket now binds 127.0.0.1:BACKEND_PORT
-        // (bound peer source = loopback -- see the config note in the VPN
-        // service), so the slot's frames must go to the loopback address;
-        // the old WAN:17024 target no longer has a listener.
-        val target = InetSocketAddress(LOOPBACK_PEER_IP, BACKEND_PORT)
-        if (gameIp.isBlank() || gamePort <= 0) return
-        val out = buildInnerUdpPacket(
-            srcIp = AppState.peerFabricatedIp,
-            dstIp = gameIp,
-            srcPort = gameTargetPort,
-            dstPort = gamePort,
-            payload = payload,
-        )
-        runCatching {
-            s.send(DatagramPacket(out, out.size, target))
-        }
-    }
-
     // ------------------------------------------------ wire helpers
     /** Strip the optional 56-byte native diag header; null when unusable. */
     private fun stripDiagHeader(data: ByteArray): ByteArray? {
         if (data.size < 1) return null
         // BIG-endian, like read_u32() in peerlink_backend.cpp (which writes the
-        // magic with write_u32, also big-endian) and like
-        // TunnelEngine.parseTunnelDiagMeta, whose default ByteBuffer is
-        // big-endian too. On the wire the four bytes are 50 4c 44 47 = "PLDG".
-        //
-        // The old code assembled them the other way round -- byte 0 into the
-        // LOW byte -- so it compared 0x47444C50 against 0x504C4447: never
-        // equal. PLDG frames were never stripped, so every packet the game
-        // sent died on the next line as "not IPv4/UDP". In the 14:50
-        // 2026-10-18 run the slot received 12 of the game's punches and
-        // dropped 12 ("rx #N parse -> not IPv4/UDP (len=132 ...)", where 132
-        // is the untouched frame length -- proof the strip never ran).
+        // magic with write_u32, also big-endian). On the wire the four bytes
+        // are 50 4c 44 47 = "PLDG".
         val magic = ((data[0].toInt() and 0xFF) shl 24) or
             ((data[1].toInt() and 0xFF) shl 16) or
             ((data[2].toInt() and 0xFF) shl 8) or
@@ -659,7 +536,8 @@ object PeerSlot {
     // ------------------------------ legacy TunnelEngine hookup (unused in
     // bot mode now that the native datapath carries the frames; kept intact
     // so TunnelEngine's TUNNEL branch still compiles and peer mode is
-    // untouched).
+    // untouched).  The fabricating answerer is gone -- this path only
+    // FORWARDS the game's frame to the engine, same as the main ferry.
     fun handleGamePacketToPeer(destIp: String, buffer: ByteArray, length: Int): Boolean {
         if (!armed) return false
         if (destIp != AppState.peerFabricatedIp) return false
@@ -667,15 +545,8 @@ object PeerSlot {
         gameIp = p.srcIp
         gamePort = p.srcPort
         gameTargetPort = p.dstPort
-        val eng = engine ?: return false
-        val (reply, note) = eng.handle(p.payload)
-        if (note == "not-stun") {
-            noteGameFrame(p.payload)
-            return true
-        }
-        if (reply != null) {
-            injector?.invoke(reply, p.srcIp, p.srcPort, p.dstPort)
-        }
+        if (!engineAttached) return false
+        sendToEngine(p.payload)
         return true
     }
 
@@ -691,6 +562,9 @@ object PeerSlot {
         val srcIp = "%d.%d.%d.%d".format(
             buf[12].toInt() and 0xFF, buf[13].toInt() and 0xFF,
             buf[14].toInt() and 0xFF, buf[15].toInt() and 0xFF)
+        val dstIp = "%d.%d.%d.%d".format(
+            buf[16].toInt() and 0xFF, buf[17].toInt() and 0xFF,
+            buf[18].toInt() and 0xFF, buf[19].toInt() and 0xFF)
         val srcPort = ((buf[ihl].toInt() and 0xFF) shl 8) or (buf[ihl + 1].toInt() and 0xFF)
         val dstPort = ((buf[ihl + 2].toInt() and 0xFF) shl 8) or (buf[ihl + 3].toInt() and 0xFF)
         val payload = buf.copyOfRange(ihl + 8, length)
