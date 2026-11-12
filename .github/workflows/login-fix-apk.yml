@@ -1,0 +1,40 @@
+name: PeerLink Bot login fix APK
+
+on:
+  push:
+    branches: [build/login-fix-cf0b997]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: cf0b9977f32f6c50197c57f17bf25fa6cc3351fe
+      - uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: temurin
+      - uses: gradle/actions/setup-gradle@v3
+      - name: Install Android SDK components
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-36' 'build-tools;35.0.0' 'platform-tools' >/dev/null
+      - name: Build fixed APK
+        run: ./gradlew assembleDebug --stacktrace
+      - name: Verify the APK
+        run: |
+          cp app/build/outputs/apk/debug/app-debug.apk peerlink-bot-login-fix.apk
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs peerlink-bot-login-fix.apk
+          sha256sum peerlink-bot-login-fix.apk
+      - name: Publish the test build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create peerlink-login-fix-cf0b997 peerlink-bot-login-fix.apk \
+            --repo "$GITHUB_REPOSITORY" --target cf0b9977f32f6c50197c57f17bf25fa6cc3351fe \
+            --title 'PeerLink Bot Create room fix' \
+            --notes 'Debug APK built from cf0b997 with the live-tested Konami login header correction.' \
+            --prerelease --latest=false
