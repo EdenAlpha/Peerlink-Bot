@@ -168,7 +168,7 @@ object BotRelayQuality {
         }
 
         // Capture/VM form: report the measured regions, quality = echo RTT ms.
-        val now = System.currentTimeMillis() / 1000L
+        val now = gate.requestTimeSeconds()
         val ql = measured.sortedBy { it.second }.map { (region, ms) ->
             linkedMapOf<String, Any?>("region" to region, "quality" to ms, "last_update" to now)
         } as List<Map<String, Any?>>

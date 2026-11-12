@@ -1,6 +1,7 @@
 package com.peerlink.app.bot
 
 import android.content.Context
+import android.os.SystemClock
 import java.io.ByteArrayOutputStream
 import java.net.HttpURLConnection
 import java.net.InetSocketAddress
@@ -96,6 +97,18 @@ class KgsGate(
     var uid: Long = 0L
         private set
     private var rqid: Long = 1_500_000L + Random.nextInt(0, 4_000_000)
+    @Volatile private var serverTime: ServerTime? = null
+
+    private class ServerTime(private val dateMillis: Long, private val receivedAt: Long) {
+        fun nowSeconds(): Long = (dateMillis + (SystemClock.elapsedRealtime() - receivedAt)) / 1000L
+    }
+
+    private class GateReply(
+        val body: LinkedHashMap<String, Any?>,
+        val serverTime: ServerTime? = null,
+    )
+
+    internal fun requestTimeSeconds(): Long = serverTime?.nowSeconds() ?: System.currentTimeMillis() / 1000L
 
     private fun nextRq(): Long = ++rqid
 
@@ -128,8 +141,24 @@ class KgsGate(
     /** Send an already-built message map verbatim (capture replays patch it first). */
     fun sendRaw(msg: LinkedHashMap<String, Any?>): LinkedHashMap<String, Any?> = send(msg)
 
-    /** POST one gate request and decode the response; never throws on server error shapes. */
-    private fun send(msg: LinkedHashMap<String, Any?>, timeoutMs: Int = 25_000): LinkedHashMap<String, Any?> {        val body = GateCodec.encode(msg)
+    private fun clockRejected(body: Map<String, Any?>): Boolean =
+        body["result"] == "ERR_INVALIDARG" && body["errcode"] == "QYNZ-" &&
+            body["msg"] == "different 10 minutes"
+
+    private fun send(msg: LinkedHashMap<String, Any?>, timeoutMs: Int = 25_000): LinkedHashMap<String, Any?> {
+        val reply = post(msg, timeoutMs)
+        val time = reply.serverTime
+        if (time == null || !clockRejected(reply.body)) return reply.body
+
+        // The gate caches replies by rqid. Rebuild the request with its HTTPS response time.
+        serverTime = time
+        val retry = LinkedHashMap(msg).apply { put("rqid", nextRq()) }
+        return post(retry, timeoutMs).body
+    }
+
+    /** POST one gate request and decode the response. */
+    private fun post(msg: LinkedHashMap<String, Any?>, timeoutMs: Int): GateReply {
+        val body = GateCodec.encode(msg)
         val sign = GateCodec.makeSign(body)
         val url = URL("https://${GateCodec.HOST}/pes22/gate/gate_${msg["msgid"]}.php")
         val conn = (url.openConnection() as HttpURLConnection).apply {
@@ -138,8 +167,9 @@ class KgsGate(
             readTimeout = timeoutMs
             doOutput = true
             instanceFollowRedirects = false
+            useCaches = false
             setRequestProperty("Accept-Language", "jp")
-            setRequestProperty("User-Agent", GateCodec.userAgent())
+            setRequestProperty("User-Agent", GateCodec.userAgent(timeSeconds = requestTimeSeconds()))
             setRequestProperty("pes-custom-encrypt", "AES256")
             setRequestProperty("Accept-Encoding", "gzip")
             setRequestProperty("Content-Encoding", "gzip")
@@ -149,23 +179,30 @@ class KgsGate(
         }
         val status: String
         val data: ByteArray
+        val time: ServerTime?
         try {
             conn.outputStream.use { it.write(body) }
             status = try { conn.responseMessage ?: "${conn.responseCode}" } catch (_: Throwable) { "?" }
+            val receivedAt = SystemClock.elapsedRealtime()
+            val dateMillis = conn.getHeaderFieldDate("Date", 0L)
+            time = if (dateMillis > 0L && conn.getHeaderFieldInt("Age", 0) == 0) {
+                ServerTime(dateMillis, receivedAt)
+            } else null
             data = try { conn.inputStream.use { it.readBytes() } } catch (_: Throwable) { ByteArray(0) }
         } catch (t: Throwable) {
-            return linkedMapOf("result" to "_NET_FAIL", "_err" to (t.message ?: t.javaClass.simpleName))
+            return GateReply(linkedMapOf("result" to "_NET_FAIL", "_err" to (t.message ?: t.javaClass.simpleName)))
         } finally {
             conn.disconnect()
         }
-        if (data.isEmpty()) return linkedMapOf("result" to "_HTTP_EMPTY", "_status" to status)
-        return try {
+        if (data.isEmpty()) return GateReply(linkedMapOf("result" to "_HTTP_EMPTY", "_status" to status))
+        val decoded: LinkedHashMap<String, Any?> = try {
             val out = GateCodec.decode(data)
             @Suppress("UNCHECKED_CAST")
             (out as? LinkedHashMap<String, Any?>) ?: linkedMapOf("result" to "_DECODE_FAIL", "_status" to status)
         } catch (t: Throwable) {
             linkedMapOf("result" to "_DECODE_FAIL", "_err" to (t.message ?: "?"), "_status" to status, "_len" to data.size)
         }
+        return GateReply(decoded, time)
     }
 
     /**
@@ -207,6 +244,12 @@ class KgsGate(
                 (pui["user_id"] as? Number)?.let { uid = it.toLong() }
             }
             return r
+        }
+        if (clockRejected(r)) {
+            throw GateException(
+                "Konami rejected the login timestamp (QYNZ-). Turn on Automatic date & time " +
+                    "in Android Settings, then try Create room again."
+            )
         }
         throw GateException("login failed: ${describe(r)}")
     }
