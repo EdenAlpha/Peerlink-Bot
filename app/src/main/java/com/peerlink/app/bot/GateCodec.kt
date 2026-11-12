@@ -62,9 +62,9 @@ object GateCodec {
 
     fun userAgent(clientVersion: String = CLIENT_VERSION, osName: String = "ANDROID",
                   version: String = "1.0", model: String = "redroid14_arm64_only",
-                  build: String = BUILD,
-                  timeSeconds: Long = System.currentTimeMillis() / 1000L): String {
-        return "PES/$version ($osName 14; 0; $model; 0; $timeSeconds; $clientVersion; ; $build; )"
+                  build: String = BUILD): String {
+        val t = (System.currentTimeMillis() / 1000L).toString()
+        return "PES/$version ($osName 14; 0; $model; $t; $clientVersion; ; $build; )"
     }
 
     // ------------------------------------------------------------- pack
