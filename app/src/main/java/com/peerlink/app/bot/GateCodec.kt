@@ -64,7 +64,7 @@ object GateCodec {
                   version: String = "1.0", model: String = "redroid14_arm64_only",
                   build: String = BUILD): String {
         val t = (System.currentTimeMillis() / 1000L).toString()
-        return "PES/$version ($osName 14; 0; $model; 0; $t; $clientVersion; ; $build; )"
+        return "PES/$version ($osName 14; 0; $model; $t; $clientVersion; ; $build; )"
     }
 
     // ------------------------------------------------------------- pack
