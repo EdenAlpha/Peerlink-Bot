@@ -33,9 +33,6 @@ class BotMatchFlow(
     companion object {
         private const val PACE_MS = 400L
 
-        /** The capture's own open-NAT word: the peer is punchable. */
-        private const val OPEN_NAT_WORD = 0x102000b3L
-
         /** Capture's inert IPv6 -- "::" / 0 everywhere (block 98). */
         private val NET6 = linkedMapOf<String, Any?>(
             "host_address" to "::", "host_port" to 0,
@@ -459,10 +456,9 @@ class BotMatchFlow(
      * record is made of.  The blocks are written by the engine's own
      * builder, so the record is the engine's own shape and not a copy.
      *
-     * Both NAT words must say the peer is punchable.  The engine's
-     * transport adds the peer to the IPv4 channel AND the IPv6 channel and
-     * keeps the peer's id only when both succeed; without the IPv6 half
-     * the id is thrown away and the connect stops at the punch.
+     * Preserve the session's measured NAT words. The address aliases below
+     * route unchanged engine payloads through the app's existing local ferry;
+     * they do not authorize changing the SDK's connectivity verdict.
      */
     fun handPeerToEngine(entry: Map<*, *>, peerId: Long): Boolean {
         if (EngineHost.base == 0L) return false
@@ -481,34 +477,25 @@ class BotMatchFlow(
             // the game's frames on loopback: it is told its peer is
             // 127.0.0.1:1163 (and [::1]:1163), it punches there, the slot carries
             // its frames to the game as the fabricated peer, and the game's frames
-            // are handed back to it.  The NAT word is the capture's own open-NAT
-            // value, so the engine treats the peer as reachable, exactly as it
-            // would on a phone behind an open NAT.
+            // are handed back to it. NAT words retain the session response values.
             val rec = EngineHost.buildPeerRecord(
                 peerId = peerId,
                 v4Host = PeerSlot.LOOPBACK_PEER_IP, v4HostPort = PeerSlot.ENGINE_PORT,
                 v4Reflexive = PeerSlot.LOOPBACK_PEER_IP,
-                v4ReflexivePort = PeerSlot.ENGINE_PORT, v4NatType = OPEN_NAT_WORD,
+                v4ReflexivePort = PeerSlot.ENGINE_PORT, v4NatType = v4Nat,
                 v6Host = "::1", v6HostPort = PeerSlot.ENGINE_PORT,
                 v6Reflexive = "::1",
-                v6ReflexivePort = PeerSlot.ENGINE_PORT, v6NatType = OPEN_NAT_WORD,
+                v6ReflexivePort = PeerSlot.ENGINE_PORT, v6NatType = v6Nat,
             ) ?: return false
             val ok = EngineHost.setPeers(rec)
             if (ok) {
                 PeerSlot.engineAttached = true
-                // The engine's own punch (0x7db9b40 in the lab): the entry that
-                // makes it speak.  Without it the engine may hold the record and
-                // sit still, and the game would get nothing.
-                AppState.appendLog("[BOT-FLOW  ] engine punch -> ${EngineHost.punch()}")
-                // The lab's proven early arm: one guided step straight after
-                // the punch puts a ready (promoted, phase-4, identity-stamped)
-                // connection in place before the engine's first finalize burst,
-                // which is what its own acceptance needs.  Then the watch loop
-                // keeps sweeping and reading the engine's verdict.
-                val peerUidText = peerId.toString()
-                AppState.appendLog("[BOT-FLOW  ] engine guided arm -> " +
-                    "${EngineHost.guidedStep(peerUidText, PeerSlot.LOOPBACK_PEER_IP)}")
-                watchEngineVerdict(peerUidText)
+                if (!EngineHost.openSession(peerId)) {
+                    PeerSlot.engineAttached = false
+                    AppState.appendLog("[BOT-FLOW  ] original session manager did not accept the peer")
+                    return false
+                }
+                watchEngineVerdict()
             }
             AppState.appendLog("[BOT-FLOW  ] engine got the peer: $peerId " +
                 "(session said v4nat=$v4Nat v6nat=$v6Nat) -- its opponent is now " +
@@ -522,40 +509,24 @@ class BotMatchFlow(
         }
     }
 
-    /**
-     * Drive the engine the way the lab's proven run did, and report its own
-     * verdict.  Every round: one guided sweep (arm/promote/stamp/retire and
-     * settle the attempt jobs) and the engine's own check, which returns 1
-     * when its transport says the peer is connected.  The guided routine is
-     * the exact sequence that produced the accepted finalize and the
-     * connected verdict on the lab wire; here it runs in this process over
-     * /proc/self/mem, fully guarded -- a wrong address is a kernel error,
-     * never a crash.
-     */
-    private fun watchEngineVerdict(peerUid: String) {
+    /** Observe the original SDK; heartbeat/message dispatch run on its runtime thread. */
+    private fun watchEngineVerdict() {
         Thread({
             var last = -1L
-            var rounds = 0
             val until = System.currentTimeMillis() + 15 * 60_000L
-            while (System.currentTimeMillis() < until) {
-                val acts = EngineHost.guidedStep(peerUid, PeerSlot.LOOPBACK_PEER_IP)
-                rounds++
-                val v = try {
-                    EngineHost.check()
-                } catch (_: Throwable) {
-                    -1L
+            while (PeerSlot.engineAttached && System.currentTimeMillis() < until) {
+                val verdict = EngineHost.check()
+                if (verdict != last) {
+                    AppState.appendLog("[BOT-FLOW  ] original engine verdict=$verdict heard=${PeerSlot.engineHeard}")
+                    last = verdict
+                    if (verdict == 1L) {
+                        com.peerlink.app.service.PeerBotService.status("Game connection established — waiting for match setup")
+                    }
                 }
-                if (v != last) {
-                    AppState.appendLog("[BOT-FLOW  ] engine verdict=$v " +
-                        "heard=${PeerSlot.engineHeard} rounds=$rounds acts=$acts")
-                    last = v
-                }
-                Thread.sleep(2_000)
+                Thread.sleep(1_000)
             }
-            AppState.appendLog("[BOT-FLOW  ] engine watch ends (last verdict=$last)")
-        }, "engine-guided").apply { isDaemon = true }.start()
+        }, "engine-verdict").apply { isDaemon = true }.start()
     }
-
 
     /** CMD_GET_GAME_ID -- builder form first, then the server-side fallbacks. */
     fun getGameId(g: KgsGate, rid: Long): Long? {

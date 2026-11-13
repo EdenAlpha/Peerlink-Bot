@@ -18,3 +18,6 @@ dependencyResolutionManagement {
 
 rootProject.name = "PeerLink"
 include(":app")
+
+// Genuine Android context/service verification without the ARM64 game binary.
+include(":engine-host-tests")

@@ -147,7 +147,8 @@ object EngineBridge {
     fun stageEngine(context: Context): Boolean {
         val stage = java.io.File(stageDir(context))
         val staged = java.io.File(stage, "libUE4.so")
-        if (staged.isFile && staged.length() >= MIN_ENGINE_BYTES) {
+        if (staged.isFile && staged.length() >= MIN_ENGINE_BYTES &&
+            File(stage, "libgadsme.so").isFile) {
             log("the engine is already staged: ${staged.absolutePath} (${staged.length()} bytes)")
             return true
         }
@@ -200,12 +201,12 @@ object EngineBridge {
     fun ensureEngineForSession(context: Context): Boolean {
         val staged = File(stageDir(context), "libUE4.so")
         val stagedBytes = if (staged.isFile) staged.length() else 0L
-        val loaded = EngineHost.base != 0L
+        val loaded = EngineHost.client != 0L
         log("engine status: staged=$stagedBytes bytes loaded=$loaded")
 
         if (loaded) return true
         if (!stageEngine(context)) {
-            log("the engine is not staged -- the bot answers the game itself this session")
+            log("the engine is not staged -- a game connection cannot start")
             return false
         }
         val uid = context
@@ -277,9 +278,10 @@ object EngineBridge {
                 log("cannot make the staging directory ${stage.absolutePath}")
                 return false
             }
-            copyFile(src, java.io.File(stage, "libUE4.so"))
             val ad = java.io.File(srcDir, "libgadsme.so")
-            if (ad.isFile) copyFile(ad, java.io.File(stage, "libgadsme.so"))
+            if (!ad.isFile) return false
+            copyFile(ad, java.io.File(stage, "libgadsme.so"))
+            copyFile(src, java.io.File(stage, "libUE4.so"))
             true
         } catch (t: Throwable) {
             log("staging the engine failed: ${t.javaClass.simpleName}: ${t.message}")
@@ -293,48 +295,46 @@ object EngineBridge {
      */
     private fun copyEngineFromApk(context: Context, stage: java.io.File): Boolean = try {
         val info = context.packageManager.getApplicationInfo(GAME_PACKAGE, 0)
-        val apk = java.io.File(info.sourceDir)
-        if (!apk.isFile) {
-            false
-        } else {
-            java.util.zip.ZipFile(apk).use { zip ->
-                val entry = zip.getEntry("lib/arm64-v8a/libUE4.so")
-                if (entry == null) {
-                    false
-                } else {
-                    if (!stage.isDirectory) stage.mkdirs()
+        val archives = listOf(info.sourceDir) + info.splitSourceDirs.orEmpty().toList()
+        if (!stage.isDirectory && !stage.mkdirs()) error("Cannot create engine directory")
+        val copied = mutableSetOf<String>()
+        for (archive in archives.distinct()) {
+            if (!File(archive).isFile) continue
+            java.util.zip.ZipFile(archive).use { zip ->
+                for (name in listOf("libgadsme.so", "libplaycore.so", "libUE4.so")) {
+                    if (name in copied) continue
+                    val entry = zip.getEntry("lib/arm64-v8a/$name") ?: continue
+                    if (name == "libUE4.so" && entry.size < MIN_ENGINE_BYTES) continue
                     zip.getInputStream(entry).use { input ->
-                        java.io.FileOutputStream(java.io.File(stage, "libUE4.so")).use { output ->
-                            input.copyTo(output, 1024 * 1024)
-                        }
+                        copyAtomically(input, File(stage, name))
                     }
-                    val ad = zip.getEntry("lib/arm64-v8a/libgadsme.so")
-                    if (ad != null) {
-                        zip.getInputStream(ad).use { input ->
-                            java.io.FileOutputStream(java.io.File(stage, "libgadsme.so")).use { output ->
-                                input.copyTo(output, 1024 * 1024)
-                            }
-                        }
-                    }
-                    true
+                    copied.add(name)
                 }
             }
         }
-    } catch (t: Throwable) {
-        log("reading the game's APK failed: ${t.javaClass.simpleName}: ${t.message}")
+        "libUE4.so" in copied && "libgadsme.so" in copied
+    } catch (error: Exception) {
+        log("reading the game's APKs failed: ${error.javaClass.simpleName}: ${error.message}")
         false
     }
 
     /** Copy one file, then make it readable and not writable. */
     private fun copyFile(src: java.io.File, dst: java.io.File) {
-        java.io.FileInputStream(src).use { input ->
-            java.io.FileOutputStream(dst).use { output ->
+        src.inputStream().use { copyAtomically(it, dst) }
+    }
+
+    private fun copyAtomically(input: java.io.InputStream, destination: File) {
+        val temporary = File.createTempFile(".engine-", ".tmp", destination.parentFile)
+        try {
+            java.io.FileOutputStream(temporary).use { output ->
                 input.copyTo(output, 1024 * 1024)
+                output.fd.sync()
             }
+            if (!temporary.setReadOnly()) error("Cannot protect staged library")
+            if (!temporary.renameTo(destination)) error("Cannot commit staged library")
+        } finally {
+            temporary.delete()
         }
-        dst.setReadable(true, false)
-        dst.setWritable(false, false)
-        dst.setExecutable(false, false)
     }
 
     private fun identify() {

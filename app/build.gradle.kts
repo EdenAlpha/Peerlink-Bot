@@ -26,6 +26,9 @@ android {
         // pipeline alone is ~40 MB across four ABIs). Phones from the last
         // years are arm64-v8a; dropping the other three cuts the download
         // users keep re-paying for on every fix (user complaint 2026-10-16).
+        externalNativeBuild {
+            cmake { arguments += listOf("-DANDROID_STL=c++_shared") }
+        }
         ndk {
             abiFilters += listOf("arm64-v8a")
         }
@@ -47,6 +50,11 @@ android {
         }
         debug {
             isDebuggable = true
+            if (providers.gradleProperty("engineHostTestBuild").orNull == "true") {
+                applicationIdSuffix = ".enginetest"
+                versionNameSuffix = "-engine-test"
+                resValue("string", "app_displayed_name", "PeerLink Test")
+            }
         }
     }
 

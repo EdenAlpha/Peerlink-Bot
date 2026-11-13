@@ -43,7 +43,7 @@ add_library(peerlinkbackend SHARED
         peerlink_backend.cpp
         engine_host.cpp)
 
-target_link_libraries(peerlinkbackend log android)
+target_link_libraries(peerlinkbackend c++_shared log android dl)
 
 add_executable(libpeerlinkstarter.so
         starter.cpp
@@ -54,7 +54,7 @@ add_executable(libpeerlinkstarter.so
 # "android" is the NDK system library that provides android_get_device_api_level().
 # "log"     is the NDK logging library (__android_log_print used in logging.h).
 # Shizuku also uses "log" — we match that exactly, plus add "android".
-target_link_libraries(libpeerlinkstarter.so log android)
+target_link_libraries(libpeerlinkstarter.so c++_shared log android)
 
 if (NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
     add_custom_command(TARGET libpeerlinkstarter.so POST_BUILD
@@ -79,7 +79,7 @@ endif ()
 add_executable(libpeerlinkengine.so
         engine_probe.cpp)
 
-target_link_libraries(libpeerlinkengine.so log dl)
+target_link_libraries(libpeerlinkengine.so c++_shared log dl)
 
 if (NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
     add_custom_command(TARGET libpeerlinkengine.so POST_BUILD

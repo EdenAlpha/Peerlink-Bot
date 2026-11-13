@@ -318,7 +318,7 @@ object BotMatchDriver {
             // not loaded means an honest dead connection -- never a fake one.
             log("engine at the connection phase: loaded=${EngineHost.base != 0L} " +
                 "peerPort=${com.peerlink.app.core.AppState.enginePeerPort}")
-            status("CONNECTED -- the engine owns the game's connection packets")
+            status("Connecting to your game — waiting for the engine’s verdict")
 
             // Mid-match liveness: re-push the antenna echo on a cadence.
             while (running) {

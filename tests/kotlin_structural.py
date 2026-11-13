@@ -101,14 +101,14 @@ def balanced(source: str) -> bool:
 def main() -> int:
     files = sorted(JAVA.rglob("*.kt"))
     check("Kotlin source tree is present", len(files) >= 30)
-    all_sources = {path: path.read_text(encoding="utf-8") for path in files}
+    all_sources = {path: path.read_text(encoding="utf-8-sig") for path in files}
     for path, source in all_sources.items():
         relative = path.relative_to(ROOT)
         check(f"balanced Kotlin tokens: {relative}", balanced(source))
         check(f"single package declaration: {relative}", len(re.findall(r"(?m)^\s*package\s+", strip_kotlin(source))) == 1)
 
-    backend = (JAVA / "com/peerlink/app/tunnel/NativePeerLinkBackend.kt").read_text(encoding="utf-8")
-    native = NATIVE.read_text(encoding="utf-8")
+    backend = (JAVA / "com/peerlink/app/tunnel/NativePeerLinkBackend.kt").read_text(encoding="utf-8-sig")
+    native = NATIVE.read_text(encoding="utf-8-sig")
     externals = re.findall(r"private\s+external\s+fun\s+(\w+)", strip_kotlin(backend))
     check("native backend declares JNI methods", len(externals) >= 7)
     for method in externals:
