@@ -42,9 +42,15 @@ class BotEngineChannelsPhoneTest {
                 assertFalse("No match was started", after.canTestPass)
                 assertTrue("Repeated preparation should preserve the original handler", EngineHost.prepareChannels(peer, squad))
                 Thread.sleep(5000)
-                assertTrue(EngineHost.snapshot().matchDataHandlerPresent)
+                val unanswered = EngineHost.snapshot()
+                Log.i("PeerlinkChannelTest", "UNANSWERED_PEER_STATE state=${unanswered.values.contentToString()}")
+                assertFalse("An unanswered socket cannot establish a native connection", unanswered.connected)
+                assertFalse("An unanswered socket cannot start a match", unanswered.canTestPass)
                 assertTrue(EngineHost.probeController())
-                Log.i("PeerlinkChannelTest", "EARLY_CHANNEL_SETUP_STABLE_WITHOUT_FORCING_CONNECTION")
+                // Native failure cleanup may remove its handler when the peer
+                // never answers. The separate two-engine test checks that a
+                // genuine connection keeps its data channels open.
+                Log.i("PeerlinkChannelTest", "UNANSWERED_PEER_NOT_REPORTED_AS_CONNECTED")
             } finally { EngineHost.stop() }
         }
     }

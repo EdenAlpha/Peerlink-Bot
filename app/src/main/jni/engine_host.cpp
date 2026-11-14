@@ -356,7 +356,8 @@ JNIEXPORT jlongArray JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeSnaps
             state[5] = *reinterpret_cast<uint32_t *>(model + 0x7b8);
             state[6] = *reinterpret_cast<unsigned char *>(model + 0x7f1);
             state[7] = *reinterpret_cast<unsigned char *>(model + 0x7f2);
-            state[19] = *reinterpret_cast<uintptr_t *>(model + 0x848) != 0;
+            uintptr_t handle = *reinterpret_cast<uintptr_t *>(model + 0x848);
+            state[19] = handle && *reinterpret_cast<uintptr_t *>(handle);
         }
         uintptr_t match = *reinterpret_cast<uintptr_t *>(g_base + 0xa533ec0);
         uintptr_t core = match ? *reinterpret_cast<uintptr_t *>(match + 0x2f8) : 0;
