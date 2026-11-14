@@ -56,8 +56,9 @@ public final class GameAndroidRuntime implements AutoCloseable {
             loader = new InputLoader(String.join(File.pathSeparator, paths), libraries, owner.getClassLoader());
             DisplayManager manager = (DisplayManager)owner.getSystemService(Context.DISPLAY_SERVICE);
             created = manager.createVirtualDisplay("PeerLink bot", 320, 180, 160, frames.getSurface(),
-                DisplayManager.VIRTUAL_DISPLAY_FLAG_OWN_CONTENT_ONLY | DisplayManager.VIRTUAL_DISPLAY_FLAG_PRESENTATION |
-                DisplayManager.VIRTUAL_DISPLAY_FLAG_DESTROY_CONTENT_ON_REMOVAL);
+                DisplayManager.VIRTUAL_DISPLAY_FLAG_OWN_CONTENT_ONLY | DisplayManager.VIRTUAL_DISPLAY_FLAG_PRESENTATION);
+            // AOSP DisplayManager: private displays always destroy their
+            // contents on removal; the extra destroy flag is a hidden API.
             if (created == null) throw new IllegalStateException("Could not create bot display");
             display = created;
             current = this;
