@@ -19,7 +19,10 @@ internal object GameAssets {
         val marker = File(root, "assets-v1.ready")
         val packageInfo = owner.packageManager.getPackageInfo("jp.konami.pesam", 0)
         val installation = "${packageInfo.lastUpdateTime}:${game.applicationInfo.sourceDir}"
-        if (marker.isFile && marker.readText() == installation) return prepared
+        if (marker.isFile && marker.readText() == installation) {
+            prepareNativePakLayout(prepared, installation)
+            return prepared
+        }
         val assets = game.assets
         val names = assets.list("").orEmpty().filter {
             it.endsWith("_all.cpk") || it.endsWith("_and.cpk") || it.contains("_eng_") && it.endsWith(".cpk")
@@ -65,8 +68,28 @@ internal object GameAssets {
             destination.parentFile?.mkdirs()
             atomicFile(destination) { it.write(command.toByteArray()) }
         }
+        prepareNativePakLayout(prepared, installation)
         atomicFile(marker) { it.write(installation.toByteArray()) }
         return prepared
+    }
+
+    private fun prepareNativePakLayout(prepared: Prepared, installation: String) {
+        // FAndroidPlatformFile maps ../../../PesMobile/... into this private
+        // UE4Game tree. -ProjectDir alone does not expose the staged files there.
+        // Verified with the original library's failed global.utoc stat on ARM64.
+        val source = File(prepared.project, "Content/Paks")
+        val target = File(prepared.root, "internal/UE4Game/PesMobile/PesMobile/Content/Paks")
+        val marker = File(prepared.root, "native-paks-v2.ready")
+        val files = source.listFiles().orEmpty().filter { it.isFile }
+        check(files.size == 5) { "Bot match resource files are incomplete" }
+        if (marker.isFile && marker.readText() == installation && files.all {
+                File(target, it.name).length() == it.length()
+            }) return
+        check(target.isDirectory || target.mkdirs()) { "Cannot create native bot resource directory" }
+        for (file in files) file.inputStream().use { input ->
+            atomicFile(File(target, file.name)) { input.copyTo(it, 128 * 1024) }
+        }
+        atomicFile(marker) { it.write(installation.toByteArray()) }
     }
 
     private fun atomicFile(destination: File, write: (java.io.OutputStream) -> Unit) {

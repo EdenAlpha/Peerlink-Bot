@@ -36,8 +36,17 @@ jobs:
       - name: Keep test APK updates signed consistently
         uses: actions/cache@v4
         with:
-          path: ~/.android/debug.keystore
-          key: peerlink-engine-test-debug-signing-v1
+          path: ~/.android/peerlink-engine-test.keystore
+          key: peerlink-engine-test-debug-signing-v2
+
+      - name: Prepare the dedicated test signing key
+        run: |
+          mkdir -p "$HOME/.android"
+          if [ ! -f "$HOME/.android/peerlink-engine-test.keystore" ]; then
+            keytool -genkeypair -keystore "$HOME/.android/peerlink-engine-test.keystore" \
+              -storepass android -keypass android -alias AndroidDebugKey \
+              -dname 'CN=Android Debug,O=Android,C=US' -keyalg RSA -keysize 2048 -validity 10000
+          fi
 
       - name: Install Android SDK components
         run: |

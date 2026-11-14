@@ -31,6 +31,7 @@ public final class GameAndroidRuntime implements AutoCloseable {
     private static volatile GameAndroidRuntime current;
     private final Context game;
     private final File storage;
+    private final String packageName;
     private final ImageReader frames;
     private final Instrumentation lifecycle = new Instrumentation();
     private final NativeActivity activity;
@@ -40,7 +41,7 @@ public final class GameAndroidRuntime implements AutoCloseable {
 
     private GameAndroidRuntime(Context owner, Context game, File root) throws Exception {
         if (Looper.myLooper() != Looper.getMainLooper()) throw new IllegalStateException("Android main thread required");
-        this.game = game; storage = root;
+        this.game = game; storage = root; packageName = owner.getPackageName();
         frames = ImageReader.newInstance(320, 180, PixelFormat.RGBA_8888, 3);
         frames.setOnImageAvailableListener(reader -> {
             try (Image image = reader.acquireLatestImage()) { /* Drain without displaying frames. */ }
@@ -64,7 +65,7 @@ public final class GameAndroidRuntime implements AutoCloseable {
             if (info.splitSourceDirs != null) paths.addAll(Arrays.asList(info.splitSourceDirs));
             String libraries = new File(owner.getFilesDir(), "engine").getAbsolutePath() + File.pathSeparator + owner.getApplicationInfo().nativeLibraryDir;
             if (info.nativeLibraryDir != null) libraries += File.pathSeparator + info.nativeLibraryDir;
-            loader = new InputLoader(String.join(File.pathSeparator, paths), libraries, owner.getClassLoader());
+            loader = new PathClassLoader(String.join(File.pathSeparator, paths), libraries, owner.getClassLoader());
             current = this;
             ComponentName component = new ComponentName(owner.getPackageName(), "com.peerlink.engine.PhoneGameHost");
             Intent launch = new Intent().setComponent(component);
@@ -91,13 +92,6 @@ public final class GameAndroidRuntime implements AutoCloseable {
             frames.close(); throw error;
         }
     }
-    private static final class InputLoader extends PathClassLoader {
-        InputLoader(String dex, String libraries, ClassLoader parent) { super(dex, libraries, parent); }
-        @Override public Class<?> loadClass(String name) throws ClassNotFoundException {
-            if (name.equals("jp.konami.android.common.GameController")) return super.loadClass("com.peerlink.engine.BotGamepad");
-            return super.loadClass(name);
-        }
-    }
     static GameAndroidRuntime create(Context owner, Context game, File root) throws Exception {
         GameAndroidRuntime runtime = EngineAndroidHost.onMainThread(() -> new GameAndroidRuntime(owner, game, root));
         try { runtime.attached.get(60, TimeUnit.SECONDS); return runtime; }
@@ -106,6 +100,7 @@ public final class GameAndroidRuntime implements AutoCloseable {
     public static ClassLoader gameLoader() { return requireCurrent().loader; }
     public static Context gameContext() { return requireCurrent().game; }
     public static File storageRoot() { return requireCurrent().storage; }
+    public static String hostPackageName() { return requireCurrent().packageName; }
     public static void activityCreated(Activity activity) { requireCurrent().attached.complete(activity); }
     public static void activityFailed(Throwable error) { requireCurrent().attached.completeExceptionally(error); }
     private static GameAndroidRuntime requireCurrent() {

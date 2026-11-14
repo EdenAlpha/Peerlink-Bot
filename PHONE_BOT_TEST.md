@@ -13,7 +13,7 @@ the architecture and GLES requirements. Running both games within its 3.7 GB
 RAM remains an on-device measurement, not an established performance claim.
 
 The app reads the installed game's APKs/assets and creates its own working
-files. First preparation uses approximately 1 GB of additional storage. The
+files. First preparation uses approximately 1.1 GB of additional storage. The
 original game files and saves are not modified. No game binaries, assets,
 account credentials or session IDs are included in this repository/APK.
 
@@ -77,3 +77,18 @@ private-display activity launch failed Android's embedding permission check
 before testing the original stall, so that route was removed. The framework
 host replacement still requires successful ARM64 startup evidence. No phone
 kickoff is claimed by the checks above.
+
+Direct ARM64 tests with the original library identified and verified these
+startup corrections before another full APK build:
+
+- Place the five native pak/IoStore files in Android's actual private UE4Game
+  directory. The original failed `global.utoc` stat returned `ENOENT`.
+- Use PeerLink's real package identity for Android services and PendingIntents.
+- Run the original CPU/GPU information initialization before native startup.
+- Expose the own software gamepad through the exact JNI input-provider class
+  name, without changing Android's global input inventory.
+
+The direct test started the original engine, loaded all 44 database tables,
+enumerated the software gamepad and completed a 15-second startup hold. These
+runtime experiments do not establish that a rebuilt APK, phone-game connection
+or kickoff works; the packaged changes require their own Android run.

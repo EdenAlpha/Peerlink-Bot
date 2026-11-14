@@ -23,6 +23,15 @@ class BotEnginePhoneTest {
             assertFalse("No opponent or match was started by this startup test", state.canTestPass)
             assertTrue("The bot's own software controller was not enumerated", EngineHost.probeController())
             Log.i("PeerlinkPhoneTest", "OWN_BOT_CONTROLLER_ENUMERATED")
+            // Exercise the real ongoing native lifecycle, including asynchronous
+            // startup callbacks. A successful RPC immediately before a crash is
+            // insufficient evidence of a usable engine host.
+            repeat(3) {
+                Thread.sleep(5000)
+                assertEquals("Native SDK stopped after initialization", 1L, EngineHost.snapshot().values[0])
+            }
+            assertTrue("The bot controller disappeared after startup", EngineHost.probeController())
+            Log.i("PeerlinkPhoneTest", "ENGINE_AND_CONTROLLER_STABLE_15_SECONDS")
         } finally { EngineHost.stop() }
     }
 }

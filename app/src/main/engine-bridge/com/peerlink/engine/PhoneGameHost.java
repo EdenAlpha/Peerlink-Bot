@@ -26,6 +26,14 @@ public final class PhoneGameHost extends GameActivity {
             activity.set(null, this);
             Field assets = GameActivity.class.getDeclaredField("AssetManagerReference");
             assets.setAccessible(true); assets.set(this, getAssets());
+            // These original startup calls populate SystemInfo's CPU/GPU
+            // strings. The SDK reads them while constructing its services.
+            // Query graphics before starting native rendering; its tiny probe
+            // context must not terminate the renderer's later EGL display.
+            java.lang.reflect.Method graphics = GameActivity.class.getDeclaredMethod("getGraphicsInformation");
+            graphics.setAccessible(true); graphics.invoke(this);
+            Class.forName("jp.konami.android.common.SystemInfo", true, getClassLoader())
+                .getMethod("InitSOCInfo", String.class).invoke(null, android.os.Build.HARDWARE);
             Class.forName("jp.konami.android.common.FirebaseAnalyticsImpl", true, getClassLoader())
                 .getMethod("onCreate", Context.class).invoke(null, this);
             // The original GameActivity initializes this before its resume
@@ -67,7 +75,7 @@ public final class PhoneGameHost extends GameActivity {
         return gameResources;
     }
     @Override public ApplicationInfo getApplicationInfo() { return game().getApplicationInfo(); }
-    @Override public String getPackageName() { return "jp.konami.pesam"; }
+    @Override public String getPackageName() { return GameAndroidRuntime.hostPackageName(); }
     @Override public String getPackageCodePath() { return game().getPackageCodePath(); }
     @Override public String getPackageResourcePath() { return game().getPackageResourcePath(); }
     @Override public File getFilesDir() { return directory("internal"); }

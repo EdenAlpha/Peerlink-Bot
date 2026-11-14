@@ -60,6 +60,11 @@ android {
         }
     }
 
+    if (providers.gradleProperty("engineHostTestBuild").orNull == "true") {
+        signingConfigs.getByName("debug").storeFile =
+            file("${System.getProperty("user.home")}/.android/peerlink-engine-test.keystore")
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -94,7 +99,8 @@ val bridgeClasses = layout.buildDirectory.dir("engineBridge/classes")
 val bridgeJar = tasks.register<Jar>("gameHostBridgeJar") {
     dependsOn("compileGameHostBridge")
     from(bridgeClasses) {
-        include("com/peerlink/engine/**", "com/epicgames/ue4/MessageBox01.class")
+        include("com/peerlink/engine/**", "com/epicgames/ue4/MessageBox01.class",
+            "jp/konami/android/common/GameController.class")
     }
     archiveFileName.set("game-host-bridge.jar")
     destinationDirectory.set(layout.buildDirectory.dir("engineBridge"))
