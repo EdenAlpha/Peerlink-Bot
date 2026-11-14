@@ -1,0 +1,16 @@
+{
+  "app_commit": "3ddc5615d60181bec23562e7bfb96434604f7616",
+  "ci_run": 43648763321,
+  "artifact_id": 14135511814,
+  "apk_sha256": "087fdfec25efd70cc4630db693c88da93c49a2ad11336b75e38d3bfdf76d4899",
+  "device": "ARM64 Android15/API35 Redroid, two app instances in Android users 0 and 10",
+  "temporary_hooks": false,
+  "native_packets_fabricated": false,
+  "connection_state_patches": false,
+  "squad_inputs": "Explicit owned squad DTOs staged only for the local paired native-input test",
+  "update_install_over_previous_apk": "success",
+  "verified": "Both original base sessions and channels14/15 state4; both remained connected during a5-second hold. Negative no-peer guard,44database tables,controller and15-second startup hold passed.",
+  "not_verified": "Fresh authenticated room, foreground physical-phone game connection, match start/kickoff or Pass/ball response",
+  "android_framework_checks": "7tests each API34 and35 passed",
+  "peer_endpoint_fixture": "127.0.0.1 UDP forwarding unchanged original SDK payloads; measured local-lab NAT descriptor271581233"
+}

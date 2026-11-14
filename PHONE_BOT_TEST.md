@@ -60,6 +60,26 @@ use and phone-game kickoff require separate evidence.
 
 ## Verification
 
+The current connection-test APK is `3ddc561`, published as
+[`phone-engine-test-3ddc561`](https://github.com/EdenAlpha/Peerlink-Bot/releases/tag/phone-engine-test-3ddc561).
+It corrects the ordering between the base session, original online-model
+construction and data-channel readiness. The native guard rejects model
+construction until the base session is connected; data channels are then
+opened by the original GameDataConnection before later game-start inputs.
+
+The exact packaged APK passed a local two-engine test on ARM64 Android 15.
+Separate Android app instances exchanged original SDK packets, both base
+sessions connected, both channels 14/15 reached native state 4, and both
+connections survived the five-second hold. The no-peer rejection, ferry,
+database/controller startup and 15-second startup hold also passed. No hooks
+or connection-state writes were used. Owned squad DTOs were staged for this
+explicit local input fixture; it supplied no authenticated match ID and does
+not verify kickoff against the user's game. Filtered logs and scope are in
+[`tests/evidence/phone-channels-20261114`](tests/evidence/phone-channels-20261114/README.md).
+
+Current APK SHA-256:
+`087fdfec25efd70cc4630db693c88da93c49a2ad11336b75e38d3bfdf76d4899`.
+
 - APK compilation and JVM readiness tests run in Android CI.
 - Genuine Android framework tests check the host and separate gamepad events.
 - `BotFerryTransportTest` checks only transport with opaque bytes; it is not a
@@ -67,6 +87,10 @@ use and phone-game kickoff require separate evidence.
 - `BotEnginePhoneTest`, explicitly selected with an owner-supplied `botUid`,
   installs/starts the original engine and probes its own controller on ARM64.
   It intentionally does not join a match or claim kickoff.
+- `BotEngineChannelsPhoneTest` checks that a still-connecting session cannot
+  trigger premature model construction or be reported as a match connection.
+- `BotEnginePairPhoneTest` checks original base and data-channel connections
+  using two separately running instances and a local UDP forwarding fixture.
 - `GameArchiveRegression` compares all 44 decoded tables against an independent
   decode of the same installed archive and rejects malformed containers.
 
@@ -107,5 +131,5 @@ Match-log exports include `java_crash_report.txt` when a saved Java crash
 report exists, so asynchronous frame-consumer failures are retained alongside
 the session log. The report's timestamp identifies when the exception occurred.
 
-Verified APK SHA-256:
+Previous RGB-fix APK (`25ae176`) SHA-256:
 `f79ff4c087673e2755ac84c8e83e90abc8fbaa9641377fb81ab07a769c5a0386`.

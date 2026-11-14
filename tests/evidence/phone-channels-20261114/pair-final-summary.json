@@ -1,0 +1,10 @@
+{
+  "pair_A": true,
+  "pair_B": true,
+  "actual_base_connections": true,
+  "actual_data_channels": true,
+  "fatal_engine_error": false,
+  "negative": true,
+  "startup": true,
+  "passed": true
+}
