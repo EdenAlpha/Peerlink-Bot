@@ -40,6 +40,7 @@ std::string g_squad_path;
 int g_match_stage = 0;
 bool g_preview_proceeded = false;
 bool g_controller_scanned = false;
+uint32_t g_channel_peer = 0;
 
 struct EngineString { uint64_t words[3]; };
 struct EnginePair { EngineString identity, channel; };
@@ -115,6 +116,20 @@ bool neutral_event(JNIEnv *env) {
     jobject event = method ? env->CallStaticObjectMethod(factory, method) : nullptr;
     bool result = input_event(env, event, true);
     if (factory) env->DeleteLocalRef(factory);
+    return result;
+}
+// The online model creates the original match-data connection and its channel
+// handlers. These owned room/roster inputs must precede the channel-ready wait;
+// the later game ID/start-request inputs are not available at this stage.
+int prepare_channel_inputs(uint32_t peer, const char *squad_path) {
+    if (g_channel_peer) return g_channel_peer == peer ? 1 : -104;
+    uintptr_t root = entry<uintptr_t (*)()>(0x7a87db8)();
+    if (!root || !*reinterpret_cast<uintptr_t *>(root + 0x20)) return -100;
+    int result = peerlink_squad_import(g_base, 0, g_uid, squad_path);
+    if (result > 0 && !peerlink_lab_uid_participants(g_base, g_uid, peer, g_uid)) result = -101;
+    if (result > 0) result = peerlink_player_cache_import(g_base, g_uid, squad_path);
+    if (result > 0 && !peerlink_original_online_inputs_v224(g_base, g_uid, peer)) result = -102;
+    if (result > 0) { g_channel_peer = peer; g_squad_path = squad_path; }
     return result;
 }
 }
@@ -218,6 +233,24 @@ JNIEXPORT jstring JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeStartupI
     return env->NewStringUTF(text);
 }
 
+JNIEXPORT jboolean JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativePrepareChannels(
+        JNIEnv *env, jobject, jlong base, jlong peer, jstring squad) {
+    if (!valid(base) || !g_client || !squad || peer <= 0 || peer > 0xffffffffLL || peer == g_uid)
+        return JNI_FALSE;
+    const char *path = env->GetStringUTFChars(squad, nullptr);
+    if (!path) return JNI_FALSE;
+    int result = -100;
+    {
+        TaskLock lock;
+        uintptr_t manager = session_manager();
+        if (lock.manager && manager && *reinterpret_cast<uintptr_t *>(manager + 0x38))
+            result = prepare_channel_inputs(static_cast<uint32_t>(peer), path);
+    }
+    env->ReleaseStringUTFChars(squad, path);
+    __android_log_print(ANDROID_LOG_INFO, TAG, "early channel input result=%d", result);
+    return result > 0 ? JNI_TRUE : JNI_FALSE;
+}
+
 JNIEXPORT jboolean JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeSetupMatch(
         JNIEnv *env, jobject, jlong base, jlong peer, jstring squad, jstring context) {
     if (!valid(base) || !g_client || peer <= 0 || peer > 0xffffffffLL || peer == g_uid ||
@@ -231,10 +264,7 @@ JNIEXPORT jboolean JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeSetupMa
         TaskLock lock;
         uintptr_t root = entry<uintptr_t (*)()>(0x7a87db8)();
         if (lock.manager && root && *reinterpret_cast<uintptr_t *>(root + 0x20)) {
-            result = peerlink_squad_import(g_base, 0, g_uid, squad_path);
-            if (result > 0 && !peerlink_lab_uid_participants(g_base, g_uid, static_cast<uint32_t>(peer), g_uid)) result = -101;
-            if (result > 0) result = peerlink_player_cache_import(g_base, g_uid, squad_path);
-            if (result > 0 && !peerlink_original_online_inputs_v224(g_base, g_uid, static_cast<uint32_t>(peer))) result = -102;
+            result = prepare_channel_inputs(static_cast<uint32_t>(peer), squad_path);
             if (result > 0) {
                 uintptr_t task = entry<uintptr_t (*)(const char *)>(0x7b488c8)("TaskSyncUserData");
                 uintptr_t task_root = *reinterpret_cast<uintptr_t *>(lock.manager + 0x118);
@@ -305,7 +335,7 @@ JNIEXPORT jint JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeAdvanceMatc
 
 JNIEXPORT jlongArray JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeSnapshot(
         JNIEnv *env, jobject, jlong base) {
-    jlong state[18]{};
+    jlong state[20]{};
     if (valid(base)) {
         TaskLock lock;
         state[0] = *reinterpret_cast<unsigned char *>(g_base + 0xa53b850);
@@ -326,6 +356,7 @@ JNIEXPORT jlongArray JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeSnaps
             state[5] = *reinterpret_cast<uint32_t *>(model + 0x7b8);
             state[6] = *reinterpret_cast<unsigned char *>(model + 0x7f1);
             state[7] = *reinterpret_cast<unsigned char *>(model + 0x7f2);
+            state[19] = *reinterpret_cast<uintptr_t *>(model + 0x848) != 0;
         }
         uintptr_t match = *reinterpret_cast<uintptr_t *>(g_base + 0xa533ec0);
         uintptr_t core = match ? *reinterpret_cast<uintptr_t *>(match + 0x2f8) : 0;
@@ -361,8 +392,8 @@ JNIEXPORT jlongArray JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeSnaps
         state[16] = work ? *reinterpret_cast<unsigned char *>(work + 0x6c4c0 + 0x102) : 0;
         state[17] = settings ? *reinterpret_cast<unsigned char *>(settings + 0xd3) : 0;
     }
-    jlongArray result = env->NewLongArray(18);
-    if (result) env->SetLongArrayRegion(result, 0, 18, state);
+    jlongArray result = env->NewLongArray(20);
+    if (result) env->SetLongArrayRegion(result, 0, 20, state);
     return result;
 }
 

@@ -167,11 +167,21 @@ internal object EngineRuntime {
         for (i in 0..3) bytes[offset + i] = (value ushr (8 * i)).toByte()
     }
 
+    private fun storeSquad(squad: ByteArray): File {
+        val root = File(gameHost!!.activity().filesDir.parentFile, "match-inputs").apply { mkdirs() }
+        return File(root, "squad.dto").apply { writeBytes(squad) }
+    }
+
+    fun prepareChannels(peerUid: Long, squad: ByteArray): Boolean = onRuntime {
+        if (client == 0L || peerUid == ownerUid) return@onRuntime false
+        nativePrepareChannels(base, peerUid, storeSquad(squad).absolutePath)
+    }
+
     fun setupMatch(peerUid: Long, gameId: Long, sid: String, category: String,
                    keyword: String, squad: ByteArray): Boolean = onRuntime {
         if (client == 0L || peerUid == ownerUid || gameId <= 0) return@onRuntime false
-        val root = File(gameHost!!.activity().filesDir.parentFile, "match-inputs").apply { mkdirs() }
-        val squadFile = File(root, "squad.dto").apply { writeBytes(squad) }
+        val squadFile = storeSquad(squad)
+        val root = squadFile.parentFile!!
         val sidBytes = sid.toByteArray(Charsets.UTF_8)
         val categoryBytes = category.toByteArray(Charsets.UTF_8)
         val keywordBytes = keyword.toByteArray(Charsets.ISO_8859_1)
@@ -202,6 +212,7 @@ internal object EngineRuntime {
     private external fun nativeApplicationReady(base: Long): Boolean
     private external fun nativeStartupInfo(base: Long): String
     private external fun nativeLoadDatabase(base: Long, path: String): Boolean
+    private external fun nativePrepareChannels(base: Long, peer: Long, squad: String): Boolean
     private external fun nativeSetupMatch(base: Long, peer: Long, squad: String, context: String): Boolean
     private external fun nativeSnapshot(base: Long): LongArray
     private external fun nativeAdvanceMatch(base: Long, controllerAllowed: Boolean): Int

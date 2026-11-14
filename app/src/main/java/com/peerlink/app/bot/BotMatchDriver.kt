@@ -262,9 +262,21 @@ object BotMatchDriver {
             check(gs!!["game_sycom"] == "P2P") { "The server selected relay; this bot test requires P2P" }
             val connectingStart = (gs!!["connecting_start_time"] as? Number)?.toLong() ?: 0L
             check(flow.handPeerToEngine(oppBlock!!, opp, connectingStart)) { "The bot engine did not accept the server's session" }
+            // Original model construction installs the match-data handlers.
+            // Waiting for channels 14/15 before doing this prevents the very
+            // connection that would allow later game-ID/start-request setup.
+            check(EngineHost.prepareChannels(opp, squadInput)) { "The bot's match-data channel setup was rejected" }
             val connectionDeadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(90)
             status("Connecting both game engines")
-            while (running && !EngineHost.snapshot().connected) {
+            var lastConnectionState = ""
+            while (running) {
+                val state = EngineHost.snapshot()
+                val progress = state.values.take(8).joinToString(",") + ",${state.matchDataHandlerPresent}"
+                if (progress != lastConnectionState) {
+                    log("native connection state [core,sdk,session,channel14,channel15,model,complete,error,handler]=$progress")
+                    lastConnectionState = progress
+                }
+                if (state.connected) break
                 check(System.nanoTime() < connectionDeadline) { "The game connection timed out before both match-data channels opened" }
                 Thread.sleep(500)
             }

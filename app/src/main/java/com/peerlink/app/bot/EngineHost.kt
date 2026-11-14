@@ -116,6 +116,8 @@ object EngineHost {
             putLong("peer", peer); putLong("gameId", gameId); putString("sid", sid)
             putString("keyword", GateCodec.sKeyword()); putByteArray("squad", squad)
         }, 60).getBoolean("ok")
+    fun prepareChannels(peer: Long, squad: ByteArray): Boolean = request(EngineProtocol.PREPARE_CHANNELS,
+        Bundle().apply { putLong("peer", peer); putByteArray("squad", squad) }, 60).getBoolean("ok")
     fun snapshot(): EngineSnapshot = EngineSnapshot(request(EngineProtocol.SNAPSHOT).getLongArray("state") ?: LongArray(19))
     fun startInputTest(controllerAllowed: Boolean): Boolean = request(EngineProtocol.START_TEST,
         Bundle().apply { putBoolean("controllerAllowed", controllerAllowed) }).getBoolean("ok")
@@ -142,6 +144,7 @@ internal object EngineProtocol {
     const val PASS = 9
     const val STOP = 10
     const val PROBE_CONTROLLER = 11
+    const val PREPARE_CHANNELS = 12
     const val STATUS = 100
 }
 
@@ -153,6 +156,7 @@ data class EngineSnapshot(val values: LongArray) {
     val ballOnPitch get() = field(11) == 1L
     val canTestPass get() = connected && matchConstructed && ballOnPitch && field(16) == 1L && field(17) == 1L
     val memoryMiB get() = field(18) / 1024
+    val matchDataHandlerPresent get() = field(19) == 1L
     val ballSpeedMmPerSecond get() = field(15)
     fun status(): String = when {
         !connected -> "Connecting to your game"

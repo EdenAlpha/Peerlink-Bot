@@ -53,6 +53,8 @@ class BotEngineService : Service() {
                 EngineProtocol.SET_PEERS -> result.putBoolean("ok", EngineRuntime.setPeers(requireNotNull(args.getByteArray("record"))))
                 EngineProtocol.OPEN_SESSION -> result.putBoolean("ok", EngineRuntime.openSession(args.getLong("peer"), args.getLong("connectingStart")))
                 EngineProtocol.CHECK -> result.putLong("verdict", EngineRuntime.check())
+                EngineProtocol.PREPARE_CHANNELS -> result.putBoolean("ok", EngineRuntime.prepareChannels(
+                    args.getLong("peer"), requireNotNull(args.getByteArray("squad"))))
                 EngineProtocol.SETUP_MATCH -> {
                     val ok = EngineRuntime.setupMatch(args.getLong("peer"), args.getLong("gameId"),
                         requireNotNull(args.getString("sid")), "MYCLUB_LOBBY_ROOM_MATCH_1VS1",
@@ -98,7 +100,7 @@ class BotEngineService : Service() {
     private fun snapshot(): EngineSnapshot {
         val now = SystemClock.elapsedRealtime()
         if (now >= nextMemorySample) { pss = Debug.getPss().toLong(); nextMemorySample = now + 5000 }
-        return EngineSnapshot(EngineRuntime.snapshot().copyOf(19).also { it[18] = pss })
+        return EngineSnapshot(EngineRuntime.snapshot().copyOf(20).also { it[18] = pss })
     }
     private fun poll() {
         try {
