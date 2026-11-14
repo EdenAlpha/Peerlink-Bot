@@ -36,11 +36,12 @@ account credentials or session IDs are included in this repository/APK.
 
 ## Implementation and limits
 
-The private `:botengine` process hosts an Android-created NativeActivity on its
-own private 320×180 virtual display. Android owns the native activity record,
-window and input queues; the output frames are drained. Removing the display
-destroys its contents instead of moving the bot onto the human screen. The
-original task manager owns match updates. Current
+The private `:botengine` process attaches its host through Android's public
+`Instrumentation.newActivity` API. The real `NativeActivity.onCreate` owns the
+native activity record and callback pipe. Its public surface callbacks receive
+an app-owned 320×180 ImageReader surface whose frames are drained. No activity
+task is launched on a display and no human input queue is attached. The original
+task manager owns match updates. Current
 account squad inputs and the server's game/session values are passed to the
 recovered native input APIs; no readiness or connectivity flags are assigned.
 The controller setting uses original setters after server permission is
@@ -71,6 +72,8 @@ use and phone-game kickoff require separate evidence.
 
 ARM64 testing identified a missing Play Asset Delivery service, a scoped
 storage failure, and an invalid manually manufactured native activity host.
-The service dependency and private storage fixes are included; the framework
-activity replacement still requires successful ARM64 startup evidence. No
-phone kickoff is claimed by the checks above.
+The service dependency and private storage fixes are included. An attempted
+private-display activity launch failed Android's embedding permission check
+before testing the original stall, so that route was removed. The framework
+host replacement still requires successful ARM64 startup evidence. No phone
+kickoff is claimed by the checks above.

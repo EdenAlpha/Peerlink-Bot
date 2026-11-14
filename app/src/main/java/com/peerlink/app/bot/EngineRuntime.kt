@@ -81,8 +81,8 @@ internal object EngineRuntime {
             val files = GameAssets.prepare(app, report)
             report("Starting bot simulation")
             check(nativeConfigureFiles(base, File(files.root, "assets").absolutePath)) { "Bot asset directory is unavailable" }
-            // Android creates the NativeActivity, its NativeCode and the real
-            // surface/input lifecycle on the bot's private display.
+            // NativeActivity creates its own NativeCode. Its surface belongs
+            // to the bot service and is never launched as a display task.
             if (gameHost == null) gameHost = GameAndroidRuntime.create(app, files.game, files.root)
             val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(120)
             var nextReport = 0L

@@ -21,7 +21,6 @@ android {
 }
 
 dependencies {
-    implementation("androidx.core:core:1.15.0")
     androidTestImplementation("androidx.test:runner:1.6.2")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
 }

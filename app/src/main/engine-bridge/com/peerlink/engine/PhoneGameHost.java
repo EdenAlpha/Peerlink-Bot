@@ -12,7 +12,7 @@ import java.io.File;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 
-/** OS-created native Activity on the bot's private display; never receives human screen input. */
+/** Framework-attached native host in the bot service; never receives human screen input. */
 public final class PhoneGameHost extends GameActivity {
     private Resources gameResources;
     public PhoneGameHost() { super(); }
