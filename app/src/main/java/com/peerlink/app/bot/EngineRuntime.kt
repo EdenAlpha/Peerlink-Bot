@@ -88,15 +88,26 @@ internal object EngineRuntime {
                 else if (!nativeStartApplication(base, host.surface(), files.root.absolutePath,
                         "-opengl -nosound -unattended -NoSplash -culture=en -featureleveles31 " +
                             "-ResX=320 -ResY=180 -ProjectDir=${files.project.absolutePath}/")) false
-                else { host.resumeAssets(); nativeResumeApplication(base); true }
+                else {
+                    host.resumeAssets()
+                    // Original GameActivity.onResume delivers this Java-side
+                    // callback BEFORE NativeActivity's native resume callback.
+                    host.resumeGame()
+                    nativeResumeApplication(base)
+                    true
+                }
             })
             if (!bound) return false
             val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(120)
+            var nextReport = 0L
             while (!nativeApplicationReady(base)) {
+                if (System.nanoTime() >= nextReport) {
+                    android.util.Log.i("PeerlinkEngineHost", nativeStartupInfo(base))
+                    nextReport = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+                }
                 check(System.nanoTime() < deadline) { "Bot simulation startup timed out" }
                 Thread.sleep(200)
             }
-            EngineAndroidHost.onMainThread(Callable { host.resumeGame() })
             check(onRuntime { nativeLoadDatabase(base, files.database.absolutePath) }) { "Bot game database could not start" }
             onRuntime {
                 client = nativeStart(base, uid)
@@ -203,6 +214,7 @@ internal object EngineRuntime {
     private external fun nativeStartApplication(base: Long, surface: android.view.Surface, root: String, command: String): Boolean
     private external fun nativeResumeApplication(base: Long)
     private external fun nativeApplicationReady(base: Long): Boolean
+    private external fun nativeStartupInfo(base: Long): String
     private external fun nativeLoadDatabase(base: Long, path: String): Boolean
     private external fun nativeSetupMatch(base: Long, peer: Long, squad: String, context: String): Boolean
     private external fun nativeSnapshot(base: Long): LongArray

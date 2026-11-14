@@ -189,6 +189,23 @@ JNIEXPORT jboolean JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeLoadDat
     return result == 44 ? JNI_TRUE : JNI_FALSE;
 }
 
+JNIEXPORT jstring JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeStartupInfo(
+        JNIEnv *env, jobject, jlong base) {
+    if (!valid(base)) return env->NewStringUTF("startup: engine not loaded");
+    uintptr_t app = reinterpret_cast<uintptr_t>(g_activity.instance);
+    uintptr_t owner = *reinterpret_cast<uintptr_t *>(g_base + 0xa5fb348);
+    char text[256];
+    snprintf(text, sizeof(text), "startup: engine=%u objects=%u kernel=%u running=%u activity=%u window=%u database=%u work=%u sessions=%u",
+        *reinterpret_cast<uintptr_t *>(g_base + 0xa364cc0) != 0,
+        *reinterpret_cast<unsigned char *>(g_base + 0x9fe6040),
+        *reinterpret_cast<unsigned char *>(g_base + 0xa53b850),
+        app ? *reinterpret_cast<uint32_t *>(app + 0x100) : 0,
+        app ? *reinterpret_cast<uint32_t *>(app + 0x60) : 0,
+        app && *reinterpret_cast<uintptr_t *>(app + 0x48), owner != 0,
+        owner && *reinterpret_cast<uintptr_t *>(owner + 0x40), session_manager() != 0);
+    return env->NewStringUTF(text);
+}
+
 JNIEXPORT jboolean JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeSetupMatch(
         JNIEnv *env, jobject, jlong base, jlong peer, jstring squad, jstring context) {
     if (!valid(base) || !g_client || peer <= 0 || peer > 0xffffffffLL || peer == g_uid ||
