@@ -21,6 +21,13 @@ import java.util.concurrent.atomic.AtomicReference
 class PeerLinkApp : Application() {
     override fun onCreate() {
         super.onCreate()
+        // The private engine process has no ADB/UI/VPN role. Avoid initializing
+        // those singletons or copying/probing the game twice.
+        val processName = if (android.os.Build.VERSION.SDK_INT >= 28) getProcessName() else ""
+        if (processName.endsWith(":botengine")) {
+            CrashLogger.install(this)
+            return
+        }
         try {
             // Conscrypt MUST be installed first — libadb-android's TLS 1.3 mutual auth
             // silently fails on Android 11+ without it.

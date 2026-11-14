@@ -92,6 +92,10 @@ object BotMatchDriver {
         val flow = BotMatchFlow(gate, gate, BotMatchFlow.SquadSource { emptyList() })
         val self = gate.uid
         try {
+            check(EngineHost.isReady) { "Bot simulation is not ready; start a new room" }
+            val squadReply = flow.userSquad(gate, self)
+            check(squadReply["result"] == "NOERR") { "Could not read the bot's current squad" }
+            val squadInput = SquadInput.encode(squadReply, self)
             status("room $roomNumber open -- join it from eFootball now")
 
             val oppSeen = waitForSeat(flow, gate, rid, self)
@@ -255,9 +259,16 @@ object BotMatchDriver {
             //    the engine needs for both families comes from this same
             //    session reply; the bot does not answer the engine's P2P
             //    frames at all.
-            if (EngineHost.base != 0L) {
-                flow.handPeerToEngine(oppBlock!!, opp)
+            check(gs!!["game_sycom"] == "P2P") { "The server selected relay; this bot test requires P2P" }
+            val connectingStart = (gs!!["connecting_start_time"] as? Number)?.toLong() ?: 0L
+            check(flow.handPeerToEngine(oppBlock!!, opp, connectingStart)) { "The bot engine did not accept the server's session" }
+            val connectionDeadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(90)
+            status("Connecting both game engines")
+            while (running && !EngineHost.snapshot().connected) {
+                check(System.nanoTime() < connectionDeadline) { "The game connection timed out before both match-data channels opened" }
+                Thread.sleep(500)
             }
+            if (!running) return
 
             // -- check-res echo (capture block 105 body); retried on noise,
             //    otherwise logged and carried on (the game sends its own).
@@ -286,6 +297,13 @@ object BotMatchDriver {
             }
             log("game_id found")
             flow.sendSessionId(gate, gameId!!)
+            status("Connected — setting up the bot's match")
+            check(EngineHost.setupMatch(opp, gameId!!, gate.sid, squadInput)) { "The bot's native match setup was rejected" }
+            val room = flow.roomState(gate, rid)
+            val matchSettings = room["room_match_settings"] as? Map<*, *>
+            val environment = matchSettings?.get("match_env") as? Map<*, *>
+            val controllersAllowed = environment?.get("can_use_mobile_controller") == "YES"
+            check(EngineHost.startInputTest(controllersAllowed)) { "Enable mobile controllers in the room settings for the bot control test" }
 
             // -- TURN announce + watch (the watch polls for the peer address;
             //    when it stays blank the slot learns the address from traffic).
@@ -294,7 +312,7 @@ object BotMatchDriver {
             val sd = flow.sendTurnAddress(gate, opp, blob, addr.length)
             log("turn announce -> ${sd["result"]}")
             flow.getTurnAddress(gate)
-            val watchDeadline = System.currentTimeMillis() + WATCH_TIMEOUT_MS
+            val watchDeadline = System.currentTimeMillis() + 5_000L
             var peerAddr = ""
             while (running && peerAddr.isBlank() && System.currentTimeMillis() < watchDeadline) {
                 val watch = flow.watchTurnAddress(gate)
@@ -316,9 +334,9 @@ object BotMatchDriver {
             // The decisive moment: whether the engine is up.  With the
             // fabricated answerers DELETED (2026-10-24), an engine that is
             // not loaded means an honest dead connection -- never a fake one.
-            log("engine at the connection phase: loaded=${EngineHost.base != 0L} " +
+            log("engine at the connection phase: loaded=${EngineHost.isReady} " +
                 "peerPort=${com.peerlink.app.core.AppState.enginePeerPort}")
-            status("Connecting to your game — waiting for the engine’s verdict")
+            status(EngineHost.snapshot().status())
 
             // Mid-match liveness: re-push the antenna echo on a cadence.
             while (running) {
@@ -327,7 +345,7 @@ object BotMatchDriver {
                 flow.antennaBeat(gate, rid, self, opp, gs!!)
             }
         } catch (t: Throwable) {
-            log("stopped by ${t.javaClass.simpleName}: ${t.message}")
+            status(t.message ?: "Bot match setup stopped")
         } finally {
             running = false
         }

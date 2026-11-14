@@ -16,6 +16,7 @@ android {
     sourceSets.getByName("main").java.apply {
         srcDir("../app/src/main/java")
         include("com/peerlink/app/bot/EngineAndroidHost.java")
+        include("com/peerlink/app/bot/SoftwareGamepadEvents.java")
     }
 }
 

@@ -460,8 +460,8 @@ class BotMatchFlow(
      * route unchanged engine payloads through the app's existing local ferry;
      * they do not authorize changing the SDK's connectivity verdict.
      */
-    fun handPeerToEngine(entry: Map<*, *>, peerId: Long): Boolean {
-        if (EngineHost.base == 0L) return false
+    fun handPeerToEngine(entry: Map<*, *>, peerId: Long, connectingStart: Long): Boolean {
+        if (!EngineHost.isReady || connectingStart !in 1..0xffffffffL) return false
         AppState.appendLog("[BOT-FLOW  ] engine hand off: building the peer record")
         try {
             val a4 = entry["address_ipv4"] as? Map<*, *> ?: return false
@@ -483,14 +483,13 @@ class BotMatchFlow(
                 v4Host = PeerSlot.LOOPBACK_PEER_IP, v4HostPort = PeerSlot.ENGINE_PORT,
                 v4Reflexive = PeerSlot.LOOPBACK_PEER_IP,
                 v4ReflexivePort = PeerSlot.ENGINE_PORT, v4NatType = v4Nat,
-                v6Host = "::1", v6HostPort = PeerSlot.ENGINE_PORT,
-                v6Reflexive = "::1",
-                v6ReflexivePort = PeerSlot.ENGINE_PORT, v6NatType = v6Nat,
+                v6Host = "::", v6HostPort = 0,
+                v6Reflexive = "::", v6ReflexivePort = 0, v6NatType = 0,
             ) ?: return false
             val ok = EngineHost.setPeers(rec)
             if (ok) {
                 PeerSlot.engineAttached = true
-                if (!EngineHost.openSession(peerId)) {
+                if (!EngineHost.openSession(peerId, connectingStart)) {
                     PeerSlot.engineAttached = false
                     AppState.appendLog("[BOT-FLOW  ] original session manager did not accept the peer")
                     return false

@@ -141,6 +141,12 @@
             android:stopWithTask="false"
             android:foregroundServiceType="dataSync" />
 
+        <service
+            android:name=".bot.BotEngineService"
+            android:process=":botengine"
+            android:exported="false"
+            android:stopWithTask="false" />
+
         <!-- Call Blocker Service — silently declines calls during gameplay.
              phoneCall foregroundServiceType is required on Android 14+ (the app
              targets SDK 36); without this <service> declaration the service

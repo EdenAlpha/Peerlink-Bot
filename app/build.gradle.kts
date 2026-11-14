@@ -1,4 +1,6 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import org.gradle.api.tasks.compile.JavaCompile
+import org.gradle.api.tasks.JavaExec
 
 // app/build.gradle.kts — PeerLink
 plugins {
@@ -17,8 +19,8 @@ android {
         applicationId = "com.peerlink.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 15
-        versionName = "5.0.11-f36"
+        versionCode = 16
+        versionName = "5.0.12-bot-test"
         // User-facing name, kept separate from applicationId so existing installs keep their data.
         resValue("string", "app_displayed_name", "PeerLink")
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -67,6 +69,8 @@ android {
         compose = true
     }
 
+    sourceSets.getByName("main").assets.srcDir(layout.buildDirectory.dir("engineBridge/assets"))
+
     externalNativeBuild {
         cmake {
             path = file("src/main/jni/CMakeLists.txt")
@@ -83,6 +87,38 @@ android {
         }
     }
 }
+
+// The bridge extends the INSTALLED game's Activity. Compile-only API signatures
+// must never enter the APK's main dex (or replace any original game class).
+val bridgeClasses = layout.buildDirectory.dir("engineBridge/classes")
+val bridgeJar = tasks.register<Jar>("gameHostBridgeJar") {
+    dependsOn("compileGameHostBridge")
+    from(bridgeClasses) { include("com/peerlink/engine/**") }
+    archiveFileName.set("game-host-bridge.jar")
+    destinationDirectory.set(layout.buildDirectory.dir("engineBridge"))
+}
+tasks.register<JavaCompile>("compileGameHostBridge") {
+    source(fileTree("src/main/engine-bridge"), fileTree("src/main/engine-bridge-api"))
+    classpath = files(android.bootClasspath)
+    destinationDirectory.set(bridgeClasses)
+    sourceCompatibility = "17"
+    targetCompatibility = "17"
+}
+val dexGameHostBridge = tasks.register<JavaExec>("dexGameHostBridge") {
+    dependsOn(bridgeJar)
+    val destination = layout.buildDirectory.file("engineBridge/assets/game-host/bridge.zip")
+    inputs.file(bridgeJar.flatMap { it.archiveFile })
+    outputs.file(destination)
+    classpath = files("${android.sdkDirectory}/build-tools/35.0.0/lib/d8.jar")
+    mainClass.set("com.android.tools.r8.D8")
+    doFirst {
+        destination.get().asFile.parentFile.mkdirs()
+        args = listOf("--min-api", "26", "--lib", android.bootClasspath.first().absolutePath,
+            "--output", destination.get().asFile.absolutePath,
+            bridgeJar.get().archiveFile.get().asFile.absolutePath)
+    }
+}
+tasks.named("preBuild").configure { dependsOn(dexGameHostBridge) }
 
 // Modern compiler config. `kotlinOptions {}` is an ERROR in Kotlin 2.3 — this is the replacement.
 // The global opt-ins save annotating every file; M3 Expressive lives behind

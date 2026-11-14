@@ -1,178 +1,162 @@
 package com.peerlink.app.bot
 
-import android.content.Context
+import android.content.*
+import android.os.*
 import com.peerlink.app.core.AppState
-import java.io.File
-import java.security.MessageDigest
-import java.util.concurrent.Callable
-import java.util.concurrent.ScheduledThreadPoolExecutor
-import java.util.concurrent.TimeUnit
+import com.peerlink.app.service.PeerBotService
+import java.util.concurrent.*
+import java.util.concurrent.atomic.AtomicInteger
 
-/** Build-B networking host. All native lifecycle calls share one runtime thread. */
+/** Main-process client. Native addresses and game memory never cross this boundary. */
 object EngineHost {
-    private const val ENGINE_SHA256 = "2cea0c85344d7d7f295aea1c2353621f02db78dbccd888a0a21a0508ac330659"
-    private const val CLIENT_CHECK = 0x7e013acL
-    const val BLOCK_SIZE = 0x80
     const val RECORD_SIZE = 0x218
-
-    @Volatile var base: Long = 0L
+    @Volatile var isReady = false
         private set
-    @Volatile var client: Long = 0L
+    @Volatile var lastError = ""
         private set
     @Volatile private var ownerUid = 0L
-    private var androidHost: EngineAndroidHost? = null
-    @Volatile private var runtimeThread: Thread? = null
-    private val runtime = ScheduledThreadPoolExecutor(1) { action ->
-        Thread(action, "engine-runtime").apply {
-            isDaemon = true
-            runtimeThread = this
+    @Volatile private var service: Messenger? = null
+    private var context: Context? = null
+    private var binding: CountDownLatch? = null
+    private val preparation = Any()
+    private val pending = ConcurrentHashMap<Int, CompletableFuture<Bundle>>()
+    private val sequence = AtomicInteger()
+    private val replyThread = HandlerThread("bot-engine-replies").apply { start() }
+    private val replies = Messenger(object : Handler(replyThread.looper) {
+        override fun handleMessage(message: Message) {
+            val data = message.data
+            if (message.what == EngineProtocol.STATUS) {
+                val line = data.getString("status").orEmpty()
+                if (line.isNotBlank()) PeerBotService.status(line)
+            } else pending.remove(message.arg1)?.complete(data)
+        }
+    })
+    private val connection = object : ServiceConnection {
+        override fun onServiceConnected(name: ComponentName, binder: IBinder) {
+            service = Messenger(binder)
+            synchronized(this@EngineHost) { binding?.countDown() }
+        }
+        override fun onServiceDisconnected(name: ComponentName) = disconnected()
+        override fun onBindingDied(name: ComponentName) = disconnected()
+        override fun onNullBinding(name: ComponentName) = disconnected()
+    }
+    private fun disconnected() {
+        service = null
+        isReady = false
+        PeerSlot.engineAttached = false
+        lastError = "Bot engine stopped — start a new room"
+        PeerBotService.status(lastError)
+        for ((id, future) in pending) if (pending.remove(id, future))
+            future.completeExceptionally(IllegalStateException(lastError))
+        synchronized(this) {
+            binding?.countDown()
+            binding = null
+            runCatching { context?.unbindService(connection) }
         }
     }
-    private var heartbeatStarted = false
-
-    private val nativeAvailable = try {
-        System.loadLibrary("peerlinkbackend")
-        true
-    } catch (error: LinkageError) {
-        AppState.appendLog("[ENGINE-HOST] native library unavailable: ${error.message}")
-        false
-    }
-
-    private fun <T> onRuntime(action: () -> T): T {
-        if (Thread.currentThread() === runtimeThread) return action()
-        return runtime.submit(Callable { action() }).get(60, TimeUnit.SECONDS)
-    }
-
-    /** Refuse unknown builds before executing any absolute-offset calls. */
-    private fun load(path: File): Boolean {
-        if (base != 0L) return true
-        val digest = MessageDigest.getInstance("SHA-256")
-        path.inputStream().buffered().use { input ->
-            val bytes = ByteArray(128 * 1024)
-            while (true) {
-                val count = input.read(bytes)
-                if (count < 0) break
-                digest.update(bytes, 0, count)
-            }
-        }
-        val actual = digest.digest().joinToString("") { "%02x".format(it) }
-        if (actual != ENGINE_SHA256) {
-            AppState.appendLog("[ENGINE-HOST] unsupported game build; engine not started (sha256=$actual)")
-            return false
-        }
-        base = nativeLoad(path.absolutePath)
-        return base != 0L
-    }
-
-    @Synchronized
-    fun prepare(context: Context, uid: Long): Boolean {
-        if (!nativeAvailable || uid !in 1..0xffffffffL) return false
-        if (client != 0L) {
-            if (ownerUid == uid) return true
-            AppState.appendLog("[ENGINE-HOST] another account owns this runtime; restart the app before switching")
-            return false
-        }
-        return try {
-            val app = context.applicationContext ?: context
-            val host = androidHost ?: EngineAndroidHost.fromInstalledGame(app).also { androidHost = it }
-            val engine = File(app.filesDir, "engine/libUE4.so")
-            if (!engine.isFile || !onRuntime { load(engine) && nativePrepareCore(base) }) return false
-            // Keep ANativeActivity.env on Android's real main thread. The
-            // native helper obtains each worker thread's own env from the VM.
-            val bound = EngineAndroidHost.onMainThread(Callable {
-                nativeInstallAndroidHost(base, host, host.assets, app.filesDir.absolutePath,
-                    app.getExternalFilesDir(null)?.absolutePath)
-            })
-            if (!bound) return false
-            onRuntime {
-                client = nativeStart(base, uid)
-                if (client == 0L) return@onRuntime false
-                ownerUid = uid
-                if (!heartbeatStarted) {
-                    runtime.scheduleWithFixedDelay({
-                        nativeTick(base)
-                    }, 0, 250, TimeUnit.MILLISECONDS)
-                    heartbeatStarted = true
+    private fun bind(owner: Context) {
+        check(Looper.myLooper() != Looper.getMainLooper()) { "Prepare the bot on a worker thread" }
+        val latch = synchronized(this) {
+            context = owner.applicationContext
+            if (service != null) return
+            binding ?: CountDownLatch(1).also {
+                binding = it
+                if (!context!!.bindService(Intent(context, BotEngineService::class.java), connection,
+                        Context.BIND_AUTO_CREATE or Context.BIND_IMPORTANT)) {
+                    binding = null
+                    error("Could not start the bot engine service")
                 }
-                AppState.appendLog("[ENGINE-HOST] real Android host and original SDK started; peer connection pending")
-                true
             }
-        } catch (error: Exception) {
-            AppState.appendLog("[ENGINE-HOST] preparation stopped: ${error.javaClass.simpleName}: ${error.message}")
-            false
-        } catch (error: LinkageError) {
-            AppState.appendLog("[ENGINE-HOST] native library unavailable: ${error.message}")
-            false
         }
+        check(latch.await(20, TimeUnit.SECONDS) && service != null) { "Bot engine service did not start" }
     }
-
-    fun setPeers(record: ByteArray): Boolean = record.size == RECORD_SIZE && onRuntime {
-        client != 0L && nativeSetPeers(base, record)
-    }
-
-    /** Accepted by the original session manager; does not assert connectivity. */
-    fun openSession(peerUid: Long): Boolean = onRuntime {
-        client != 0L && nativeOpenSession(base, peerUid)
-    }
-
-    /** Original SDK's own verdict. No connection state is changed here. */
-    fun check(): Long = onRuntime {
-        if (client == 0L) 0L else nativeCall(base, CLIENT_CHECK, client, 0, 0, 0)
-    }
-
-    fun buildBlock(family: Int, address: String, port: Int): ByteArray? = onRuntime {
-        if (base == 0L) return@onRuntime null
-        val pointer = nativeAlloc(BLOCK_SIZE)
-        if (pointer == 0L) return@onRuntime null
+    private fun request(command: Int, arguments: Bundle = Bundle(), timeout: Long = 30): Bundle {
+        val endpoint = service ?: error("Bot engine is not running")
+        val id = sequence.incrementAndGet()
+        val response = CompletableFuture<Bundle>()
+        pending[id] = response
         try {
-            if (nativeBuildBlock(base, pointer, family, address, port) == 0L) null
-            else ByteArray(BLOCK_SIZE).also { nativeRead(pointer, it) }
-        } finally {
-            nativeFree(pointer)
+            endpoint.send(Message.obtain(null, command).apply { arg1 = id; data = arguments; replyTo = replies })
+            val result = response.get(timeout, TimeUnit.SECONDS)
+            result.getString("error")?.let { error(it) }
+            return result
+        } finally { pending.remove(id) }
+    }
+    fun prepare(owner: Context, uid: Long): Boolean = synchronized(preparation) {
+        if (isReady) return ownerUid == uid
+        try {
+            bind(owner)
+            val result = request(EngineProtocol.PREPARE, Bundle().apply { putLong("uid", uid) }, 300)
+            isReady = result.getBoolean("ok")
+            if (isReady) ownerUid = uid
+            else lastError = result.getString("reason") ?: "The bot simulation did not start"
+            isReady
+        } catch (error: Exception) {
+            lastError = error.cause?.message ?: error.message ?: "Bot startup failed"
+            PeerBotService.status(lastError)
+            false
         }
     }
-
-    /** Original SDK input layout; NAT words are 32-bit values, not pointers. */
-    fun buildPeerRecord(
-        peerId: Long,
-        v4Host: String, v4HostPort: Int, v4Reflexive: String, v4ReflexivePort: Int, v4NatType: Long,
-        v6Host: String, v6HostPort: Int, v6Reflexive: String, v6ReflexivePort: Int, v6NatType: Long,
-    ): ByteArray? {
-        if (peerId !in 1..0xffffffffL || v4NatType !in 0..0xffffffffL || v6NatType !in 0..0xffffffffL) return null
-        val blocks = listOf(
-            0x00c to (buildBlock(1, v4Host, v4HostPort) ?: return null),
-            0x08c to (buildBlock(1, v4Reflexive, v4ReflexivePort) ?: return null),
-            0x110 to (buildBlock(2, v6Host, v6HostPort) ?: return null),
-            0x190 to (buildBlock(2, v6Reflexive, v6ReflexivePort) ?: return null),
-        )
-        return ByteArray(RECORD_SIZE).also { record ->
-            putInt(record, 8, peerId.toInt())
-            for ((offset, block) in blocks) block.copyInto(record, offset)
-            putInt(record, 0x10c, v4NatType.toInt())
-            putInt(record, 0x210, v6NatType.toInt())
-            putInt(record, 0x214, -1)
-            // The JNI adapter supplies the original interface vtable in its
-            // owned copy before submitting the record to the original SDK.
-        }
+    fun buildPeerRecord(peerId: Long, v4Host: String, v4HostPort: Int, v4Reflexive: String,
+                        v4ReflexivePort: Int, v4NatType: Long, v6Host: String, v6HostPort: Int,
+                        v6Reflexive: String, v6ReflexivePort: Int, v6NatType: Long): ByteArray? =
+        request(EngineProtocol.PEER_RECORD, Bundle().apply {
+            putLong("peer", peerId)
+            putStringArray("addresses", arrayOf(v4Host, v4Reflexive, v6Host, v6Reflexive))
+            putIntArray("ports", intArrayOf(v4HostPort, v4ReflexivePort, v6HostPort, v6ReflexivePort))
+            putLongArray("nat", longArrayOf(v4NatType, v6NatType))
+        }).getByteArray("record")
+    fun setPeers(record: ByteArray): Boolean = record.size == RECORD_SIZE &&
+        request(EngineProtocol.SET_PEERS, Bundle().apply { putByteArray("record", record) }).getBoolean("ok")
+    fun openSession(peerUid: Long, connectingStart: Long): Boolean = request(EngineProtocol.OPEN_SESSION,
+        Bundle().apply { putLong("peer", peerUid); putLong("connectingStart", connectingStart) }).getBoolean("ok")
+    fun check(): Long = if (!isReady) 0 else runCatching { request(EngineProtocol.CHECK).getLong("verdict") }.getOrDefault(0)
+    fun setupMatch(peer: Long, gameId: Long, sid: String, squad: ByteArray): Boolean =
+        request(EngineProtocol.SETUP_MATCH, Bundle().apply {
+            putLong("peer", peer); putLong("gameId", gameId); putString("sid", sid)
+            putString("keyword", GateCodec.sKeyword()); putByteArray("squad", squad)
+        }, 60).getBoolean("ok")
+    fun snapshot(): EngineSnapshot = EngineSnapshot(request(EngineProtocol.SNAPSHOT).getLongArray("state") ?: LongArray(19))
+    fun startInputTest(controllerAllowed: Boolean): Boolean = request(EngineProtocol.START_TEST,
+        Bundle().apply { putBoolean("controllerAllowed", controllerAllowed) }).getBoolean("ok")
+    fun pass(): Boolean = request(EngineProtocol.PASS).getBoolean("ok")
+    fun stop() {
+        runCatching { request(EngineProtocol.STOP) }
+        isReady = false
+        ownerUid = 0
+        service = null
+        synchronized(this) { runCatching { context?.unbindService(connection) }; binding = null }
     }
+}
 
-    private fun putInt(bytes: ByteArray, offset: Int, value: Int) {
-        for (i in 0..3) bytes[offset + i] = (value ushr (8 * i)).toByte()
+internal object EngineProtocol {
+    const val PREPARE = 1
+    const val PEER_RECORD = 2
+    const val SET_PEERS = 3
+    const val OPEN_SESSION = 4
+    const val CHECK = 5
+    const val SETUP_MATCH = 6
+    const val SNAPSHOT = 7
+    const val START_TEST = 8
+    const val PASS = 9
+    const val STOP = 10
+    const val STATUS = 100
+}
+
+data class EngineSnapshot(val values: LongArray) {
+    private fun field(index: Int) = values.getOrElse(index) { 0 }
+    val connected get() = field(2) == 4L && field(3) == 4L && field(4) == 4L
+    val metadataReady get() = field(5) == 5L && field(6) == 1L && field(7) == 0L
+    val matchConstructed get() = field(8) == 17L && field(9) == 54L && field(10) == 22L
+    val ballOnPitch get() = field(11) == 1L
+    val canTestPass get() = connected && matchConstructed && ballOnPitch && field(16) == 1L && field(17) == 1L
+    val memoryMiB get() = field(18) / 1024
+    val ballSpeedMmPerSecond get() = field(15)
+    fun status(): String = when {
+        !connected -> "Connecting to your game"
+        !metadataReady -> "Connected — exchanging teams"
+        !matchConstructed -> "Loading the match — continue in eFootball when ready"
+        !ballOnPitch -> "Match loaded — waiting for play to resume"
+        else -> "Match simulation ready — bot control test available"
     }
-
-    private external fun nativeLoad(path: String): Long
-    private external fun nativePrepareCore(base: Long): Boolean
-    private external fun nativeInstallAndroidHost(
-        base: Long, activity: android.app.NativeActivity, assets: android.content.res.AssetManager,
-        internalPath: String, externalPath: String?,
-    ): Boolean
-    private external fun nativeStart(base: Long, uid: Long): Long
-    private external fun nativeSetPeers(base: Long, record: ByteArray): Boolean
-    private external fun nativeOpenSession(base: Long, peer: Long): Boolean
-    private external fun nativeTick(base: Long)
-    private external fun nativeCall(base: Long, offset: Long, a0: Long, a1: Long, a2: Long, a3: Long): Long
-    private external fun nativeAlloc(size: Int): Long
-    private external fun nativeFree(address: Long)
-    private external fun nativeRead(address: Long, bytes: ByteArray)
-    private external fun nativeBuildBlock(base: Long, destination: Long, family: Int, address: String, port: Int): Long
 }

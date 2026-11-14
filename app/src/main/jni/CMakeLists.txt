@@ -41,7 +41,13 @@ endif ()
 
 add_library(peerlinkbackend SHARED
         peerlink_backend.cpp
-        engine_host.cpp)
+        engine_host.cpp
+        game/squad_input.c
+        game/database_input.c
+        game/online_inputs.c
+        game/match_context.c
+        game/participants.c
+        game/preview_proceed.c)
 
 target_link_libraries(peerlinkbackend c++_shared log android dl)
 

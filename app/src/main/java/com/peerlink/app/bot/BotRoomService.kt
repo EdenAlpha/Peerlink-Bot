@@ -78,6 +78,13 @@ object BotRoomService : BotRoomBackend {
         // marker is persisted so a restarted VPN service comes back as a
         // bot-mode session instead of failing the peer-mode requirements.
         BotMode.ensureStarted(ctx, identityInUse.userId)
+        PeerBotService.start(ctx, "")
+        PeerBotService.status("Preparing the bot simulation")
+        if (!EngineBridge.ensureEngineForSession(ctx)) {
+            PeerBotService.stop(ctx)
+            BotMode.stop()
+            throw KgsGate.GateException(EngineHost.lastError.ifBlank { "The bot simulation could not start" })
+        }
 
         // The capture's login-time quality report (blocks 35 + 38-40): fetch
         // the region list, measure the echo endpoints, SET. The room-time

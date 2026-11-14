@@ -142,6 +142,8 @@
 
 -keep class com.peerlink.app.tunnel.NativePeerLinkBackend { *; }
 -keep class com.peerlink.app.bot.EngineHost { *; }
+-keep class com.peerlink.app.bot.EngineRuntime { *; }
+-keep class com.peerlink.app.bot.SoftwareGamepadEvents { *; }
 
 
 # ══════════════════════════════════════════════════════════

@@ -144,7 +144,7 @@ object EngineBridge {
      * The old code only tried route 2 and gave up when the helper was not
      * running, which is why the engine was never staged on the phone.
      */
-    fun stageEngine(context: Context): Boolean {
+    @Synchronized fun stageEngine(context: Context): Boolean {
         val stage = java.io.File(stageDir(context))
         val staged = java.io.File(stage, "libUE4.so")
         if (staged.isFile && staged.length() >= MIN_ENGINE_BYTES &&
@@ -201,7 +201,7 @@ object EngineBridge {
     fun ensureEngineForSession(context: Context): Boolean {
         val staged = File(stageDir(context), "libUE4.so")
         val stagedBytes = if (staged.isFile) staged.length() else 0L
-        val loaded = EngineHost.client != 0L
+        val loaded = EngineHost.isReady
         log("engine status: staged=$stagedBytes bytes loaded=$loaded")
 
         if (loaded) return true

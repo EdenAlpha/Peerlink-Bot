@@ -12,6 +12,9 @@ import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import com.peerlink.app.bot.BotMode
+import com.peerlink.app.bot.EngineHost
+import com.peerlink.app.bot.BotMatchDriver
+import com.peerlink.app.bot.PeerSlot
 import com.peerlink.app.core.AppState
 
 /**
@@ -33,6 +36,7 @@ class PeerBotService : Service() {
         private const val NOTIF_ID = 2010
         const val EXTRA_ROOM = "room_number"
         const val ACTION_STOP = "com.peerlink.BOT_STOP"
+        const val ACTION_PASS = "com.peerlink.BOT_PASS"
 
         /** Bot mode: ask the UI to raise the one-time VPN permission dialog. */
         const val ACTION_VPN_CONSENT = "com.peerlink.BOT_VPN_CONSENT"
@@ -99,6 +103,12 @@ class PeerBotService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
+        if (intent?.action == ACTION_PASS) {
+            Thread({
+                runCatching { EngineHost.pass() }.onFailure { status("Bot input unavailable: ${it.message}") }
+            }, "bot-pass-action").start()
+            return START_STICKY
+        }
         intent?.getStringExtra(EXTRA_ROOM)?.let { if (it.isNotBlank()) roomNumber = it }
         refresh()
         return START_STICKY
@@ -114,6 +124,10 @@ class PeerBotService : Service() {
     override fun onDestroy() {
         active = null
         running = false
+        BotMatchDriver.stop()
+        PeerSlot.disarm()
+        BotMode.stop()
+        Thread({ EngineHost.stop() }, "bot-engine-stop").start()
         AppState.appendLog("[BOT-SVC   ] bot session service stopped")
         super.onDestroy()
     }
@@ -150,12 +164,16 @@ class PeerBotService : Service() {
             Intent(this, PeerBotService::class.java).apply { action = ACTION_STOP },
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
+        val pass = PendingIntent.getService(this, 2,
+            Intent(this, PeerBotService::class.java).apply { action = ACTION_PASS },
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val title = if (roomNumber.isBlank()) "PeerLink Bot" else "PeerLink Bot - room $roomNumber"
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(title)
             .setContentText(status)
             .setSmallIcon(android.R.drawable.ic_menu_share)
             .setContentIntent(open)
+            .addAction(0, "Bot Pass", pass)
             .addAction(0, "Stop", stop)
             .setOngoing(true)
             .setSilent(true)

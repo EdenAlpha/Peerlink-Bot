@@ -196,8 +196,9 @@ object PeerSlot {
             if (n <= 0) continue
             rxCount++
             val data = buf.copyOf(n)
-            val head = data.take(12).joinToString("") { "%02x".format(it) }
-            AppState.appendLog("[BOT-SLOT  ] rx #$rxCount n=$n head=$head")
+            if (rxCount <= 8 || rxCount % 1000 == 0) {
+                AppState.appendLog("[BOT-SLOT  ] game transport rx #$rxCount n=$n")
+            }
 
             if (n == 1) {
                 when (data[0].toInt() and 0xFF) {
@@ -412,7 +413,8 @@ object PeerSlot {
     // ------------------------------------------------ wire helpers
     /** Strip the optional 56-byte native diag header; null when unusable. */
     private fun stripDiagHeader(data: ByteArray): ByteArray? {
-        if (data.size < 1) return null
+        if (data.isEmpty()) return null
+        if (data.size < 4) return data
         // BIG-endian, like read_u32() in peerlink_backend.cpp (which writes the
         // magic with write_u32, also big-endian). On the wire the four bytes
         // are 50 4c 44 47 = "PLDG".

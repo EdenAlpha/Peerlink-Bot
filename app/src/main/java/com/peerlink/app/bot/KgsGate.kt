@@ -300,7 +300,7 @@ class KgsGate(
                 "cpu_level" to "EASY", "match_time" to 1, "injury" to "NO", "ball_type" to 1,
                 "exTime" to "0", "pk" to "NO", "substitution_times" to 1, "substitution" to 1,
                 "exSubstitution" to "", "limitTime" to "NOSET", "equalization" to "NO",
-                "regulation" to "", "can_use_mobile_controller" to "NO",
+                "regulation" to "", "can_use_mobile_controller" to "YES",
             )
         )
         m["event_account_type"] = "GAME_PLAYER"
