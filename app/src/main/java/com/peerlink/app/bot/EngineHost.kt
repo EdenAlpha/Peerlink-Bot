@@ -120,6 +120,7 @@ object EngineHost {
     fun startInputTest(controllerAllowed: Boolean): Boolean = request(EngineProtocol.START_TEST,
         Bundle().apply { putBoolean("controllerAllowed", controllerAllowed) }).getBoolean("ok")
     fun pass(): Boolean = request(EngineProtocol.PASS).getBoolean("ok")
+    internal fun probeController(): Boolean = request(EngineProtocol.PROBE_CONTROLLER).getBoolean("ok")
     fun stop() {
         runCatching { request(EngineProtocol.STOP) }
         isReady = false
@@ -140,6 +141,7 @@ internal object EngineProtocol {
     const val START_TEST = 8
     const val PASS = 9
     const val STOP = 10
+    const val PROBE_CONTROLLER = 11
     const val STATUS = 100
 }
 

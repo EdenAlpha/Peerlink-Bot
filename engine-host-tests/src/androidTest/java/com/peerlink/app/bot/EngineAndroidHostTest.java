@@ -38,14 +38,19 @@ public class EngineAndroidHostTest {
         assertTrue(onMain);
     }
 
-    @Test public void constructingAnUnattachedHostOnAWorkerIsRejected() {
+    @Test public void constructingAnUnattachedHostOnAWorkerIsRejected() throws Exception {
         Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
-        assertNotEquals(Looper.getMainLooper(), Looper.myLooper());
-        try {
-            new EngineAndroidHost(context, context.getClassLoader());
-            fail("Worker-thread construction must not create an invalid Activity host");
-        } catch (IllegalStateException expected) {
-            assertTrue(expected.getMessage().contains("main thread"));
-        }
+        java.util.concurrent.atomic.AtomicReference<Throwable> failure = new java.util.concurrent.atomic.AtomicReference<>();
+        Thread worker = new Thread(() -> {
+            // Activity's own constructor requires a Looper. Give this worker
+            // one so the production host's MAIN-thread guard is what we test.
+            Looper.prepare();
+            try { new EngineAndroidHost(context, context.getClassLoader()); }
+            catch (Throwable error) { failure.set(error); }
+        }, "host-construction-test");
+        worker.start(); worker.join(5000);
+        assertFalse("Host constructor hung", worker.isAlive());
+        assertTrue(failure.get() instanceof IllegalStateException);
+        assertTrue(failure.get().getMessage().contains("main thread"));
     }
 }

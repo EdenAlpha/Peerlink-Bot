@@ -71,6 +71,7 @@ class BotEngineService : Service() {
                     result.putBoolean("ok", testing)
                 }
                 EngineProtocol.PASS -> result.putBoolean("ok", pressPass())
+                EngineProtocol.PROBE_CONTROLLER -> result.putBoolean("ok", EngineRuntime.probeController())
                 EngineProtocol.STOP -> {
                     testing = false
                     EngineRuntime.neutral()

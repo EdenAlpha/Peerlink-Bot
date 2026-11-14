@@ -354,6 +354,14 @@ JNIEXPORT void JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeNeutralInpu
         Java_com_peerlink_app_bot_EngineRuntime_nativeInputKey(env, self, base, code, 1);
     neutral_event(env);
 }
+JNIEXPORT jboolean JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeProbeController(
+        JNIEnv *env, jobject, jlong base) {
+    if (!valid(base) || !g_core_ready) return JNI_FALSE;
+    TaskLock lock;
+    entry<void (*)()>(0x6772fbc)();
+    if (env->ExceptionCheck() || !neutral_event(env)) return JNI_FALSE;
+    return entry<unsigned char (*)(uint32_t)>(0x6773d1c)(0) ? JNI_TRUE : JNI_FALSE;
+}
 JNIEXPORT jlong JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeLoad(
         JNIEnv *env, jobject, jstring path) {
     if (g_base) return static_cast<jlong>(g_base);
@@ -443,6 +451,10 @@ JNIEXPORT jlong JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeStart(
         *reinterpret_cast<uint32_t *>(g_base + 0xa5d5c20) != 3) return 0;
     uintptr_t client = entry<uintptr_t (*)()>(0x7e02524)();
     if (!client) return 0;
+    uintptr_t services = *reinterpret_cast<uintptr_t *>(g_base + 0xa5d9cd0);
+    uintptr_t clock = services ? *reinterpret_cast<uintptr_t *>(services + 8) : 0;
+    if (!clock) return 0;
+    entry<void (*)(uintptr_t, uint32_t)>(0x7e14a38)(clock, static_cast<uint32_t>(time(nullptr)));
     // Five real arguments; the old four-argument trampoline left the last
     // argument undefined. Let the engine choose its real local UDP port.
     if (!(entry<uint32_t (*)(uintptr_t, uint32_t, uint32_t, int, unsigned char)>(0x7e02878)(

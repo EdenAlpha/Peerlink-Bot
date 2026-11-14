@@ -197,6 +197,7 @@ internal object EngineRuntime {
         if (base == 0L) false else nativeInputKey(base, code, if (down) 0 else 1)
     }
     fun neutral() = onRuntime { if (base != 0L) nativeNeutralInput(base) }
+    fun probeController(): Boolean = onRuntime { base != 0L && nativeProbeController(base) }
 
     private external fun nativeLoad(path: String): Long
     private external fun nativeStartApplication(base: Long, surface: android.view.Surface, root: String, command: String): Boolean
@@ -208,6 +209,7 @@ internal object EngineRuntime {
     private external fun nativeAdvanceMatch(base: Long, controllerAllowed: Boolean): Int
     private external fun nativeInputKey(base: Long, code: Int, action: Int): Boolean
     private external fun nativeNeutralInput(base: Long)
+    private external fun nativeProbeController(base: Long): Boolean
     private external fun nativePrepareCore(base: Long): Boolean
     private external fun nativeInstallAndroidHost(
         base: Long, activity: android.app.NativeActivity, assets: android.content.res.AssetManager,
