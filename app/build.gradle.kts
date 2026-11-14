@@ -140,6 +140,10 @@ kotlin {
 }
 
 dependencies {
+    // The original native app initializes Play Asset Delivery even when the
+    // installed game's data is already staged. Its real Android services must
+    // be declared by the matching public SDK before that initialization runs.
+    implementation("com.google.android.play:asset-delivery:2.3.0")
     // ── AndroidX core ──
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("androidx.appcompat:appcompat:1.7.0")

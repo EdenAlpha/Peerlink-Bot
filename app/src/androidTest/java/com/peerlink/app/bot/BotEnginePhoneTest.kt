@@ -16,7 +16,8 @@ class BotEnginePhoneTest {
             ?: error("Supply the owned test account's botUid instrumentation argument")
         try {
             assertTrue("Could not stage the installed engine", EngineBridge.stageEngine(context))
-            assertTrue(EngineHost.lastError, EngineHost.prepare(context, uid))
+            val started = EngineHost.prepare(context, uid)
+            assertTrue(EngineHost.lastError, started)
             val state = EngineHost.snapshot()
             Log.i("PeerlinkPhoneTest", "ORIGINAL_ENGINE_STARTED state=${state.values.contentToString()} memoryMiB=${state.memoryMiB}")
             assertFalse("No opponent or match was started by this startup test", state.canTestPass)
