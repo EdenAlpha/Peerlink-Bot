@@ -70,13 +70,15 @@ use and phone-game kickoff require separate evidence.
 - `GameArchiveRegression` compares all 44 decoded tables against an independent
   decode of the same installed archive and rejects malformed containers.
 
-ARM64 testing identified a missing Play Asset Delivery service, a scoped
-storage failure, and an invalid manually manufactured native activity host.
-The service dependency and private storage fixes are included. An attempted
-private-display activity launch failed Android's embedding permission check
-before testing the original stall, so that route was removed. The framework
-host replacement still requires successful ARM64 startup evidence. No phone
-kickoff is claimed by the checks above.
+On 2026-11-14, APK commit `f415515` passed three consecutive tests with freshly
+cleared app data on ARM64 Android 14 (Redroid). Each attempt loaded the original
+engine and all 44 database tables, detected the bot's own controller, delivered
+neutral input through the original native handler, and remained responsive for
+the 15-second hold. No diagnostic hooks or manual file staging were used.
+The APK/JVM build and five Android framework/input tests also passed in
+[Android CI run 43620523688](https://github.com/EdenAlpha/Peerlink-Bot/actions/runs/43620523688).
+This is test-device startup evidence; kickoff and visible Pass response against
+the user's foreground game still require a real match test.
 
 Direct ARM64 tests with the original library identified and verified these
 startup corrections before another full APK build:
@@ -87,8 +89,11 @@ startup corrections before another full APK build:
 - Run the original CPU/GPU information initialization before native startup.
 - Expose the own software gamepad through the exact JNI input-provider class
   name, without changing Android's global input inventory.
+- Wait for the original asynchronous database loader to complete before
+  importing the decoded tables. Application/session availability precedes
+  this completion; importing during its club-update callback caused an
+  intermittent null stadium lookup. The host observes the original completion
+  state and releases its task lock while waiting.
 
-The direct test started the original engine, loaded all 44 database tables,
-enumerated the software gamepad and completed a 15-second startup hold. These
-runtime experiments do not establish that a rebuilt APK, phone-game connection
-or kickoff works; the packaged changes require their own Android run.
+Verified APK SHA-256:
+`f5f4f9d36b9f514baf221c882c748950b376a35c4a6aec9b7bedf2d0c767f675`.

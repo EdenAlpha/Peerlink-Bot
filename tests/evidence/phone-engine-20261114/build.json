@@ -1,0 +1,10 @@
+{
+  "app_commit": "f41551502cd6bcadf56258a57567066832a28ebf",
+  "ci_run": 43620523688,
+  "artifact_id": 14123208827,
+  "apk_sha256": "f5f4f9d36b9f514baf221c882c748950b376a35c4a6aec9b7bedf2d0c767f675",
+  "device": "ARM64 Android14 Redroid test device",
+  "scope": "Fresh app data; original engine startup;44 database tables; own controller and neutral native input;15sec stability. No real-match or kickoff claim.",
+  "temporary_hooks": false,
+  "manual_file_staging": false
+}

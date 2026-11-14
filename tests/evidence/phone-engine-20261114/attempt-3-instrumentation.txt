@@ -1,0 +1,9 @@
+
+com.peerlink.app.bot.BotFerryTransportTest:.
+com.peerlink.app.bot.BotEnginePhoneTest:.
+
+Time: 22.237
+
+OK (2 tests)
+
+
