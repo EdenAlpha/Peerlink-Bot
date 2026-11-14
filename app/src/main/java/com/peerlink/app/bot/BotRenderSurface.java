@@ -1,7 +1,6 @@
 package com.peerlink.app.bot;
 
 import android.graphics.ImageFormat;
-import android.hardware.HardwareBuffer;
 import android.media.Image;
 import android.media.ImageReader;
 import android.os.Handler;
@@ -17,8 +16,10 @@ public final class BotRenderSurface implements AutoCloseable {
         // EGL producers choose device-specific RGB/RGBX/RGBA formats. PRIVATE
         // accepts those opaque buffers, avoiding ImageReader's fixed-format
         // check and CPU pixel mapping. The bot consumes no rendered pixels.
-        reader = ImageReader.newInstance(width, height, ImageFormat.PRIVATE, 3,
-                HardwareBuffer.USAGE_GPU_SAMPLED_IMAGE);
+        // PRIVATE's default consumer usage is zero. We only release frames;
+        // requiring texture sampling would unnecessarily restrict allocation
+        // of otherwise valid RGB producer buffers on some gralloc drivers.
+        reader = ImageReader.newInstance(width, height, ImageFormat.PRIVATE, 3);
         reader.setOnImageAvailableListener(source -> {
             synchronized (this) {
                 if (closed) return;
