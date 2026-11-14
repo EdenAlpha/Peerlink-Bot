@@ -36,7 +36,9 @@ final class GameAndroidRuntime implements AutoCloseable {
                 try (InputStream input = owner.getAssets().open("game-host/bridge.zip");
                      FileOutputStream output = new FileOutputStream(pending)) {
                     if (!pending.setReadOnly()) throw new IOException("Cannot protect game bridge");
-                    input.transferTo(output); output.getFD().sync();
+                    byte[] buffer = new byte[32768]; int count;
+                    while ((count = input.read(buffer)) != -1) output.write(buffer, 0, count);
+                    output.getFD().sync();
                 }
                 if (!pending.renameTo(bridge)) throw new IOException("Cannot commit game bridge");
             } finally { pending.delete(); }
@@ -52,12 +54,14 @@ final class GameAndroidRuntime implements AutoCloseable {
                 android.view.Window.class).newInstance(owner, game, root, windowOwner.getWindow());
             if (activity.getClass().getSuperclass().getClassLoader() != loader)
                 throw new IllegalStateException("Original GameActivity was replaced");
+            Class.forName("jp.konami.android.common.FirebaseAnalyticsImpl", true, loader)
+                .getMethod("onCreate", Context.class).invoke(null, activity);
             hostType.getMethod("bindStorage", String.class).invoke(activity, new File(root, "project/PesMobile").getAbsolutePath());
         } catch (Exception | LinkageError error) { frames.close(); throw error; }
     }
 
-    static GameAndroidRuntime create(Context owner, GameAssets.Prepared files) throws Exception {
-        return EngineAndroidHost.onMainThread(() -> new GameAndroidRuntime(owner, files.getGame(), files.getRoot()));
+    static GameAndroidRuntime create(Context owner, Context game, File root) throws Exception {
+        return EngineAndroidHost.onMainThread(() -> new GameAndroidRuntime(owner, game, root));
     }
     NativeActivity activity() { return activity; }
     Surface surface() { return frames.getSurface(); }

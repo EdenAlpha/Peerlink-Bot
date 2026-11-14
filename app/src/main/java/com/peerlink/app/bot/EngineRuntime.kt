@@ -58,7 +58,7 @@ internal object EngineRuntime {
         }
         val actual = digest.digest().joinToString("") { "%02x".format(it) }
         if (actual != ENGINE_SHA256) {
-            AppState.appendLog("[ENGINE-HOST] unsupported game build; engine not started (sha256=$actual)")
+            report("Unsupported eFootball build — this bot test requires the verified 11.1.1 engine")
             return false
         }
         base = nativeLoad(path.absolutePath)
@@ -80,7 +80,7 @@ internal object EngineRuntime {
             if (!engine.isFile || !onRuntime { load(engine) }) return false
             val files = GameAssets.prepare(app, report)
             report("Starting bot simulation")
-            val host = gameHost ?: GameAndroidRuntime.create(app, files).also { gameHost = it }
+            val host = gameHost ?: GameAndroidRuntime.create(app, files.game, files.root).also { gameHost = it }
             val bound = EngineAndroidHost.onMainThread(Callable {
                 val activity = host.activity()
                 if (!nativeInstallAndroidHost(base, activity, activity.assets,
