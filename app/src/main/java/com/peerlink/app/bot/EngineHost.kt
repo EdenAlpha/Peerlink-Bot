@@ -150,7 +150,8 @@ internal object EngineProtocol {
 
 data class EngineSnapshot(val values: LongArray) {
     private fun field(index: Int) = values.getOrElse(index) { 0 }
-    val connected get() = field(2) == 4L && field(3) == 4L && field(4) == 4L
+    val sessionConnected get() = field(2) == 4L
+    val connected get() = sessionConnected && field(3) == 4L && field(4) == 4L
     val metadataReady get() = field(5) == 5L && field(6) == 1L && field(7) == 0L
     val matchConstructed get() = field(8) == 17L && field(9) == 54L && field(10) == 22L
     val ballOnPitch get() = field(11) == 1L

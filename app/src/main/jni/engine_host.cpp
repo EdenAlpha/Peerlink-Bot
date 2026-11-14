@@ -243,8 +243,16 @@ JNIEXPORT jboolean JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativePrepare
     {
         TaskLock lock;
         uintptr_t manager = session_manager();
-        if (lock.manager && manager && *reinterpret_cast<uintptr_t *>(manager + 0x38))
-            result = prepare_channel_inputs(static_cast<uint32_t>(peer), path);
+        if (lock.manager && manager) {
+            entry<void (*)(uintptr_t)>(0x2f39738)(manager);
+            uintptr_t session = *reinterpret_cast<uintptr_t *>(manager + 0x38);
+            // GameDataConnection asks this session for its negotiated
+            // configuration. Creating it while connecting yields an error
+            // and the original model tears itself down on its next frame.
+            result = session && entry<uint32_t (*)(uintptr_t)>(0x7cedee8)(session) == 4 ?
+                prepare_channel_inputs(static_cast<uint32_t>(peer), path) : -105;
+            entry<void (*)(uintptr_t)>(0x8c1f0d0)(manager + 8);
+        }
     }
     env->ReleaseStringUTFChars(squad, path);
     __android_log_print(ANDROID_LOG_INFO, TAG, "early channel input result=%d", result);

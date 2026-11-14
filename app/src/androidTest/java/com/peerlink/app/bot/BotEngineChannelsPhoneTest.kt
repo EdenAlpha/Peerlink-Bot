@@ -13,7 +13,7 @@ import java.net.InetSocketAddress
 /** Explicit owned native-input test; no room, game ID or connectivity is fabricated. */
 @RunWith(AndroidJUnit4::class)
 class BotEngineChannelsPhoneTest {
-    @Test(timeout = 300_000) fun createsOriginalMatchDataHandlerBeforeWaitingForPeerChannels() {
+    @Test(timeout = 300_000) fun refusesMatchDataConstructionBeforeNativeSessionConnects() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val context = instrumentation.targetContext
         val args = InstrumentationRegistry.getArguments()
@@ -32,24 +32,21 @@ class BotEngineChannelsPhoneTest {
                 val before = EngineHost.snapshot()
                 Log.i("PeerlinkChannelTest", "BEFORE_CHANNEL_MODEL state=${before.values.contentToString()}")
                 assertFalse("Handler already existed before the tested setup", before.matchDataHandlerPresent)
-                assertTrue("Original match-data setup was rejected", EngineHost.prepareChannels(peer, squad))
-                val deadline = System.nanoTime() + 10_000_000_000L
-                while (!EngineHost.snapshot().matchDataHandlerPresent && System.nanoTime() < deadline) Thread.sleep(100)
+                assertFalse("An unanswered socket is not a connected session", before.sessionConnected)
+                assertFalse("Premature construction must be rejected", EngineHost.prepareChannels(peer, squad))
                 val after = EngineHost.snapshot()
-                Log.i("PeerlinkChannelTest", "EARLY_ORIGINAL_HANDLER_PRESENT state=${after.values.contentToString()}")
-                assertTrue("Original GameDataConnection handler was not constructed", after.matchDataHandlerPresent)
+                Log.i("PeerlinkChannelTest", "PREMATURE_CHANNEL_SETUP_REJECTED state=${after.values.contentToString()}")
+                assertFalse("No handler should be created for an unconnected session", after.matchDataHandlerPresent)
                 assertFalse("A local sink is not a peer connection", after.connected)
                 assertFalse("No match was started", after.canTestPass)
-                assertTrue("Repeated preparation should preserve the original handler", EngineHost.prepareChannels(peer, squad))
+                assertFalse("Repeated premature preparation must remain rejected", EngineHost.prepareChannels(peer, squad))
                 Thread.sleep(5000)
                 val unanswered = EngineHost.snapshot()
                 Log.i("PeerlinkChannelTest", "UNANSWERED_PEER_STATE state=${unanswered.values.contentToString()}")
                 assertFalse("An unanswered socket cannot establish a native connection", unanswered.connected)
                 assertFalse("An unanswered socket cannot start a match", unanswered.canTestPass)
                 assertTrue(EngineHost.probeController())
-                // Native failure cleanup may remove its handler when the peer
-                // never answers. The separate two-engine test checks that a
-                // genuine connection keeps its data channels open.
+                assertFalse(unanswered.matchDataHandlerPresent)
                 Log.i("PeerlinkChannelTest", "UNANSWERED_PEER_NOT_REPORTED_AS_CONNECTED")
             } finally { EngineHost.stop() }
         }

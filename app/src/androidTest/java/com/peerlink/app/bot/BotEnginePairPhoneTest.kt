@@ -38,8 +38,8 @@ class BotEnginePairPhoneTest {
                 "::", 0, "::", 0, 0))
             assertTrue(EngineHost.setPeers(record))
             assertTrue(EngineHost.openSession(peer, start))
-            assertTrue(EngineHost.prepareChannels(peer, squad))
             val deadline = System.nanoTime() + 45_000_000_000L
+            var prepared = false
             var last = ""
             while (true) {
                 val state = EngineHost.snapshot()
@@ -48,7 +48,13 @@ class BotEnginePairPhoneTest {
                     Log.i("PeerlinkPairTest", "PAIR_$role state=$line")
                     last = line
                 }
-                if (state.connected) break
+                if (!prepared && state.sessionConnected) {
+                    Log.i("PeerlinkPairTest", "ORIGINAL_ANDROID_PAIR_${role}_BASE_SESSION_CONNECTED")
+                    assertTrue(EngineHost.prepareChannels(peer, squad))
+                    prepared = true
+                    continue
+                }
+                if (prepared && state.connected) break
                 assertTrue("Original engines did not connect: $line", System.nanoTime() < deadline)
                 Thread.sleep(100)
             }
