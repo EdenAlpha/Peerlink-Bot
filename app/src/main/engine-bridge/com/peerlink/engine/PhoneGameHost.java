@@ -83,7 +83,9 @@ public final class PhoneGameHost extends GameActivity {
     }
 
     public void bindStorage(String project) {
-        nativeSetGlobalActivity(false, false, getFilesDir().getAbsolutePath(),
+        // This host targets scoped-storage Android. Use its own private files
+        // rather than the game's historical /sdcard/UE4Game root.
+        nativeSetGlobalActivity(true, false, getFilesDir().getAbsolutePath(),
             getExternalFilesDir(null).getAbsolutePath(), false, game.getPackageCodePath());
     }
     public void resumeAssets() { nativeResumeMainInit(); }

@@ -93,7 +93,9 @@ android {
 val bridgeClasses = layout.buildDirectory.dir("engineBridge/classes")
 val bridgeJar = tasks.register<Jar>("gameHostBridgeJar") {
     dependsOn("compileGameHostBridge")
-    from(bridgeClasses) { include("com/peerlink/engine/**") }
+    from(bridgeClasses) {
+        include("com/peerlink/engine/**", "com/epicgames/ue4/MessageBox01.class")
+    }
     archiveFileName.set("game-host-bridge.jar")
     destinationDirectory.set(layout.buildDirectory.dir("engineBridge"))
 }
