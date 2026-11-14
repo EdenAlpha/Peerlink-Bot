@@ -169,17 +169,31 @@ JNIEXPORT jboolean JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeLoadDat
     if (!valid(base) || !g_core_ready || !path) return JNI_FALSE;
     const char *directory = env->GetStringUTFChars(path, nullptr);
     if (!directory) return JNI_FALSE;
-    long result;
-    {
-        TaskLock lock;
-        uintptr_t owner = *reinterpret_cast<uintptr_t *>(g_base + 0xa5fb348);
-        uintptr_t work = owner ? *reinterpret_cast<uintptr_t *>(owner + 0x40) : 0;
-        result = work && *reinterpret_cast<uint32_t *>(work + 0x319db64) ? 44 :
-            peerlink_game_database_input(g_base, directory);
-        uintptr_t services = entry<uintptr_t (*)()>(0x677cfa4)();
-        uintptr_t data = services ? *reinterpret_cast<uintptr_t *>(services + 9 * 8) : 0;
-        if (result == 44 && data && *reinterpret_cast<uintptr_t *>(data) == g_base + 0x988c270 &&
-            !*reinterpret_cast<uintptr_t *>(data + 0x80)) entry<void (*)(uintptr_t)>(0x68c3768)(data);
+    long result = -6;
+    for (unsigned attempt = 0; attempt < 3000; ++attempt) {
+        {
+            TaskLock lock;
+            uintptr_t owner = *reinterpret_cast<uintptr_t *>(g_base + 0xa5fb348);
+            // The application/session objects exist before the asynchronous
+            // database callbacks finish. Importing here during stage 1 lets
+            // the club-update callback see clubs before their stadium table,
+            // causing a null lookup in the original engine. The original
+            // loader at 0x8246b3c sets stage 4 only after those callbacks finish.
+            // Observe its completion; never assign a native loading flag.
+            if (owner && *reinterpret_cast<volatile uint32_t *>(owner + 0x30) == 4) {
+                uintptr_t work = *reinterpret_cast<uintptr_t *>(owner + 0x40);
+                result = work && *reinterpret_cast<uint32_t *>(work + 0x319db64) ? 44 :
+                    peerlink_game_database_input(g_base, directory);
+                uintptr_t services = entry<uintptr_t (*)()>(0x677cfa4)();
+                uintptr_t data = services ? *reinterpret_cast<uintptr_t *>(services + 9 * 8) : 0;
+                if (result == 44 && data && *reinterpret_cast<uintptr_t *>(data) == g_base + 0x988c270 &&
+                    !*reinterpret_cast<uintptr_t *>(data + 0x80)) entry<void (*)(uintptr_t)>(0x68c3768)(data);
+                break;
+            }
+        }
+        // Let the original task manager and its workers make progress while
+        // waiting. Holding TaskLock across this wait would block completion.
+        usleep(10000);
     }
     env->ReleaseStringUTFChars(path, directory);
     __android_log_print(ANDROID_LOG_INFO, TAG, "database startup result=%ld", result);
