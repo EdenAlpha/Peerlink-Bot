@@ -85,7 +85,10 @@ public final class GameAndroidRuntime implements AutoCloseable {
             activity.surfaceChanged(surface, PixelFormat.RGBA_8888, 320, 180);
             activity.onWindowFocusChanged(true);
         } catch (Exception | LinkageError error) {
-            frames.close(); current = null; throw error;
+            android.util.Log.e("PeerlinkEngineHost", "Framework host startup failed", error);
+            // NativeActivity may already own worker threads which still need
+            // their class loader until the isolated service process is stopped.
+            frames.close(); throw error;
         }
     }
     private static final class InputLoader extends PathClassLoader {
@@ -107,7 +110,7 @@ public final class GameAndroidRuntime implements AutoCloseable {
     public static void activityFailed(Throwable error) { requireCurrent().attached.completeExceptionally(error); }
     private static GameAndroidRuntime requireCurrent() {
         GameAndroidRuntime value = current;
-        if (value == null) throw new IllegalStateException("Bot service must prepare its private display first");
+        if (value == null) throw new IllegalStateException("Bot service must prepare its native host first");
         return value;
     }
     android.app.NativeActivity activity() { return (android.app.NativeActivity)attached.getNow(null); }

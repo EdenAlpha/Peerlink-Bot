@@ -28,6 +28,10 @@ public final class PhoneGameHost extends GameActivity {
             assets.setAccessible(true); assets.set(this, getAssets());
             Class.forName("jp.konami.android.common.FirebaseAnalyticsImpl", true, getClassLoader())
                 .getMethod("onCreate", Context.class).invoke(null, this);
+            // The original GameActivity initializes this before its resume
+            // callbacks. This initializes the public SDK; it does not sign in.
+            Class.forName("com.google.android.gms.games.PlayGamesSdk", true, getClassLoader())
+                .getMethod("initialize", Context.class).invoke(null, getApplicationContext());
             nativeSetGlobalActivity(true, false, getFilesDir().getAbsolutePath(),
                 getExternalFilesDir(null).getAbsolutePath(), false, game().getPackageCodePath());
             // NativeActivity allocates its real NativeCode, callback pipe,
