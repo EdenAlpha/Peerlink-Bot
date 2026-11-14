@@ -126,6 +126,7 @@ class PeerBotService : Service() {
         running = false
         BotMatchDriver.stop()
         PeerSlot.disarm()
+        if (BotMode.active) stopService(Intent(this, PeerLinkVpnService::class.java))
         BotMode.stop()
         Thread({ EngineHost.stop() }, "bot-engine-stop").start()
         AppState.appendLog("[BOT-SVC   ] bot session service stopped")

@@ -48,6 +48,9 @@ object BotRoomService : BotRoomBackend {
 
         // The bot declares the translated endpoint at the gate (real LAN
         // host, fabricated .53.2 reflexive -- the address the game punches).
+        // Reserve a distinct UDP endpoint and capture the real host BEFORE
+        // constructing the gate's immutable NAT profile.
+        BotMode.prepareEndpoint(ctx)
         var gate = KgsGate(identity, BotMode.declaredProfile())
         gate.login()
 

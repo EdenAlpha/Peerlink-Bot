@@ -39,7 +39,7 @@ object PeerSlot {
      * this slot's sockets and its answers travel back to the game. The game
      * never sees this port -- it keeps punching the fabricated peer identity.
      */
-    const val ENGINE_PORT = 1163
+    val ENGINE_PORT: Int get() = engineSock4?.localPort ?: error("Engine ferry is not armed")
 
     /**
      * True once the engine holds this slot as its peer (the peer record was
@@ -88,11 +88,26 @@ object PeerSlot {
 
     /** The port the game sent TO (our declared port = .53.2:1162). */
     @Volatile
-    private var gameTargetPort = BotMode.BOT_PORT
+    private var gameTargetPort = 0
+    @Volatile private var directGamePeer: InetSocketAddress? = null
 
     private var socket: DatagramSocket? = null
     private var worker: Thread? = null
     private val loggedClasses = java.util.Collections.synchronizedSet(HashSet<Int>())
+
+    /** Reserve before the gate advertises a port; do not collide with the game's own UDP socket. */
+    @Synchronized fun reserveEndpoint(): Int {
+        val existing = socket
+        if (existing != null && !existing.isClosed) return existing.localPort
+        val reserved = DatagramSocket(null)
+        try {
+            // A real game's host candidate can reach this phone directly;
+            // fabricated-address packets arrive from the VPN on loopback.
+            reserved.bind(InetSocketAddress("0.0.0.0", 0))
+            socket = reserved
+            return reserved.localPort
+        } catch (error: Exception) { reserved.close(); throw error }
+    }
 
     /**
      * Invoked the moment this slot's loopback socket exists. The VPN service
@@ -121,7 +136,9 @@ object PeerSlot {
         // fires (socket live, reactive), then re-targets it once the session
         // reply carries the game's address. Never churn the socket or lose
         // the punch-watch state on the update.
-        if (armed && gameUid == oppUid && socket != null) {
+        if (armed && socket != null) {
+            require(gameUid == oppUid || gameUid == 0L || oppUid == 0L) { "A different game owns this ferry; start a new room" }
+            if (oppUid > 0) gameUid = oppUid
             if (announced.isNotBlank()) gameAddress = announced
             if (localIp.isNotBlank()) gameIp = localIp
             if (localPort > 0) gamePort = localPort
@@ -137,10 +154,8 @@ object PeerSlot {
         armed = true
 
         val s = try {
-            DatagramSocket(null).apply {
-                reuseAddress = true
-                bind(InetSocketAddress(LOOPBACK_PEER_IP, BotMode.BOT_PORT))
-            }
+            reserveEndpoint()
+            requireNotNull(socket)
         } catch (t: Throwable) {
             AppState.appendLog("[BOT-SLOT  ] loopback peer bind failed: ${t.message}")
             armed = false
@@ -165,6 +180,7 @@ object PeerSlot {
         armed = false
         engineAttached = false
         engineHeard = false
+        directGamePeer = null
         closeEngineSockets()
         runCatching { socket?.close() }
         socket = null
@@ -200,6 +216,16 @@ object PeerSlot {
                 AppState.appendLog("[BOT-SLOT  ] game transport rx #$rxCount n=$n")
             }
 
+            val fromBackend = pkt.address.isLoopbackAddress && pkt.port == BACKEND_PORT
+            if (!fromBackend) {
+                // Raw traffic addressed to the server-advertised host candidate
+                // has no inner IP header. Carry it unchanged and reply to the
+                // same local socket (including the VPN's ordinary UDP proxy).
+                if (!pkt.address.isLoopbackAddress && pkt.address.hostAddress != BotMode.hostIp) continue
+                directGamePeer = pkt.socketAddress as? InetSocketAddress
+                if (engineAttached) { sendToEngine(data); noteGameFrame(data) }
+                continue
+            }
             if (n == 1) {
                 when (data[0].toInt() and 0xFF) {
                     0xFC -> runCatching {
@@ -234,6 +260,7 @@ object PeerSlot {
             gameIp = inner.srcIp
             gamePort = inner.srcPort
             gameTargetPort = inner.dstPort
+            directGamePeer = null
 
             // The ENGINE plays the opponent. Every game frame goes to its
             // socket unchanged; nothing is answered from here. If the engine
@@ -284,14 +311,15 @@ object PeerSlot {
         val s4 = try {
             DatagramSocket(null).apply {
                 reuseAddress = true
-                bind(InetSocketAddress(LOOPBACK_PEER_IP, ENGINE_PORT))
+                bind(InetSocketAddress(LOOPBACK_PEER_IP, 0))
                 soTimeout = 250
             }
         } catch (t: Throwable) {
             AppState.appendLog("[BOT-SLOT  ] cannot bind the engine's peer socket " +
-                "$LOOPBACK_PEER_IP:$ENGINE_PORT: ${t.message}")
+                "$LOOPBACK_PEER_IP: ${t.message}")
             return
         }
+        engineSock4 = s4
         val s6 = try {
             DatagramSocket(null).apply {
                 reuseAddress = true
@@ -302,7 +330,6 @@ object PeerSlot {
             AppState.appendLog("[BOT-SLOT  ] no IPv6 loopback peer: ${t.message}")
             null
         }
-        engineSock4 = s4
         engineSock6 = s6
         AppState.appendLog("[BOT-SLOT  ] the engine's peer is $LOOPBACK_PEER_IP:$ENGINE_PORT" +
             (if (s6 != null) " and [::1]:$ENGINE_PORT" else " (IPv4 only)"))
@@ -390,6 +417,11 @@ object PeerSlot {
             AppState.appendLog("[BOT-SLOT  ] the engine's own bytes are flowing " +
                 "(${payload.size} B first frame) -- the whole exchange is the " +
                 "engine's from here")
+        }
+        val direct = directGamePeer
+        if (direct != null) {
+            runCatching { socket?.send(DatagramPacket(payload, payload.size, direct)) }
+            return
         }
         if (gameIp.isBlank() || gamePort <= 0) return
         val out = buildInnerUdpPacket(

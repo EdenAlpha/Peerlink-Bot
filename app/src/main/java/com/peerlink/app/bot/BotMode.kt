@@ -44,7 +44,7 @@ object BotMode {
      * so any valid port works; 1162 mirrors the pattern seen in the real
      * two-phone match capture.
      */
-    const val BOT_PORT = 1162
+    val BOT_PORT: Int get() = PeerSlot.reserveEndpoint()
 
     /**
      * Local bind port for the bot's T7 beating socket (bundle convention).
@@ -54,6 +54,7 @@ object BotMode {
     const val BOT_LOCAL_PORT = 44001
 
     private const val PREFS = "bot_mode_prefs"
+    private var sessionContext: Context? = null
 
     /** True while a bot-mode room session owns the phone. */
     @Volatile
@@ -84,10 +85,16 @@ object BotMode {
         AppState.peerFabricatedIp = BOT_FAB_IP
     }
 
-    /** Begin a bot-mode session: fixed pair + host capture + marker + beats. */
-    fun ensureStarted(ctx: Context, uid: Long) {
+    fun prepareEndpoint(ctx: Context) {
         ensurePair()
         hostIp = resolveHostIp(ctx)
+        PeerSlot.reserveEndpoint()
+    }
+
+    /** Begin a bot-mode session: fixed pair + host capture + marker + beats. */
+    fun ensureStarted(ctx: Context, uid: Long) {
+        sessionContext = ctx.applicationContext
+        prepareEndpoint(ctx)
         active = true
         ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .putBoolean("active", true)
@@ -165,5 +172,8 @@ object BotMode {
     fun stop() {
         keepalive?.stop()
         keepalive = null
+        active = false
+        sessionContext?.getSharedPreferences(PREFS, Context.MODE_PRIVATE)?.edit()
+            ?.putBoolean("active", false)?.apply()
     }
 }

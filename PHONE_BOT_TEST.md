@@ -1,0 +1,72 @@
+# PeerLink phone bot test
+
+This is an experimental integration branch, `feat/phone-match-test`. The test
+package is `com.peerlink.app.enginetest`, displayed as **PeerLink Test**. It can
+be installed beside the existing PeerLink app. Only one of their VPNs can run
+at a time.
+
+The engine is restricted to the verified eFootball 11.1.1 ARM64 library,
+SHA-256 `2cea0c85344d7d7f295aea1c2353621f02db78dbccd888a0a21a0508ac330659`.
+An unknown library is refused before offset-based calls. The bot engine needs
+Android 12 or later; the user's Android 15 / Helio G81 / Mali-G52 phone meets
+the architecture and GLES requirements. Running both games within its 3.7 GB
+RAM remains an on-device measurement, not an established performance claim.
+
+The app reads the installed game's APKs/assets and creates its own working
+files. First preparation uses approximately 1 GB of additional storage. The
+original game files and saves are not modified. No game binaries, assets,
+account credentials or session IDs are included in this repository/APK.
+
+## User test
+
+1. Open PeerLink Test and create a bot room. The first preparation copies the
+   engine and required assets; progress appears in the bot notification/log.
+2. Allow the ordinary Android VPN request if needed. Open eFootball and join
+   the displayed room number.
+3. Use Ready / To Match in the room. Continue through the team preview and
+   the final To Match normally. The bot owns the home side and its own match
+   process. Mobile controllers must remain allowed in the room settings.
+4. When native match objects and an on-pitch ball are observed, the test sends
+   Pass to the bot's own gamepad, up to ten times at six-second intervals.
+   **Bot Pass** in the notification requests another input. It never taps or
+   injects input into the user's foreground game.
+5. Confirm the bot's pass/ball response in eFootball. A packet count,
+   connected SDK or constructed match alone does not establish kickoff.
+   Stop in the notification ends the bot and its game VPN.
+
+## Implementation and limits
+
+The private `:botengine` service runs the original Java/JNI/native application
+lifecycle with real Android services and an offscreen 320×180 surface whose
+frames are drained. The original task manager owns match updates. Current
+account squad inputs and the server's game/session values are passed to the
+recovered native input APIs; no readiness or connectivity flags are assigned.
+The controller setting uses original setters after server permission is
+checked. The complete server-to-native controller configuration mapping is
+not established by that test override.
+
+The local ferry reserves a free port before the server receives its profile.
+It carries both raw host-candidate traffic and VPN-wrapped fabricated-address
+traffic. Only the original engine generates game-protocol replies. The SDK
+receives the server's connecting-start time. Relay-selected sessions stop with
+a clear error because this test implements the local P2P route.
+
+This is a simple control test, not a completed autonomous player. Exact action
+classification, possession/cursor/orientation decoding, sustained phone memory
+use and phone-game kickoff require separate evidence.
+
+## Verification
+
+- APK compilation and JVM readiness tests run in Android CI.
+- Genuine Android framework tests check the host and separate gamepad events.
+- `BotFerryTransportTest` checks only transport with opaque bytes; it is not a
+  substitute for a native connection or match.
+- `BotEnginePhoneTest`, explicitly selected with an owner-supplied `botUid`,
+  installs/starts the original engine and probes its own controller on ARM64.
+  It intentionally does not join a match or claim kickoff.
+- `GameArchiveRegression` compares all 44 decoded tables against an independent
+  decode of the same installed archive and rejects malformed containers.
+
+The first ARM64 startup run identified a missing Play Asset Delivery service;
+the public SDK dependency was added. Check the latest test evidence before
+describing this integration as reaching phone kickoff.
