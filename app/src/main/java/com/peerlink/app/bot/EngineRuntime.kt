@@ -80,24 +80,10 @@ internal object EngineRuntime {
             if (!engine.isFile || !onRuntime { load(engine) }) return false
             val files = GameAssets.prepare(app, report)
             report("Starting bot simulation")
-            val host = gameHost ?: GameAndroidRuntime.create(app, files.game, files.root).also { gameHost = it }
-            val bound = EngineAndroidHost.onMainThread(Callable {
-                val activity = host.activity()
-                if (!nativeInstallAndroidHost(base, activity, activity.assets,
-                        activity.filesDir.absolutePath, activity.getExternalFilesDir(null)?.absolutePath)) false
-                else if (!nativeStartApplication(base, host.surface(), files.root.absolutePath,
-                        "-opengl -nosound -unattended -NoSplash -culture=en -featureleveles31 " +
-                            "-ResX=320 -ResY=180 -ProjectDir=${files.project.absolutePath}/")) false
-                else {
-                    host.resumeAssets()
-                    // Original GameActivity.onResume delivers this Java-side
-                    // callback BEFORE NativeActivity's native resume callback.
-                    host.resumeGame()
-                    nativeResumeApplication(base)
-                    true
-                }
-            })
-            if (!bound) return false
+            check(nativeConfigureFiles(base, File(files.root, "assets").absolutePath)) { "Bot asset directory is unavailable" }
+            // Android creates the NativeActivity, its NativeCode and the real
+            // surface/input lifecycle on the bot's private display.
+            if (gameHost == null) gameHost = GameAndroidRuntime.create(app, files.game, files.root)
             val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(120)
             var nextReport = 0L
             while (!nativeApplicationReady(base)) {
@@ -209,10 +195,10 @@ internal object EngineRuntime {
     }
     fun neutral() = onRuntime { if (base != 0L) nativeNeutralInput(base) }
     fun probeController(): Boolean = onRuntime { base != 0L && nativeProbeController(base) }
+    fun closeHost() { gameHost?.close(); gameHost = null }
 
     private external fun nativeLoad(path: String): Long
-    private external fun nativeStartApplication(base: Long, surface: android.view.Surface, root: String, command: String): Boolean
-    private external fun nativeResumeApplication(base: Long)
+    private external fun nativeConfigureFiles(base: Long, assets: String): Boolean
     private external fun nativeApplicationReady(base: Long): Boolean
     private external fun nativeStartupInfo(base: Long): String
     private external fun nativeLoadDatabase(base: Long, path: String): Boolean
@@ -222,15 +208,9 @@ internal object EngineRuntime {
     private external fun nativeInputKey(base: Long, code: Int, action: Int): Boolean
     private external fun nativeNeutralInput(base: Long)
     private external fun nativeProbeController(base: Long): Boolean
-    private external fun nativePrepareCore(base: Long): Boolean
-    private external fun nativeInstallAndroidHost(
-        base: Long, activity: android.app.NativeActivity, assets: android.content.res.AssetManager,
-        internalPath: String, externalPath: String?,
-    ): Boolean
     private external fun nativeStart(base: Long, uid: Long): Long
     private external fun nativeSetPeers(base: Long, record: ByteArray): Boolean
     private external fun nativeOpenSession(base: Long, peer: Long, connectingStart: Long): Boolean
-    private external fun nativeTick(base: Long)
     private external fun nativeCall(base: Long, offset: Long, a0: Long, a1: Long, a2: Long, a3: Long): Long
     private external fun nativeAlloc(size: Int): Long
     private external fun nativeFree(address: Long)

@@ -64,6 +64,7 @@
 
     <application
         android:name=".core.PeerLinkApp"
+        android:appComponentFactory=".bot.EngineComponentFactory"
         android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
         android:label="PeerLink"
@@ -72,10 +73,22 @@
         android:theme="@style/Theme.PeerLink"
         android:hardwareAccelerated="true"
         android:usesCleartextTraffic="true"
-        tools:replace="android:allowBackup,android:label"
+        tools:replace="android:allowBackup,android:label,android:appComponentFactory"
         tools:targetApi="36">
 
         <!-- Main Activity -->
+        <activity
+            android:name="com.peerlink.engine.PhoneGameHost"
+            android:process=":botengine"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:taskAffinity="${applicationId}.botengine"
+            android:screenOrientation="landscape"
+            android:theme="@android:style/Theme.NoTitleBar.Fullscreen"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|density">
+            <meta-data android:name="android.app.lib_name" android:value="UE4" />
+            <meta-data android:name="com.epicgames.ue4.GameActivity.ProjectName" android:value="PesMobile" />
+        </activity>
         <activity
             android:name=".ui.MainActivity"
             android:exported="true"

@@ -130,10 +130,11 @@ class BotEngineService : Service() {
     override fun onDestroy() {
         testing = false
         runCatching { EngineRuntime.neutral() }
+        EngineRuntime.closeHost()
         worker.shutdownNow()
         super.onDestroy()
         // The original engine owns native worker threads and cannot be dlclosed safely.
-        // This process contains only the bot service; VPN and UI live in the main process.
+        // The bot Activity shares this process; VPN and UI live in the main process.
         Process.killProcess(Process.myPid())
     }
 }

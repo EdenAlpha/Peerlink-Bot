@@ -36,9 +36,11 @@ account credentials or session IDs are included in this repository/APK.
 
 ## Implementation and limits
 
-The private `:botengine` service runs the original Java/JNI/native application
-lifecycle with real Android services and an offscreen 320×180 surface whose
-frames are drained. The original task manager owns match updates. Current
+The private `:botengine` process hosts an Android-created NativeActivity on its
+own private 320×180 virtual display. Android owns the native activity record,
+window and input queues; the output frames are drained. Removing the display
+destroys its contents instead of moving the bot onto the human screen. The
+original task manager owns match updates. Current
 account squad inputs and the server's game/session values are passed to the
 recovered native input APIs; no readiness or connectivity flags are assigned.
 The controller setting uses original setters after server permission is
@@ -67,6 +69,8 @@ use and phone-game kickoff require separate evidence.
 - `GameArchiveRegression` compares all 44 decoded tables against an independent
   decode of the same installed archive and rejects malformed containers.
 
-The first ARM64 startup run identified a missing Play Asset Delivery service;
-the public SDK dependency was added. Check the latest test evidence before
-describing this integration as reaching phone kickoff.
+ARM64 testing identified a missing Play Asset Delivery service, a scoped
+storage failure, and an invalid manually manufactured native activity host.
+The service dependency and private storage fixes are included; the framework
+activity replacement still requires successful ARM64 startup evidence. No
+phone kickoff is claimed by the checks above.

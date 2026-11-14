@@ -33,15 +33,10 @@ long peerlink_original_preview_proceed_v271(uintptr_t);
 namespace {
 constexpr uint64_t kEngineSize = 161937720ULL;
 uintptr_t g_base = 0;
-ANativeActivity g_activity{};
-jobject g_assets = nullptr;
-std::string g_internal_path, g_external_path;
 uintptr_t g_client = 0;
 uint32_t g_uid = 0;
 bool g_core_ready = false;
-ANativeActivityCallbacks g_callbacks{};
-ANativeWindow *g_window = nullptr;
-std::string g_obb_path, g_squad_path;
+std::string g_squad_path;
 int g_match_stage = 0;
 bool g_preview_proceeded = false;
 bool g_controller_scanned = false;
@@ -56,6 +51,9 @@ template <typename Fn> Fn entry(uint64_t offset) {
     return reinterpret_cast<Fn>(g_base + offset);
 }
 bool valid(jlong base) { return g_base && static_cast<uintptr_t>(base) == g_base; }
+ANativeActivity *framework_activity() {
+    return g_base ? entry<ANativeActivity *(*)()>(0x2f4ebcc)() : nullptr;
+}
 void destroy_string(EngineString &value) {
     if (value.words[0] & 1) entry<void (*)(void *)>(0x2f376d4)(reinterpret_cast<void *>(value.words[2]));
 }
@@ -122,43 +120,42 @@ bool neutral_event(JNIEnv *env) {
 }
 
 extern "C" {
-JNIEXPORT jboolean JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeStartApplication(
-        JNIEnv *env, jobject, jlong base, jobject surface, jstring root, jstring command) {
-    if (!valid(base) || !g_activity.vm || !surface || !root || !command) return JNI_FALSE;
-    if (g_activity.instance) return JNI_TRUE;
-    const char *directory = env->GetStringUTFChars(root, nullptr);
+JNIEXPORT jboolean JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeConfigureFiles(
+        JNIEnv *env, jobject, jlong base, jstring assets) {
+    if (!valid(base) || !assets) return JNI_FALSE;
+    const char *directory = env->GetStringUTFChars(assets, nullptr);
     if (!directory) return JNI_FALSE;
-    std::string assets = std::string(directory) + "/assets";
-    g_obb_path = std::string(directory) + "/obb";
-    env->ReleaseStringUTFChars(root, directory);
-    if (chdir(assets.c_str())) return JNI_FALSE;
-    const jchar *arguments = env->GetStringChars(command, nullptr);
-    if (!arguments) return JNI_FALSE;
-    std::u16string copy(reinterpret_cast<const char16_t *>(arguments), env->GetStringLength(command));
-    env->ReleaseStringChars(command, arguments);
-    entry<void (*)(const char16_t *)>(0x438062c)(copy.c_str());
-    g_window = ANativeWindow_fromSurface(env, surface);
-    if (!g_window) return JNI_FALSE;
-    g_activity.callbacks = &g_callbacks;
-    g_activity.obbPath = g_obb_path.c_str();
-    entry<void (*)(ANativeActivity *, void *, size_t)>(0x288a448)(&g_activity, nullptr, 0);
-    return g_activity.instance ? JNI_TRUE : JNI_FALSE;
+    int result = chdir(directory);
+    env->ReleaseStringUTFChars(assets, directory);
+    return result == 0 ? JNI_TRUE : JNI_FALSE;
 }
 
-JNIEXPORT void JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeResumeApplication(
-        JNIEnv *, jobject, jlong base) {
-    if (!valid(base) || !g_activity.instance || !g_window) return;
-    if (g_callbacks.onStart) g_callbacks.onStart(&g_activity);
-    if (g_callbacks.onResume) g_callbacks.onResume(&g_activity);
-    if (g_callbacks.onNativeWindowCreated) g_callbacks.onNativeWindowCreated(&g_activity, g_window);
-    ARect bounds{0, 0, 320, 180};
-    if (g_callbacks.onContentRectChanged) g_callbacks.onContentRectChanged(&g_activity, &bounds);
-    if (g_callbacks.onWindowFocusChanged) g_callbacks.onWindowFocusChanged(&g_activity, 1);
+JNIEXPORT void JNICALL Java_com_peerlink_app_bot_FrameworkActivityCalls_create(
+        JNIEnv *env, jclass, jobject activity, jobject state) {
+    jclass framework = env->FindClass("android/app/NativeActivity");
+    jmethodID method = framework ? env->GetMethodID(framework, "onCreate", "(Landroid/os/Bundle;)V") : nullptr;
+    if (method) env->CallNonvirtualVoidMethod(activity, framework, method, state);
+    if (framework) env->DeleteLocalRef(framework);
+}
+
+JNIEXPORT void JNICALL Java_com_peerlink_app_bot_FrameworkActivityCalls_lifecycle(
+        JNIEnv *env, jclass, jobject activity, jint event) {
+    const char *names[] = {"onResume", "onPause", "onStop", "onDestroy", "onWindowFocusChanged", "onWindowFocusChanged"};
+    if (event < 0 || event > 5) return;
+    jclass framework = env->FindClass("android/app/NativeActivity");
+    jmethodID method = framework ? env->GetMethodID(framework, names[event], event < 4 ? "()V" : "(Z)V") : nullptr;
+    if (method) {
+        if (event < 4) env->CallNonvirtualVoidMethod(activity, framework, method);
+        else env->CallNonvirtualVoidMethod(activity, framework, method, event == 4 ? JNI_TRUE : JNI_FALSE);
+    }
+    if (framework) env->DeleteLocalRef(framework);
 }
 
 JNIEXPORT jboolean JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeApplicationReady(
         JNIEnv *, jobject, jlong base) {
-    if (!valid(base) || !g_activity.instance) return JNI_FALSE;
+    if (!valid(base)) return JNI_FALSE;
+    ANativeActivity *activity = framework_activity();
+    if (!activity || !activity->instance) return JNI_FALSE;
     uintptr_t owner = *reinterpret_cast<uintptr_t *>(g_base + 0xa5fb348);
     bool ready = *reinterpret_cast<uintptr_t *>(g_base + 0xa364cc0) &&
         *reinterpret_cast<unsigned char *>(g_base + 0xa53b850) >= 1 &&
@@ -192,7 +189,8 @@ JNIEXPORT jboolean JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeLoadDat
 JNIEXPORT jstring JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeStartupInfo(
         JNIEnv *env, jobject, jlong base) {
     if (!valid(base)) return env->NewStringUTF("startup: engine not loaded");
-    uintptr_t app = reinterpret_cast<uintptr_t>(g_activity.instance);
+    ANativeActivity *activity = framework_activity();
+    uintptr_t app = activity ? reinterpret_cast<uintptr_t>(activity->instance) : 0;
     uintptr_t owner = *reinterpret_cast<uintptr_t *>(g_base + 0xa5fb348);
     char text[256];
     snprintf(text, sizeof(text), "startup: engine=%u objects=%u kernel=%u running=%u activity=%u window=%u database=%u work=%u sessions=%u",
@@ -403,66 +401,16 @@ JNIEXPORT jlong JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeLoad(
     void *symbol = dlsym(library, "JNI_OnLoad");
     if (!symbol || !dladdr(symbol, &info) || !info.dli_fbase) return 0;
     g_base = reinterpret_cast<uintptr_t>(info.dli_fbase);
-    // Full UE4 JNI_OnLoad/activity startup is deliberately not invoked: this
-    // host uses the original networking helpers without launching the renderer.
+    // Loading here only pins and locates the verified binary. Its installed
+    // Java class loader and framework NativeActivity perform JNI/lifecycle init.
     return static_cast<jlong>(g_base);
-}
-
-JNIEXPORT jboolean JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativePrepareCore(
-        JNIEnv *, jobject, jlong base) {
-    if (!valid(base)) return JNI_FALSE;
-    if (g_core_ready) return JNI_TRUE;
-    // Same original constructor order as the clean two-engine lab. Optional
-    // Java-dependent services are constructed before registering the activity.
-    if (!*reinterpret_cast<uintptr_t *>(g_base + 0xa535738)) entry<void (*)()>(0x7e06990)();
-    if (!*reinterpret_cast<uintptr_t *>(g_base + 0xa5fb028)) entry<void (*)()>(0x8226208)();
-    if (!*reinterpret_cast<uintptr_t *>(g_base + 0xa5d9cd0)) entry<void (*)()>(0x7e0af8c)();
-    uintptr_t services = *reinterpret_cast<uintptr_t *>(g_base + 0xa5d9cd0);
-    uintptr_t clock = services ? *reinterpret_cast<uintptr_t *>(services + 8) : 0;
-    if (!clock || !session_manager()) return JNI_FALSE;
-    entry<void (*)(uintptr_t, uint32_t)>(0x7e14a38)(clock, static_cast<uint32_t>(time(nullptr)));
-    entry<void (*)(int)>(0x822ee30)(1);
-    g_core_ready = true;
-    return JNI_TRUE;
-}
-
-JNIEXPORT jboolean JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeInstallAndroidHost(
-        JNIEnv *env, jobject, jlong base, jobject activity, jobject assets,
-        jstring internal_path, jstring external_path) {
-    if (!valid(base) || !activity || !assets || !internal_path) return JNI_FALSE;
-    if (g_activity.clazz) return env->IsSameObject(g_activity.clazz, activity);
-    JavaVM *vm = nullptr;
-    if (env->GetJavaVM(&vm) != JNI_OK || !vm) return JNI_FALSE;
-    AAssetManager *manager = AAssetManager_fromJava(env, assets);
-    if (!manager) return JNI_FALSE;
-    const char *internal = env->GetStringUTFChars(internal_path, nullptr);
-    if (!internal) return JNI_FALSE;
-    g_internal_path = internal;
-    env->ReleaseStringUTFChars(internal_path, internal);
-    if (external_path) {
-        const char *external = env->GetStringUTFChars(external_path, nullptr);
-        if (!external) return JNI_FALSE;
-        g_external_path = external;
-        env->ReleaseStringUTFChars(external_path, external);
-    }
-    jobject receiver = env->NewGlobalRef(activity);
-    if (!receiver) return JNI_FALSE;
-    g_assets = env->NewGlobalRef(assets);
-    if (!g_assets) { env->DeleteGlobalRef(receiver); return JNI_FALSE; }
-    g_activity.vm = vm;
-    g_activity.env = env;
-    g_activity.clazz = receiver;
-    g_activity.internalDataPath = g_internal_path.c_str();
-    g_activity.externalDataPath = g_external_path.empty() ? nullptr : g_external_path.c_str();
-    g_activity.sdkVersion = android_get_device_api_level();
-    g_activity.assetManager = manager;
-    entry<void (*)(ANativeActivity *)>(0x2f4ebc0)(&g_activity);
-    return entry<ANativeActivity *(*)()>(0x2f4ebcc)() == &g_activity ? JNI_TRUE : JNI_FALSE;
 }
 
 JNIEXPORT jlong JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeStart(
         JNIEnv *, jobject, jlong base, jlong uid) {
-    if (!valid(base) || !g_core_ready || !g_activity.vm || uid <= 0 || uid > 0xffffffffLL) return 0;
+    if (!valid(base) || !g_core_ready || uid <= 0 || uid > 0xffffffffLL) return 0;
+    ANativeActivity *activity = framework_activity();
+    if (!activity || !activity->vm || !activity->instance) return 0;
     if (g_client) return g_uid == static_cast<uint32_t>(uid) ? static_cast<jlong>(g_client) : 0;
     if (!entry<uintptr_t (*)()>(0x7db9294)() ||
         *reinterpret_cast<uint32_t *>(g_base + 0xa5d5c20) != 3) return 0;

@@ -144,6 +144,9 @@
 -keep class com.peerlink.app.bot.EngineHost { *; }
 -keep class com.peerlink.app.bot.EngineRuntime { *; }
 -keep class com.peerlink.app.bot.SoftwareGamepadEvents { *; }
+-keep class com.peerlink.app.bot.GameAndroidRuntime { public *; }
+-keep class com.peerlink.app.bot.FrameworkActivityCalls { *; }
+-keep class com.peerlink.app.bot.EngineComponentFactory { *; }
 
 
 # ══════════════════════════════════════════════════════════
