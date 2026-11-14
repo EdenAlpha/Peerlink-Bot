@@ -6,6 +6,12 @@ on:
   pull_request:
     branches: [ main ]
   workflow_dispatch:
+    inputs:
+      publish_run_id:
+        description: 'Publish an already verified phone-test artifact from this CI run; do not rebuild'
+        required: false
+        default: ''
+        type: string
 
 permissions:
   contents: write
@@ -16,6 +22,7 @@ concurrency:
 
 jobs:
   build:
+    if: github.event_name != 'workflow_dispatch' || inputs.publish_run_id == ''
     runs-on: ubuntu-latest
 
     steps:
@@ -104,6 +111,7 @@ jobs:
             --prerelease
 
   android-host-services:
+    if: github.event_name != 'workflow_dispatch' || inputs.publish_run_id == ''
     runs-on: ubuntu-latest
     timeout-minutes: 25
     permissions:
@@ -141,3 +149,41 @@ jobs:
           path: engine-host-tests/build/outputs/androidTest-results/
           if-no-files-found: warn
           retention-days: 14
+
+  publish-phone-test:
+    if: github.event_name == 'workflow_dispatch' && inputs.publish_run_id != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - name: Download the verified test APK
+        uses: actions/download-artifact@v4
+        with:
+          name: peerlink-phone-bot-test
+          run-id: ${{ inputs.publish_run_id }}
+          github-token: ${{ github.token }}
+          path: phone-test
+      - name: Publish a separate experimental test release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TEST_BUILD_RUN: ${{ inputs.publish_run_id }}
+          TEST_REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          [[ "$TEST_BUILD_RUN" =~ ^[0-9]+$ ]]
+          test "$(gh api "repos/$TEST_REPOSITORY/actions/runs/$TEST_BUILD_RUN" --jq '.conclusion')" = success
+          TEST_COMMIT=$(gh api "repos/$TEST_REPOSITORY/actions/runs/$TEST_BUILD_RUN" --jq '.head_sha')
+          test -f phone-test/peerlink-debug.apk
+          cat > phone-test-notes.md <<'NOTES'
+          Experimental ARM64 PeerLink Test for the verified eFootball 11.1.1 engine.
+
+          Android engine startup, all 44 database tables, own-controller detection and a 15-second startup hold were verified before publication.
+
+          Phone-game P2P connection, kickoff and visible Pass response still require a real match test. This is a simple control test, not a complete autonomous player.
+
+          Installs separately as PeerLink Test. The original game must already be installed; game binaries and assets are not bundled.
+          NOTES
+          gh release create "phone-engine-test-${TEST_COMMIT:0:7}" phone-test/peerlink-debug.apk \
+            --repo "$TEST_REPOSITORY" --target "$TEST_COMMIT" --prerelease \
+            --title 'PeerLink phone engine and controller test' --notes-file phone-test-notes.md
