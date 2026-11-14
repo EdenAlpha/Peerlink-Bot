@@ -1,0 +1,6 @@
+ACTUAL_PRODUCER_FORMAT 3
+OLD_RGB888_RGBA8888_MISMATCH_REPRODUCED The producer output buffer format 0x3 doesn't match the ImageReader's configured buffer format 0x1.
+NATIVE_FORMAT_DRAIN_PASSED format=3 frames=8
+NATIVE_FORMAT_DRAIN_PASSED format=2 frames=8
+NATIVE_FORMAT_DRAIN_PASSED format=1 frames=8
+DIRECT_ANDROID_FORMAT_FIX_PASSED

@@ -1,0 +1,13 @@
+{
+  "app_commit": "25ae176d2bab38d9daa5898eb290a397ca9c27b8",
+  "ci_run": 43642773105,
+  "artifact_id": 14132734643,
+  "apk_sha256": "f79ff4c087673e2755ac84c8e83e90abc8fbaa9641377fb81ab07a769c5a0386",
+  "device": "ARM64 Android15 Redroid test device",
+  "temporary_hooks": false,
+  "manual_file_staging": false,
+  "update_install_over_previous_apk": "success",
+  "direct_regression": "ActualImageWriterRGB888 producer reproduces oldImageReaderRGBA8888 failure; productionPRIVATE/default0 reader drains8RGB,8RGBX,8RGBA.",
+  "packaged_scope": "3freshdata originalengine startup,44database tables,owncontroller neutralinput,and15sec stability. No physicalphone match or kickoff claim.",
+  "android_framework_checks": "7tests each API34 and35 passed"
+}

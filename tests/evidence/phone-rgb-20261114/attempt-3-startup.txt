@@ -1,0 +1,5 @@
+11-14 21:32:00.610  3011  3023 I PeerlinkEngineHost: startup: engine=0 objects=0 kernel=0 running=1 activity=11 window=1 database=0 work=0 sessions=0
+11-14 21:32:03.122  3011  3024 I PeerlinkEngineHost: database startup result=44
+11-14 21:32:03.136  2972  3007 I PeerlinkPhoneTest: ORIGINAL_ENGINE_STARTED state=[1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 620898] memoryMiB=606
+11-14 21:32:03.138  2972  3007 I PeerlinkPhoneTest: OWN_BOT_CONTROLLER_ENUMERATED
+11-14 21:32:18.163  2972  3007 I PeerlinkPhoneTest: ENGINE_AND_CONTROLLER_STABLE_15_SECONDS

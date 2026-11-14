@@ -70,13 +70,15 @@ use and phone-game kickoff require separate evidence.
 - `GameArchiveRegression` compares all 44 decoded tables against an independent
   decode of the same installed archive and rejects malformed containers.
 
-On 2026-11-14, APK commit `f415515` passed three consecutive tests with freshly
-cleared app data on ARM64 Android 14 (Redroid). Each attempt loaded the original
+On 2026-11-14, APK commit `25ae176` installed successfully over the previous test
+APK, then passed three consecutive tests with freshly cleared app data on
+ARM64 Android 15 (Redroid). Each attempt loaded the original
 engine and all 44 database tables, detected the bot's own controller, delivered
 neutral input through the original native handler, and remained responsive for
 the 15-second hold. No diagnostic hooks or manual file staging were used.
-The APK/JVM build and five Android framework/input tests also passed in
-[Android CI run 43620523688](https://github.com/EdenAlpha/Peerlink-Bot/actions/runs/43620523688).
+The APK/JVM build and seven Android framework, input and buffer tests on each
+of Android 14 and 15 also passed in
+[Android CI run 43642773105](https://github.com/EdenAlpha/Peerlink-Bot/actions/runs/43642773105).
 This is test-device startup evidence; kickoff and visible Pass response against
 the user's foreground game still require a real match test.
 
@@ -94,6 +96,16 @@ startup corrections before another full APK build:
   this completion; importing during its club-update callback caused an
   intermittent null stadium lookup. The host observes the original completion
   state and releases its task lock while waiting.
+- Accept the producer's native frame format in the offscreen consumer. The
+  Infinix crash report identified an RGB888 (`0x3`) frame reaching a reader
+  fixed to RGBA8888 (`0x1`). A direct Android test reproduced that exact
+  exception. The production `PRIVATE` reader, with default consumer usage,
+  drained eight frames in each of RGB888, RGBX8888 and RGBA8888. It releases
+  buffers without reading pixels or requiring texture sampling.
+
+Match-log exports include `java_crash_report.txt` when a saved Java crash
+report exists, so asynchronous frame-consumer failures are retained alongside
+the session log. The report's timestamp identifies when the exception occurred.
 
 Verified APK SHA-256:
-`f5f4f9d36b9f514baf221c882c748950b376a35c4a6aec9b7bedf2d0c767f675`.
+`f79ff4c087673e2755ac84c8e83e90abc8fbaa9641377fb81ab07a769c5a0386`.

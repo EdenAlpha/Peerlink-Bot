@@ -1,0 +1,38 @@
+[
+  {
+    "attempt": 1,
+    "instrumentation_ok": true,
+    "markers": {
+      "database startup result=44": true,
+      "ORIGINAL_ENGINE_STARTED": true,
+      "OWN_BOT_CONTROLLER_ENUMERATED": true,
+      "ENGINE_AND_CONTROLLER_STABLE_15_SECONDS": true
+    },
+    "fatal_engine_error": false,
+    "passed": true
+  },
+  {
+    "attempt": 2,
+    "instrumentation_ok": true,
+    "markers": {
+      "database startup result=44": true,
+      "ORIGINAL_ENGINE_STARTED": true,
+      "OWN_BOT_CONTROLLER_ENUMERATED": true,
+      "ENGINE_AND_CONTROLLER_STABLE_15_SECONDS": true
+    },
+    "fatal_engine_error": false,
+    "passed": true
+  },
+  {
+    "attempt": 3,
+    "instrumentation_ok": true,
+    "markers": {
+      "database startup result=44": true,
+      "ORIGINAL_ENGINE_STARTED": true,
+      "OWN_BOT_CONTROLLER_ENUMERATED": true,
+      "ENGINE_AND_CONTROLLER_STABLE_15_SECONDS": true
+    },
+    "fatal_engine_error": false,
+    "passed": true
+  }
+]
