@@ -383,6 +383,10 @@ class MainActivity : AppCompatActivity(), NsdDiscovery.NsdCallback {
                                 // Bundle EVERYTHING into a single zip file.
                                 val entries = mutableListOf<ZipEntryData>()
                                 entries.add(ZipEntryData(name = "match_log.txt", text = fullLog))
+                                val javaCrash = com.peerlink.app.core.CrashLogger.getLastReport(this@MainActivity)
+                                if (!javaCrash.isNullOrBlank()) {
+                                    entries.add(ZipEntryData(name = "java_crash_report.txt", text = javaCrash))
+                                }
                                 if (udpTrace.isNotBlank()) {
                                     entries.add(ZipEntryData(name = "udp_trace.csv", text = udpTrace))
                                 }
@@ -418,6 +422,7 @@ class MainActivity : AppCompatActivity(), NsdDiscovery.NsdCallback {
                                             )
                                             appendLine("Contents:")
                                             appendLine("- match_log.txt : full session log")
+                                            if (!javaCrash.isNullOrBlank()) appendLine("- java_crash_report.txt : latest Java exception report")
                                             if (udpTrace.isNotBlank()) {
                                                 appendLine("- udp_trace.csv : UDP timing trace")
                                             }

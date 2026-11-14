@@ -17,8 +17,6 @@ import android.graphics.Canvas;
 import android.graphics.Rect;
 import android.content.pm.ApplicationInfo;
 import android.graphics.PixelFormat;
-import android.media.Image;
-import android.media.ImageReader;
 import android.os.Handler;
 import android.os.Looper;
 import dalvik.system.PathClassLoader;
@@ -32,7 +30,7 @@ public final class GameAndroidRuntime implements AutoCloseable {
     private final Context game;
     private final File storage;
     private final String packageName;
-    private final ImageReader frames;
+    private final BotRenderSurface frames;
     private final Instrumentation lifecycle = new Instrumentation();
     private final NativeActivity activity;
     private final SurfaceHolder surface;
@@ -42,10 +40,7 @@ public final class GameAndroidRuntime implements AutoCloseable {
     private GameAndroidRuntime(Context owner, Context game, File root) throws Exception {
         if (Looper.myLooper() != Looper.getMainLooper()) throw new IllegalStateException("Android main thread required");
         this.game = game; storage = root; packageName = owner.getPackageName();
-        frames = ImageReader.newInstance(320, 180, PixelFormat.RGBA_8888, 3);
-        frames.setOnImageAvailableListener(reader -> {
-            try (Image image = reader.acquireLatestImage()) { /* Drain without displaying frames. */ }
-        }, new Handler(Looper.getMainLooper()));
+        frames = new BotRenderSurface(320, 180, new Handler(Looper.getMainLooper()));
         surface = new OffscreenSurface(frames.getSurface());
         try {
             File bridge = new File(root, "game-host-bridge.zip");

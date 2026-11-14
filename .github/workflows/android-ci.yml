@@ -114,6 +114,9 @@ jobs:
     if: github.event_name != 'workflow_dispatch' || inputs.publish_run_id == ''
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    strategy:
+      matrix:
+        api: [34, 35]
     permissions:
       contents: read
     steps:
@@ -136,7 +139,7 @@ jobs:
       - name: Test the production host on genuine Android
         uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: 34
+          api-level: ${{ matrix.api }}
           target: default
           arch: x86_64
           disable-animations: true
@@ -145,7 +148,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: android-host-service-tests
+          name: android-host-service-tests-api-${{ matrix.api }}
           path: engine-host-tests/build/outputs/androidTest-results/
           if-no-files-found: warn
           retention-days: 14
