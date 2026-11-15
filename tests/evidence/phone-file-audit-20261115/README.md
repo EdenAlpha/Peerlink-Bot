@@ -1,0 +1,13 @@
+# Installed-game copy verification
+
+The exact APK from commit `21929d27b936d6224246df79e7e167c99c5126ae` passed [CI 43687787518](https://github.com/EdenAlpha/Peerlink-Bot/actions/runs/43687787518), including app JVM tests, the APK/test APK build, and Android 14/15 host tests. Its hashes are in `build.json`. That artifact was installed without rebuilding in ARM64 Android 15 lab run [43681945022](https://github.com/EdenAlpha/peerlink-efootball-disconnects/actions/runs/43681945022), using the original installed 11.1.1 game splits and owned test inputs. No native observer, hook, protocol substitution or readiness write was used.
+
+The production audit verified 108 private working files: 47 selected CPK packs, five extracted resources, all 47 decoded database tables, four generated command-line files, and five resources at their actual native paths. The three libraries are checked separately. All 44 native database table names and record strides matched the pinned original engine. The additional Combination, SpecialPlayerAssignmentKind and TeamColor tables were decoded and checked without inventing a native layout for them.
+
+The Android corruption test changed one byte of `database/Ball.decoded` and native `global.utoc`, preserving both lengths. A second production audit found exactly two mismatches, restored both copies from their verified sources, and finished with `repaired=2`. The original game files were opened only for reading. The initial unchanged cache finished with `repaired=0`. The complete test took 2.713 seconds on the lab runner; this is not a performance claim for the user's phone.
+
+The exact APK then passed the original two-engine channel connection/hold test and the controlled peer-stop diagnostic test. Both users asserted that `[BOT-FILES] SUMMARY result=PASS` arrived in the main-process export log. On peer loss, the independent monitor retained the first native failure with a 100 ms sampling interval and no local stop request. The initiating side remains unresolved in a generic native transport error.
+
+Local `GameArchiveRegression` independently compared all 44 native decoded tables with the earlier lab output; all matched, and malformed containers were rejected. The app unit tests cover same-size corruption, truncated/missing copies, reuse without rewriting, refusal of a source that changes during copying, and invalid native table layouts.
+
+**Limit:** the audit covers installed APK sources and their copies, not downloaded/private game updates. Its PASS does not establish equal live databases, full-game phone interoperability, the cause of the user's disconnect, or kickoff. The release retains these limits in its exported report and release notes.

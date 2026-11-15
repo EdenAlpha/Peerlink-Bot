@@ -243,3 +243,5 @@ Before startup, PeerLink now streams SHA-256 comparisons between the installed g
 `SUMMARY result=PASS` means those copies/decodings passed, not that the bot has all data used by the running game. Downloaded/private game updates are explicitly `NOT_CHECKED`. A good copy can still be older than live data downloaded into the game's private storage. This audit does not assert the cause of the phone disconnect or claim kickoff works.
 
 `GameFileIntegrityPhoneTest` deliberately changes one byte in a cached database and one native resource, preserving their sizes; it checks both are detected and restored from the original sources. The standalone `GameArchiveRegression` compares all 44 decoded tables against independent lab output.
+
+Verified file-audit build: [phone-engine-test-21929d2](https://github.com/EdenAlpha/Peerlink-Bot/releases/tag/phone-engine-test-21929d2). Exact APK, Android corruption repair, native pair and controlled-disconnect evidence: [phone-file-audit-20261115](tests/evidence/phone-file-audit-20261115/README.md).
