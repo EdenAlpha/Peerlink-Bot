@@ -128,10 +128,10 @@ class BotEngineService : Service() {
             data = Bundle().apply { putString("status", line) }
         }) }
     }
-    private fun snapshot(): EngineSnapshot {
+    private fun snapshot(passive: Boolean = false): EngineSnapshot {
         val now = SystemClock.elapsedRealtime()
         if (now >= nextMemorySample) { pss = Debug.getPss().toLong(); nextMemorySample = now + 5000 }
-        return EngineSnapshot(EngineRuntime.snapshot().copyOf(29).also { it[18] = pss })
+        return EngineSnapshot(EngineRuntime.snapshot(passive).copyOf(29).also { it[18] = pss })
     }
     private fun diagnostic(line: String, firstFailure: Boolean = false) {
         runCatching { observer?.send(Message.obtain(null, EngineProtocol.DIAGNOSTIC).apply {
@@ -144,7 +144,7 @@ class BotEngineService : Service() {
     }
     private fun sampleDiagnostics() {
         try {
-            val state = snapshot()
+            val state = snapshot(passive = true)
             connectionTrace.sample(state, SystemClock.elapsedRealtime()).forEach {
                 diagnostic(it.text, it.firstFailure)
             }

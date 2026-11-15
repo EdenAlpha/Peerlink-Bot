@@ -211,7 +211,9 @@ internal object EngineRuntime {
         nativeSetupMatch(base, peerUid, squadFile.absolutePath, contextFile.absolutePath)
     }
 
-    fun snapshot(): LongArray = onRuntime { if (base == 0L) LongArray(18) else nativeSnapshot(base) }
+    fun snapshot(passive: Boolean = false): LongArray = onRuntime {
+        if (base == 0L) LongArray(29) else nativeSnapshot(base, passive)
+    }
     fun advanceMatch(controllerAllowed: Boolean): Int = onRuntime {
         if (base == 0L) -1 else nativeAdvanceMatch(base, controllerAllowed)
     }
@@ -235,7 +237,7 @@ internal object EngineRuntime {
     private external fun nativeLoadDatabase(base: Long, path: String): Boolean
     private external fun nativePrepareChannels(base: Long, peer: Long, squad: String): Boolean
     private external fun nativeSetupMatch(base: Long, peer: Long, squad: String, context: String): Boolean
-    private external fun nativeSnapshot(base: Long): LongArray
+    private external fun nativeSnapshot(base: Long, passive: Boolean): LongArray
     private external fun nativeAdvanceMatch(base: Long, controllerAllowed: Boolean): Int
     private external fun nativeInputKey(base: Long, code: Int, action: Int): Boolean
     private external fun nativeNeutralInput(base: Long)

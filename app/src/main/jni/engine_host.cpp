@@ -388,7 +388,7 @@ JNIEXPORT jint JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeAdvanceMatc
 }
 
 JNIEXPORT jlongArray JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeSnapshot(
-        JNIEnv *env, jobject, jlong base) {
+        JNIEnv *env, jobject, jlong base, jboolean passive) {
     // Append-only IPC layout. Diagnostic fields are reads under the same
     // original task lock; they never change the engine's connection verdict.
     constexpr unsigned kStateSize = 29;
@@ -399,7 +399,9 @@ JNIEXPORT jlongArray JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeSnaps
         // Read the application's original published frame counter. Never
         // advance its heartbeat or manually tick the engine from this host.
         state[20] = entry<uint32_t (*)()>(0x2f4b5bc)();
-        state[1] = g_client ? entry<uint32_t (*)(uintptr_t)>(0x7e013ac)(g_client) : 0;
+        // The SDK verdict routine also updates its connection bookkeeping.
+        // A high-frequency diagnostic read must not invoke it more often.
+        state[1] = passive ? -1 : (g_client ? entry<uint32_t (*)(uintptr_t)>(0x7e013ac)(g_client) : 0);
         uintptr_t manager = session_manager();
         if (manager) {
             entry<void (*)(uintptr_t)>(0x2f39738)(manager);
