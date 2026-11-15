@@ -50,20 +50,24 @@ internal class NativeTurnExchange(
         require(bytes.size in 1..2048) {
             "The server's peer connection record has an invalid decoded length (${bytes.size} bytes)"
         }
-        // SEND includes address_data_size, but GET/WATCH may return only the
-        // Base64 address. Its decoded byte count is the native input length.
-        // If a reply explicitly supplies a size, still reject a mismatch.
-        if (reply.containsKey("address_data_size")) {
-            val size = reply["address_data_size"] as? Number
-            require(size != null && size.toLong() == bytes.size.toLong()) {
-                "The server's peer connection record size does not match its decoded length " +
-                    "(declared=${size?.toLong() ?: "non-numeric"}, decoded=${bytes.size})"
+        // The game's callback 0x7e8f444 passes the declared payload length
+        // to 0x7e23714, separately from the decoded fixed-capacity buffer.
+        // An IPv4 record can contain 7 useful bytes in a 20-byte buffer.
+        val count = if (reply.containsKey("address_data_size")) {
+            val size = (reply["address_data_size"] as? Number)?.toLong()
+            require(size != null && size in 0..bytes.size.toLong()) {
+                "The server's peer connection record length exceeds its available data " +
+                    "(declared=${size ?: "non-numeric"}, decoded=${bytes.size})"
             }
-        }
-        if (!bytes.contentEquals(received)) {
-            check(acceptPeer(bytes)) { "The bot engine rejected the peer's connection record" }
-            received = bytes.copyOf()
-            log("peer connection record supplied to original engine (${bytes.size} bytes)")
+            size.toInt()
+        } else bytes.size
+        // The original native input treats a zero-length record as no data.
+        if (count == 0) return
+        val record = if (count == bytes.size) bytes else bytes.copyOf(count)
+        if (!record.contentEquals(received)) {
+            check(acceptPeer(record)) { "The bot engine rejected the peer's connection record" }
+            received = record.copyOf()
+            log("peer connection record supplied to original engine (${record.size} bytes, buffer=${bytes.size})")
         }
     }
 }

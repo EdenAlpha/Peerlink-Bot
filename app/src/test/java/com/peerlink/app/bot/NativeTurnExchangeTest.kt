@@ -86,14 +86,86 @@ class NativeTurnExchangeTest {
         assertEquals(1, inputs)
     }
 
-    @Test fun rejectsTruncatedRecordBeforeCallingTheNativeInput() {
+    @Test fun rejectsDeclaredPayloadLargerThanTheDecodedBuffer() {
         val exchange = NativeTurnExchange(
             localAddress = { null }, acceptPeer = { fail("Truncated data must not reach the engine"); false },
             send = { _, _ -> error("No local address") },
-            get = { reply(phoneRecord).toMutableMap().also { it["address_data_size"] = 19 } },
+            get = { reply(phoneRecord).toMutableMap().also { it["address_data_size"] = 21 } },
             watch = { emptyMap<String, Any>() }, log = {},
         )
         assertThrows(IllegalArgumentException::class.java) { exchange.pump() }
+    }
+
+    @Test fun phoneReplyWithSevenUsefulBytesInTwentyBytesReachesNativeAndAllowsSetup() {
+        var accepted = false
+        var prepared = false
+        val encodedReply = GateCodec.pack(reply(phoneRecord).toMutableMap().also {
+            it["address_data_size"] = 7L
+        })
+        val exchange = NativeTurnExchange(
+            localAddress = { null },
+            acceptPeer = {
+                assertArrayEquals(phoneRecord.copyOf(7), it)
+                accepted = true
+                true
+            },
+            send = { _, _ -> error("No local relay record") },
+            get = { GateCodec.unpack(encodedReply) as Map<*, *> },
+            watch = { emptyMap<String, Any>() }, log = {},
+        )
+        assertTrue(PeerConnectionPhase.awaitTransport(
+            running = { true }, exchangeAddresses = exchange::pump,
+            snapshot = { EngineSnapshot(LongArray(23).also { it[2] = if (accepted) 4 else 1; it[21] = 2 }) },
+            prepareChannels = { prepared = true; true }, progress = {},
+            pause = { fail("A padded peer record must not stop setup") },
+        ))
+        assertTrue(accepted)
+        assertTrue(prepared)
+    }
+
+    @Test fun watchDeliversNineteenUsefulBytesFromTwentyByteBuffer() {
+        val payload = ByteArray(19) { (it + 1).toByte() }
+        val buffer = payload + byteArrayOf(0x7f)
+        var inputs = 0
+        val exchange = NativeTurnExchange(
+            localAddress = { null },
+            acceptPeer = { assertArrayEquals(payload, it); inputs++; true },
+            send = { _, _ -> error("No local relay record") },
+            get = { mapOf("result" to "NOERR") },
+            watch = { reply(buffer).toMutableMap().also { it["address_data_size"] = payload.size } },
+            log = {},
+        )
+        exchange.pump()
+        assertEquals(1, inputs)
+    }
+
+    @Test fun differentUnusedPaddingDoesNotRepeatTheNativeInput() {
+        val changedPadding = phoneRecord.copyOf().also { it[it.lastIndex] = 0x7f }
+        var inputs = 0
+        val exchange = NativeTurnExchange(
+            localAddress = { null },
+            acceptPeer = { assertArrayEquals(phoneRecord.copyOf(7), it); inputs++; true },
+            send = { _, _ -> error("No local relay record") },
+            get = { reply(phoneRecord).toMutableMap().also { it["address_data_size"] = 7 } },
+            watch = { reply(changedPadding).toMutableMap().also { it["address_data_size"] = 7 } },
+            log = {},
+        )
+        exchange.pump()
+        assertEquals(1, inputs)
+    }
+
+    @Test fun zeroLengthRecordDoesNotAbortAFollowingWatchRecord() {
+        var inputs = 0
+        val exchange = NativeTurnExchange(
+            localAddress = { null },
+            acceptPeer = { assertArrayEquals(phoneRecord.copyOf(7), it); inputs++; true },
+            send = { _, _ -> error("No local relay record") },
+            get = { reply(ByteArray(20)).toMutableMap().also { it["address_data_size"] = 0 } },
+            watch = { reply(phoneRecord).toMutableMap().also { it["address_data_size"] = 7 } },
+            log = {},
+        )
+        exchange.pump()
+        assertEquals(1, inputs)
     }
 
     @Test fun rejectsOversizedRecordEvenWithoutADeclaredSize() {
