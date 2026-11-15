@@ -104,6 +104,12 @@ public final class GameAndroidRuntime implements AutoCloseable {
         return value;
     }
     android.app.NativeActivity activity() { return (android.app.NativeActivity)attached.getNow(null); }
+    void engineReady() throws Exception {
+        EngineAndroidHost.onMainThread(() -> {
+            activity.getClass().getMethod("onEngineReady").invoke(activity);
+            return null;
+        });
+    }
     @Override public void close() {
         new Handler(Looper.getMainLooper()).post(() -> {
             try {

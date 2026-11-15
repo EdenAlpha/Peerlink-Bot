@@ -15,6 +15,7 @@ import java.lang.reflect.Field;
 /** Framework-attached native host in the bot service; never receives human screen input. */
 public final class PhoneGameHost extends GameActivity {
     private Resources gameResources;
+    private boolean engineReadyResumeDelivered;
     public PhoneGameHost() { super(); }
     private Context game() { return GameAndroidRuntime.gameContext(); }
 
@@ -57,6 +58,19 @@ public final class PhoneGameHost extends GameActivity {
             Class.forName("jp.konami.AndroidUtil", true, getClassLoader()).getMethod("OnResumeCallback").invoke(null);
             FrameworkActivityCalls.lifecycle(this, 0);
         } catch (Exception error) { throw new IllegalStateException("Bot Activity resume failed", error); }
+    }
+    /** The original callback ignores notifications before kernel phase 1.
+     * Our framework resume precedes surface creation, so repeat the game-side
+     * notification once after initialization, as the retained QEMU host does.
+     */
+    public void onEngineReady() {
+        if (engineReadyResumeDelivered) return;
+        try {
+            Class.forName("jp.konami.AndroidUtil", true, getClassLoader()).getMethod("OnResumeCallback").invoke(null);
+            engineReadyResumeDelivered = true;
+            android.util.Log.i("PeerlinkEngineHost", "ORIGINAL_GAME_RESUME_AFTER_ENGINE_READY mainLooper=" +
+                (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()));
+        } catch (Exception error) { throw new IllegalStateException("Bot engine-ready resume failed", error); }
     }
     @Override protected void onPause() { FrameworkActivityCalls.lifecycle(this, 1); }
     @Override public void onStop() { FrameworkActivityCalls.lifecycle(this, 2); }

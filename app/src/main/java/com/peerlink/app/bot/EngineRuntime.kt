@@ -97,6 +97,11 @@ internal object EngineRuntime {
                 Thread.sleep(200)
             }
             check(onRuntime { nativeLoadDatabase(base, files.database.absolutePath) }) { "Bot game database could not start" }
+            // The original Java resume callback checks kernel phase == 1.
+            // Framework onResume runs before our native window is attached;
+            // deliver its game-side notification once after the kernel/data
+            // startup, matching the successful full-application host.
+            gameHost?.engineReady()
             onRuntime {
                 client = nativeStart(base, uid)
                 if (client == 0L) return@onRuntime false
