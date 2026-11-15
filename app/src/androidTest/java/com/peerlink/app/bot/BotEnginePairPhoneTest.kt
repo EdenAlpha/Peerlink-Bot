@@ -29,9 +29,10 @@ class BotEnginePairPhoneTest {
         val start = args.getString("connectingStart")!!.toLong()
         val peerNat = args.getString("peerNat")?.toLongOrNull() ?: 271581233L
         val beforePeerDelay = args.getString("beforePeerDelayMs")?.toLongOrNull() ?: 0L
+        val splitCandidates = args.getString("splitCandidates") == "true"
         require(peerNat in 0..0xffffffffL && beforePeerDelay in 0..180_000)
         val squad = File(context.filesDir, "early-channel-test/squad.dto").readBytes()
-        val ferry = if (role == "A") PairFerry() else null
+        val ferry = if (role == "A") PairFerry(splitCandidates) else null
         try {
             assertTrue(EngineBridge.stageEngine(context))
             assertTrue(EngineHost.lastError, EngineHost.prepare(context, uid))
@@ -39,7 +40,8 @@ class BotEnginePairPhoneTest {
             if (beforePeerDelay > 0) Thread.sleep(beforePeerDelay)
             val port = if (role == "A") 39201 else 39202
             val record = requireNotNull(EngineHost.buildPeerRecord(peer,
-                "127.0.0.1", port, "127.0.0.1", port, peerNat,
+                "127.0.0.1", port, if (splitCandidates) "127.0.0.2" else "127.0.0.1",
+                if (splitCandidates) port + 2 else port, peerNat,
                 "::", 0, "::", 0, 0))
             assertTrue(EngineHost.setPeers(record))
             assertTrue(EngineHost.openSession(peer, start))
@@ -79,13 +81,13 @@ class BotEnginePairPhoneTest {
     /** Two plain UDP sockets forward original payloads without inspecting or
      * answering them. Learn only each native SDK's ephemeral source endpoint.
      */
-    private class PairFerry : AutoCloseable {
+    private class PairFerry(splitCandidates: Boolean) : AutoCloseable {
         private val running = AtomicBoolean(true)
-        private val sockets = arrayOf(39201, 39202).map {
-            DatagramSocket(InetSocketAddress("127.0.0.1", it)).apply { soTimeout = 100 }
+        private val sockets = (if (splitCandidates) arrayOf(39201, 39202, 39203, 39204) else arrayOf(39201, 39202)).map {
+            DatagramSocket(InetSocketAddress(if (it >= 39203) "127.0.0.2" else "127.0.0.1", it)).apply { soTimeout = 100 }
         }
         private val endpoints = arrayOfNulls<InetSocketAddress>(2)
-        private val pending = arrayOf(ArrayList<ByteArray>(), ArrayList<ByteArray>())
+        private val pending = Array(sockets.size) { ArrayList<ByteArray>() }
         private var traced = 0
         private val threads = sockets.indices.map { index ->
             Thread({
@@ -95,15 +97,15 @@ class BotEnginePairPhoneTest {
                         sockets[index].receive(packet)
                         synchronized(this) {
                             val source = packet.socketAddress as InetSocketAddress
-                            if (endpoints[index] != source)
+                            if (endpoints[index and 1] != source)
                                 Log.i("PeerlinkPairTest", "PAIR_ENDPOINT index=$index source=$source")
-                            endpoints[index] = source
+                            endpoints[index and 1] = source
                             val bytes = packet.data.copyOfRange(packet.offset, packet.offset + packet.length)
                             if (traced++ < 80) trace(index, bytes)
                             pending[index].add(bytes)
                             for (from in sockets.indices) {
-                                val to = 1 - from
-                                val destination = endpoints[to] ?: continue
+                                val to = from xor 1
+                                val destination = endpoints[to and 1] ?: continue
                                 for (bytes in pending[from])
                                     sockets[to].send(DatagramPacket(bytes, bytes.size, destination))
                                 pending[from].clear()
