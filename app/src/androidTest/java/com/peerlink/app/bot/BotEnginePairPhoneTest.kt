@@ -27,14 +27,19 @@ class BotEnginePairPhoneTest {
         val role = args.getString("pairRole") ?: error("Supply pairRole A or B")
         require(role == "A" || role == "B")
         val start = args.getString("connectingStart")!!.toLong()
+        val peerNat = args.getString("peerNat")?.toLongOrNull() ?: 271581233L
+        val beforePeerDelay = args.getString("beforePeerDelayMs")?.toLongOrNull() ?: 0L
+        require(peerNat in 0..0xffffffffL && beforePeerDelay in 0..180_000)
         val squad = File(context.filesDir, "early-channel-test/squad.dto").readBytes()
         val ferry = if (role == "A") PairFerry() else null
         try {
             assertTrue(EngineBridge.stageEngine(context))
             assertTrue(EngineHost.lastError, EngineHost.prepare(context, uid))
+            Log.i("PeerlinkPairTest", "PAIR_$role prepared; peerNat=$peerNat beforePeerDelayMs=$beforePeerDelay")
+            if (beforePeerDelay > 0) Thread.sleep(beforePeerDelay)
             val port = if (role == "A") 39201 else 39202
             val record = requireNotNull(EngineHost.buildPeerRecord(peer,
-                "127.0.0.1", port, "127.0.0.1", port, 271581233,
+                "127.0.0.1", port, "127.0.0.1", port, peerNat,
                 "::", 0, "::", 0, 0))
             assertTrue(EngineHost.setPeers(record))
             assertTrue(EngineHost.openSession(peer, start))
@@ -81,6 +86,7 @@ class BotEnginePairPhoneTest {
         }
         private val endpoints = arrayOfNulls<InetSocketAddress>(2)
         private val pending = arrayOf(ArrayList<ByteArray>(), ArrayList<ByteArray>())
+        private var traced = 0
         private val threads = sockets.indices.map { index ->
             Thread({
                 while (running.get()) {
@@ -88,8 +94,13 @@ class BotEnginePairPhoneTest {
                         val packet = DatagramPacket(ByteArray(65535), 65535)
                         sockets[index].receive(packet)
                         synchronized(this) {
-                            endpoints[index] = packet.socketAddress as InetSocketAddress
-                            pending[index].add(packet.data.copyOfRange(packet.offset, packet.offset + packet.length))
+                            val source = packet.socketAddress as InetSocketAddress
+                            if (endpoints[index] != source)
+                                Log.i("PeerlinkPairTest", "PAIR_ENDPOINT index=$index source=$source")
+                            endpoints[index] = source
+                            val bytes = packet.data.copyOfRange(packet.offset, packet.offset + packet.length)
+                            if (traced++ < 80) trace(index, bytes)
+                            pending[index].add(bytes)
                             for (from in sockets.indices) {
                                 val to = 1 - from
                                 val destination = endpoints[to] ?: continue
@@ -104,6 +115,23 @@ class BotEnginePairPhoneTest {
                     }
                 }
             }, "owned-pair-ferry-$index").apply { isDaemon = true; start() }
+        }
+        private fun trace(from: Int, bytes: ByteArray) {
+            fun u16(at: Int) = ((bytes[at].toInt() and 255) shl 8) or (bytes[at + 1].toInt() and 255)
+            if (bytes.size < 20) return
+            var at = 20
+            var kind = -1
+            var capability = "none"
+            while (at + 4 <= bytes.size) {
+                val tag = u16(at)
+                val count = u16(at + 2)
+                if (at + 4 + count > bytes.size) break
+                if (tag == 0x9090 && count >= 1) kind = bytes[at + 4].toInt() and 255
+                if (tag == 0x909d && count == 4)
+                    capability = bytes.copyOfRange(at + 4, at + 8).joinToString("") { "%02x".format(it.toInt() and 255) }
+                at += 4 + count
+            }
+            Log.i("PeerlinkPairTest", "PAIR_FRAME from=$from op=${u16(0).toString(16)} bytes=${bytes.size} kind=$kind capability=$capability")
         }
         override fun close() {
             running.set(false)
