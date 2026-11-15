@@ -506,7 +506,7 @@ class BotMatchFlow(
         }
     }
 
-    /** Observe the original SDK; heartbeat/message dispatch run on its runtime thread. */
+    /** Read the original transport state; its SDK operations remain with the game. */
     private fun watchEngineVerdict() {
         Thread({
             var last = -1L
@@ -514,7 +514,7 @@ class BotMatchFlow(
             while (PeerSlot.engineAttached && System.currentTimeMillis() < until) {
                 val verdict = EngineHost.check()
                 if (verdict != last) {
-                    AppState.appendLog("[BOT-FLOW  ] original engine verdict=$verdict heard=${PeerSlot.engineHeard}")
+                    AppState.appendLog("[BOT-FLOW  ] native transport connected=${verdict == 1L} heard=${PeerSlot.engineHeard}")
                     last = verdict
                     if (verdict == 1L) {
                         com.peerlink.app.service.PeerBotService.status("Game connection established — waiting for match setup")

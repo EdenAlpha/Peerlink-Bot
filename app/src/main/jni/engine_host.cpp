@@ -567,9 +567,12 @@ JNIEXPORT jlongArray JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeSnaps
         // Read the application's original published frame counter. Never
         // advance its heartbeat or manually tick the engine from this host.
         state[20] = entry<uint32_t (*)()>(0x2f4b5bc)();
-        // The SDK verdict routine also updates its connection bookkeeping.
-        // A high-frequency diagnostic read must not invoke it more often.
-        state[1] = passive ? -1 : (g_client ? entry<uint32_t (*)(uintptr_t)>(0x7e013ac)(g_client) : 0);
+        // 7e013ac is an active SDK operation, not a status getter. Calling it
+        // from a snapshot races the original application's network owner
+        // (observed crash: 6922030 through 7e014e0 on engine-runtime).
+        // Keep the append-only slot as unavailable; all connection predicates
+        // below use the original session/channel/model states instead.
+        state[1] = -1;
         uintptr_t manager = session_manager();
         if (manager) {
             entry<void (*)(uintptr_t)>(0x2f39738)(manager);

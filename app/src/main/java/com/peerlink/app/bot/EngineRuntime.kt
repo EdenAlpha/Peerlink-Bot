@@ -11,7 +11,6 @@ import java.util.concurrent.TimeUnit
 /** Original game runtime, confined to the private :botengine process. */
 internal object EngineRuntime {
     const val ENGINE_SHA256 = "2cea0c85344d7d7f295aea1c2353621f02db78dbccd888a0a21a0508ac330659"
-    private const val CLIENT_CHECK = 0x7e013acL
     const val BLOCK_SIZE = 0x80
     const val RECORD_SIZE = 0x218
 
@@ -147,10 +146,10 @@ internal object EngineRuntime {
         client != 0L && nativePeerTurnAddress(base, input)
     }
 
-    /** Original SDK's own verdict. No connection state is changed here. */
-    fun check(): Long = onRuntime {
-        if (client == 0L) 0L else nativeCall(base, CLIENT_CHECK, client, 0, 0, 0)
-    }
+    /** Compatibility status query, derived only from published native states.
+     * The SDK's check routine performs network work and belongs to the app's
+     * original runtime; it must never be called by a status watcher. */
+    fun check(): Long = if (EngineSnapshot(snapshot(passive = true)).transportConnected) 1L else 0L
 
     fun buildBlock(family: Int, address: String, port: Int): ByteArray? = onRuntime {
         if (base == 0L) return@onRuntime null
