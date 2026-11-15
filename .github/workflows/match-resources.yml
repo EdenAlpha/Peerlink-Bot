@@ -1,0 +1,22 @@
+name: Publish verified match resources
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  resources:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 -m pip install pycryptodome
+      - name: Restore only hash-pinned game resources from the owned archive
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 tools/publish_match_resources.py
+      - name: Publish the verified companion files
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload engine-resources-11.1.1 match-resource-output/* --clobber
+          gh release edit engine-resources-11.1.1 --draft=false --prerelease
