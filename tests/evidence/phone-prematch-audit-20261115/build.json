@@ -10,5 +10,13 @@
   "phone_game_kickoff_verified": false,
   "native_match_load_passed": false,
   "unhooked_native_tests": true,
-  "loading_context_fresh": false
+  "loading_context_fresh": false,
+  "release": {
+    "url": "https://github.com/EdenAlpha/Peerlink-Bot/releases/tag/phone-engine-test-28b0fc4",
+    "tag": "phone-engine-test-28b0fc4",
+    "commit": "28b0fc42261796147526ea7cc0a44308cc2e77ea",
+    "asset_url": "https://github.com/EdenAlpha/Peerlink-Bot/releases/download/phone-engine-test-28b0fc4/peerlink-debug.apk",
+    "asset_sha256": "sha256:32911a4bf3b92a54600b71f394d29fdc4d8ec816629bd0c7016c618688d762a2",
+    "publish_workflow_run": 43719822934
+  }
 }
