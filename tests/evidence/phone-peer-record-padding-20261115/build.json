@@ -1,0 +1,21 @@
+{
+  "commit": "eaf7f2aafc30ae91ab56964d7a91ef7716de3b8e",
+  "ci_run": 43679894976,
+  "ci_conclusion": "success",
+  "unit_task": ":app:testDebugUnitTest",
+  "native_turn_exchange_test_count": 11,
+  "host_android_apis_passed": [
+    34,
+    35
+  ],
+  "artifact_id": 14147764561,
+  "artifact_archive_sha256": "5a13e7bb6a7c909ed73eb7ca0833b1f1ff01610d11fb6f84dff5f4b862547e6f",
+  "publish_run": 43680308128,
+  "release_tag": "phone-engine-test-eaf7f2a",
+  "published_apk_sha256": "c4bacacbfb9a05561802aee242bdc3eeeb6ed643b5ea94680d37092a3ca367c6",
+  "published_apk_size": 35775239,
+  "original_callback_verified_by": "Read-only pinned ARM64 instructions in original-callback.txt",
+  "native_code_changed": false,
+  "new_native_pair_run": false,
+  "physical_phone_kickoff_verified": false
+}

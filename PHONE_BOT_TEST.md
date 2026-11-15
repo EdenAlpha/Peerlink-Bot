@@ -60,26 +60,36 @@ use and phone-game kickoff require separate evidence.
 
 ## Verification
 
-The current connection-test APK is `0979e4c`, published as
-[`phone-engine-test-0979e4c`](https://github.com/EdenAlpha/Peerlink-Bot/releases/tag/phone-engine-test-0979e4c).
-The latest phone export reached configured native transport and SDK verdict 1,
-then the driver's peer-record length check stopped setup before GameID.
-This patch accepts GET/WATCH records without the size metadata supplied on
-SEND, uses their decoded byte length, and retains native-input bounds and
-validation of explicit sizes. It also reports declared/decoded counts on an
-actual mismatch. The failed reply body is not present in the phone export.
+The current connection-test APK is `eaf7f2a`, published as
+[`phone-engine-test-eaf7f2a`](https://github.com/EdenAlpha/Peerlink-Bot/releases/tag/phone-engine-test-eaf7f2a).
+The latest phone export identifies the precise parser error: the server
+reported 7 valid bytes inside a decoded 20-byte buffer. The driver required
+equal lengths and stopped before the server connection report and GameID.
+Original callback `0x7e8f444` passes the declared payload count to the original
+native input. PeerLink now follows that contract: it forwards the valid prefix,
+ignores unused capacity and zero-length replies, and rejects truncated or
+oversized data. Omitted size metadata retains decoded-length handling.
 
-All JVM tests, including seven peer-record tests, and Android 14/15 host
+All JVM tests, including eleven peer-record tests, and Android 14/15 host
 checks passed in
-[Android CI run 43678511111](https://github.com/EdenAlpha/Peerlink-Bot/actions/runs/43678511111).
-The new coverage exercises the production MessagePack decoder and shared
-connection phase. It is not a new native match test. The engine and ferry are
-unchanged; physical-phone kickoff and visible bot Pass still require a fresh
-match. Evidence is in
-[`tests/evidence/phone-peer-record-size-20261115`](tests/evidence/phone-peer-record-size-20261115/README.md).
+[Android CI run 43679894976](https://github.com/EdenAlpha/Peerlink-Bot/actions/runs/43679894976).
+The new tests exercise 7-in-20 and 19-in-20 replies through the production
+MessagePack decoder/shared connection phase, padding deduplication, empty
+replies and invalid lengths. Pinned native callback instructions and sanitized
+phone evidence are in
+[`tests/evidence/phone-peer-record-padding-20261115`](tests/evidence/phone-peer-record-padding-20261115/README.md).
+This is parser/phase verification; physical-phone kickoff and visible bot Pass
+remain unverified. The original native engine, JNI, controller and ferry are
+unchanged by this patch.
 
 Current APK SHA-256:
-`a32fb24f69c098b97be03c54576a4a7ccb9e00e99bd63d40ccd0eb96ca427eb0`.
+`c4bacacbfb9a05561802aee242bdc3eeeb6ed643b5ea94680d37092a3ca367c6`.
+
+The previous parser-test APK was `0979e4c`, published as
+[`phone-engine-test-0979e4c`](https://github.com/EdenAlpha/Peerlink-Bot/releases/tag/phone-engine-test-0979e4c).
+It accepted omitted size metadata but still rejected valid padded buffers.
+Its historical test evidence is in
+[`tests/evidence/phone-peer-record-size-20261115`](tests/evidence/phone-peer-record-size-20261115/README.md).
 
 The previous configuration-test APK was `4389161`, published as
 [`phone-engine-test-4389161`](https://github.com/EdenAlpha/Peerlink-Bot/releases/tag/phone-engine-test-4389161).
@@ -102,7 +112,7 @@ Previous configuration-test APK SHA-256:
 The previous connection-report APK was `f1fd6f0`, published as
 [`phone-engine-test-f1fd6f0`](https://github.com/EdenAlpha/Peerlink-Bot/releases/tag/phone-engine-test-f1fd6f0).
 It allowed the server report and GameID setup to proceed after native transport
-confirmation. The latest physical export confirms that progression, then shows
+confirmation. The physical export from that build confirms the progression, then shows
 the data channels remaining closed. Its earlier report-order evidence remains
 in [`tests/evidence/phone-connection-report-20261115`](tests/evidence/phone-connection-report-20261115/README.md).
 

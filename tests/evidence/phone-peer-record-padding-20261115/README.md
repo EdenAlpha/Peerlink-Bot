@@ -1,0 +1,11 @@
+# Declared payload length inside a padded native peer record
+
+The physical-phone export after `0979e4c` gives the missing contract detail: `declared=7, decoded=20`. At 06:02:37.838 (device-local time), PeerLink's exact-size check stopped the driver before the server connection report or GameID request. The separately running original SDK later reported verdict 1 at 06:02:41.798. This was an integration parser failure; it does not establish a native engine crash or kickoff. The sanitized observation is in `phone-observation.json`.
+
+The previous missing-field fix did not address padded buffers. Original callback `0x7e8f444` passes the response's data pointer and declared payload count separately to original input `0x7e23714`. That input copies exactly the declared count and treats zero as no data. Relevant pinned ARM64 instructions are in `original-callback.txt`.
+
+Commit `eaf7f2a` bounds the decoded buffer at 2048 bytes, validates the declared count against available bytes, and supplies only that prefix to the existing native input. For the observed shape, 7 bytes are forwarded from a 20-byte buffer. No payload bytes are rewritten or padding sent as payload. Missing count metadata retains the previous decoded-length behavior. Zero-length input is ignored; oversized/truncated/overflowing inputs remain rejected. Deduplication compares the valid payload, so unused padding changes do not repeat the native input.
+
+Regression tests include the observed 7-in-20 shape through the production MessagePack decoder and shared connection phase; a 19-in-20 WATCH reply; differing unused padding; a zero-length reply followed by a valid WATCH reply; exact binary delivery; omitted metadata; and malformed bounds. The test byte pattern reuses the previously observed native address sample, rather than claiming to replay the latest reply's undisclosed bytes. Callback and connection-state functions are test doubles in these JVM tests. They do not prove a fresh native match or physical-phone kickoff.
+
+CI/release identity is recorded in `build.json` when available. The original native engine, JNI input, controller, ferry and graphics are unchanged by this parser correction. No account IDs, session values or raw packet captures are committed.

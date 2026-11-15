@@ -1,0 +1,22 @@
+Pinned eFootball 11.1.1 ARM64 engine
+SHA-256 2cea0c85344d7d7f295aea1c2353621f02db78dbccd888a0a21a0508ac330659
+Read-only instruction inspection; no engine patch.
+
+Original response callback:
+7e8f468: add x1, x19, #0x960
+7e8f46c: ldr w2, [x19, #0x978]
+7e8f470: bl #0x7e23714
+
+The callback supplies the data address and declared length separately.
+
+Original input:
+7e2372c: mov w21, w2
+7e23730: cbz w2, #0x7e237d4
+7e237a8: mov x0, x23
+7e237ac: mov x1, x20
+7e237b0: mov x2, x21
+7e237b4: bl #0x8c1bc70
+7e237b8: str x21, [x19, #0xb0]
+
+The original input copies the declared count and retains that count.
+It does nothing for a zero-length record. Buffer capacity is not payload length.

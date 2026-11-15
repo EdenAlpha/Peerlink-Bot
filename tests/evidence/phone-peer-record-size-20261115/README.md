@@ -9,3 +9,5 @@ Commit `0979e4c` uses the decoded record length when size metadata is absent. It
 Regression tests cover GET and WATCH replies without the SEND size field through the production MessagePack decoder, unchanged byte-for-byte native delivery, progression through the shared connection phase, explicit mismatches, oversized records without size metadata, and overflowing declared sizes. They do not simulate a successful physical-phone kickoff. The existing native engine/ferry implementation is unchanged by this parser patch.
 
 Build/release verification is recorded in `build.json` after CI completes. Physical-phone kickoff and visible bot control still require a new match test.
+
+The following phone export (`peerlink_match_1794719131390.zip`) supplied the precise values: declared payload 7 bytes, decoded buffer 20 bytes. The strict-equality check retained by this build still rejected that valid shape. Commit `eaf7f2a` follows the original native callback's separate payload count; see [the subsequent correction](../phone-peer-record-padding-20261115/README.md). This directory records the earlier, incomplete parser fix.
