@@ -1,0 +1,24 @@
+{
+  "android-host-service-tests-api-34": {
+    "totalCases": 8,
+    "importTest": {
+      "class": "com.peerlink.app.bot.GameResourceImportProviderTest",
+      "name": "shellCanCopyOnlyTheGrantedFileAndGrantExpires",
+      "seconds": "2.78",
+      "passed": true
+    },
+    "artifactId": 14180119919,
+    "artifactSha256": "3f45220faa88a0feabf418effb2db943538b67109f79876a872d09e64a7dea3c"
+  },
+  "android-host-service-tests-api-35": {
+    "totalCases": 8,
+    "importTest": {
+      "class": "com.peerlink.app.bot.GameResourceImportProviderTest",
+      "name": "shellCanCopyOnlyTheGrantedFileAndGrantExpires",
+      "seconds": "2.718",
+      "passed": true
+    },
+    "artifactId": 14181235535,
+    "artifactSha256": "81de40937b3364b5e3196fbbe6cb6971fd6473e90ea23542de16a25dae73ce09"
+  }
+}

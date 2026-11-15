@@ -1,0 +1,10 @@
+{
+  "sourceCommit": "7abcf970b8236f3f1f00dec520d88eb9a59894f1",
+  "ciRun": 43761775854,
+  "publicationRun": 43762370944,
+  "artifactId": 14180782542,
+  "artifactSha256": "a5569a4b675cd5d0700c52f3bd39d3b6fb4681d40617f0444b0636a3bbdd974c",
+  "apkSha256": "5217ca067613659cad3faa316d92dc5bd896064e0737db0c506367e1ad355bdc",
+  "apkBytes": 35838148,
+  "release": "https://github.com/EdenAlpha/Peerlink-Bot/releases/tag/phone-engine-test-7abcf97"
+}

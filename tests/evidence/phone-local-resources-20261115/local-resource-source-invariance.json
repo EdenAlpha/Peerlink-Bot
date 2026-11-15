@@ -1,0 +1,10 @@
+{
+  "reference": "6c7d0a97bb0a0ad8f397afc5601aac78e36239b2",
+  "candidate": "7abcf970b8236f3f1f00dec520d88eb9a59894f1",
+  "unchanged": {
+    "app/src/main/jni": true,
+    "app/src/main/engine-bridge": true,
+    "app/src/main/java/com/peerlink/app/bot/EngineRuntime.kt": true,
+    "app/src/main/assets/game-host/match-resources-11.1.1.tsv": true
+  }
+}
