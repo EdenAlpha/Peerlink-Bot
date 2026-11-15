@@ -114,6 +114,30 @@ class BotEngineTurnPairPhoneTest {
             assertTrue("Independent native monitor did not reach the export log",
                 AppState.getLogs().contains("[BOT-DIAG] NATIVE_STATE"))
             Log.i("PeerlinkTurnTest", "ORIGINAL_CONFIGURED_TURN_${role}_DIAGNOSTICS_ACTIVE")
+            // Explicit private lab fixture for observing the later production
+            // loading path. A retained context is not fresh authentication or
+            // proof of a server-authorized kickoff.
+            if (args.getString("matchLoadingProbe") == "true") {
+                val contextInput = java.nio.ByteBuffer.wrap(File(root, "context.dto").readBytes())
+                    .order(java.nio.ByteOrder.LITTLE_ENDIAN)
+                require(contextInput.int == 0x31494752 && contextInput.int.toLong() == uid)
+                val gameId = contextInput.long
+                contextInput.int // team ID is read from the squad by the production adapter.
+                val sidSize = contextInput.int
+                val categorySize = contextInput.int
+                val keywordSize = contextInput.int
+                require(sidSize in 1..512 && categorySize in 1..64 && keywordSize == 8)
+                require(contextInput.remaining() == sidSize + categorySize + keywordSize)
+                val sid = ByteArray(sidSize).also { contextInput.get(it) }.toString(Charsets.UTF_8)
+                assertTrue("Production match setup rejected the private fixture",
+                    EngineHost.setupMatch(peer, gameId, sid, squad))
+                assertTrue(EngineHost.startInputTest(true))
+                repeat(30) {
+                    Thread.sleep(1000)
+                    val loading = EngineHost.snapshot()
+                    Log.i("PeerlinkTurnTest", "MATCH_LOADING_PROBE_$role state=${loading.values.contentToString()}")
+                }
+            }
             if (args.getString("diagnosticPeerStop") == "true" && role == "A") {
                 // B closes its actual process after the same successful hold.
                 // Observe exported logs only: no driver/RPC polling to hide
