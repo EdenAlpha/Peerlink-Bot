@@ -677,11 +677,17 @@ JNIEXPORT jboolean JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeOpenSes
         uintptr_t sdk = entry<uintptr_t (*)()>(0x7db9468)();
         if (sdk) {
             entry<void (*)(uintptr_t, uint32_t, uint32_t, uint32_t)>(0x7db99ec)(sdk, static_cast<uint32_t>(connecting_start), 0, 1);
-            accepted = entry<uint32_t (*)(uintptr_t, const void *)>(0x7cf16fc)(manager, config);
+            uintptr_t holder = *reinterpret_cast<uintptr_t *>(g_base + 0xa535738);
+            uintptr_t provider = holder ? *reinterpret_cast<uintptr_t *>(holder) : 0;
+            // TaskMatchSession enters through OnlineSystemMultiplay, which
+            // prepares its transport provider before creating the session.
+            // Calling only the inner session factory bypasses that setup.
+            if (provider) accepted = entry<uint32_t (*)(uintptr_t, const void *)>(0x7cc4608)(provider, config);
         }
     }
     entry<void (*)(void *)>(0x7b33bf8)(config);
     free(request);
+    __android_log_print(ANDROID_LOG_INFO, TAG, "original provider session accepted=%u", accepted & 1);
     return accepted & 1 ? JNI_TRUE : JNI_FALSE;
 }
 
