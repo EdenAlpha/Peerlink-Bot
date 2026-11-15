@@ -1,6 +1,9 @@
 name: Publish verified match resources
 on:
   workflow_dispatch:
+  push:
+    branches: [feat/phone-match-test]
+    paths: [.github/workflows/match-resources.yml]
 permissions:
   contents: write
 jobs:
