@@ -1,0 +1,35 @@
+{
+  "sourceManifest": "app/src/main/assets/game-host/match-resources-11.1.1.tsv",
+  "sourceManifestSha256": "c0b39107077902a86871ffaf89d68625eee98c40bd112e7995527fad48ab73b5",
+  "allSourceFilesVerifiedBySizeAndSha256": true,
+  "files": 63,
+  "inputBytes": 2184159958,
+  "targetBytes": 500000000,
+  "measurements": [
+    {
+      "method": "ZIP Deflate level 9",
+      "files": 63,
+      "inputBytes": 2184159958,
+      "compressedBytes": 2164430561,
+      "compressedDecimalMB": 2164.430561,
+      "compressedFraction": 0.9909670548955279,
+      "reductionPercent": 0.9032945104472057,
+      "elapsedSeconds": 55.06507329602027,
+      "targetBytes": 500000000,
+      "meets500MBTarget": false
+    },
+    {
+      "method": "tar + Zstandard level 9, 2 workers",
+      "files": 63,
+      "inputBytes": 2184159958,
+      "compressedBytes": 2114162022,
+      "compressedDecimalMB": 2114.162022,
+      "compressedFraction": 0.9679520102254342,
+      "reductionPercent": 3.20479897745658,
+      "elapsedSeconds": 4.858724763995269,
+      "targetBytes": 500000000,
+      "meets500MBTarget": false
+    }
+  ],
+  "scope": "Full set compressed losslessly, streamed into byte counters; no private account/session files or game state changes. No downloadable compressed artifact was created."
+}
