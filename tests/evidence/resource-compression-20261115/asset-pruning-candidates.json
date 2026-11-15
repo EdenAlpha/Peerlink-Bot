@@ -1,0 +1,84 @@
+{
+  "source": "original-package-chunks-v96.json; original AssetRegistry package-to-chunk assignments",
+  "catalogPackages": 147583,
+  "catalogSha256": "f54c354f83111508b79e8db89d1af9b4c9058f0842102e2f85258adeb5ba805a",
+  "scope": "Candidate identification only. AssetRegistry chunk assignments are not a runtime dependency trace. Whole-pack byte sizes are not proven removable-byte totals. No resources or app manifests were changed.",
+  "candidates": [
+    {
+      "category": "Detailed real faces and cosmetic face construction",
+      "registryChunk": 3611,
+      "packGroup": "pc3611_mobile_and",
+      "wholeGroupBytes": 151570188,
+      "assignedPackages": 31675,
+      "matchingPrefixPackages": 31200,
+      "samplePackages": [
+        "/Game/Assets/character/RealFace/ABP_119153ep01v0032_HairBone",
+        "/Game/Assets/character/RealFace/ABP_119153_HairBone",
+        "/Game/Assets/character/RealFace/ABP_127516_HairBone",
+        "/Game/Assets/character/RealFace/ABP_128078_HairBone"
+      ],
+      "safeToRemoveAsWholePack": null
+    },
+    {
+      "category": "Stadium/scenery and props",
+      "registryChunk": 3001,
+      "packGroup": "pc3001_mobile_and",
+      "wholeGroupBytes": 258296842,
+      "assignedPackages": 4644,
+      "matchingPrefixPackages": 1379,
+      "samplePackages": [
+        "/Game/Assets/bg/Stadium/common/ad/T_ad_acl_bsm",
+        "/Game/Assets/bg/Stadium/common/banner/Textures/T_banner1_01_nrm",
+        "/Game/Assets/bg/Stadium/common/base/BPFL_TeamSymbolsInfo",
+        "/Game/Assets/bg/Stadium/common/base/TeamSymbols/RT_DemoGeneral2"
+      ],
+      "safeToRemoveAsWholePack": null
+    },
+    {
+      "category": "Separate Parkour mode",
+      "registryChunk": 4000,
+      "packGroup": "pc4000_mobile_and",
+      "wholeGroupBytes": 37378563,
+      "assignedPackages": 757,
+      "matchingPrefixPackages": 757,
+      "samplePackages": [
+        "/Game/Parkour/DT_UIImageMaterial_Parkour",
+        "/Game/Parkour/Parkour",
+        "/Game/Parkour/ParkourPlayerManager",
+        "/Game/Parkour/BG/Stadium/st093/Materials/MI_st093_CircleMonitor_Em"
+      ],
+      "safeToRemoveAsWholePack": null
+    },
+    {
+      "category": "Movies and player-acquisition presentation",
+      "registryChunk": 7000,
+      "packGroup": "pc7000_mobile_and",
+      "wholeGroupBytes": 133027577,
+      "assignedPackages": 393,
+      "matchingPrefixPackages": 393,
+      "samplePackages": [
+        "/Game/Movies/advice/01/advice_01_am",
+        "/Game/Movies/advice/01/advice_01_am_Texture",
+        "/Game/Movies/advice/02/advice_02_am",
+        "/Game/Movies/advice/02/advice_02_am_Texture"
+      ],
+      "safeToRemoveAsWholePack": null
+    },
+    {
+      "category": "Mixed UI, including required match preview",
+      "registryChunk": 1000,
+      "packGroup": "pc1000_mobile_and",
+      "wholeGroupBytes": 370669977,
+      "assignedPackages": 78712,
+      "matchingPrefixPackages": 77814,
+      "samplePackages": [
+        "/Game/Assets/ui/Data/Symbol/Blank/coach_dummy",
+        "/Game/Assets/ui/Data/Symbol/Blank/emblemLC_blank",
+        "/Game/Assets/ui/Data/Symbol/Blank/emblemLC_blank_l",
+        "/Game/Assets/ui/Data/Symbol/Blank/emblemLC_blank_ll"
+      ],
+      "safeToRemoveAsWholePack": null
+    }
+  ],
+  "under500MBBundleValidated": false
+}

@@ -18,3 +18,17 @@ bundle. An asset-subset or repacking approach has not been validated. Lossless
 archive compression also leaves the original approximately 2.2 GB expanded
 resource footprint unchanged. The existing Android loader was not changed to
 consume a compressed archive, and no new APK is claimed by this experiment.
+
+
+## Candidate content, not a validated reduced bundle
+
+The original registry contains 147,583 package paths. It assigns detailed
+real-face assets to chunk 3611, stadium/scenery and props to 3001, a separate
+Parkour mode to 4000, movies/presentation to 7000 and mixed UI to 1000. These
+are concrete categories to investigate for a bot without visible graphics.
+The candidate JSON retains counts, sample paths and whole-group byte sizes.
+Those group sizes must not be described as established savings: registry
+assignments are not a runtime dependency trace, and required/optional packages
+can share containers. In particular chunk 1000 contains the match-preview
+widget whose earlier absence blocked loading. No pack has been removed or
+repacked by this analysis, and no under-500-MB set has been validated.
