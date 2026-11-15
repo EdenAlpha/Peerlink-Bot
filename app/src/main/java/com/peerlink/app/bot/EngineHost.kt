@@ -187,6 +187,7 @@ object EngineHost {
         Bundle().apply { putBoolean("controllerAllowed", controllerAllowed) }).getBoolean("ok")
     fun pass(): Boolean = request(EngineProtocol.PASS).getBoolean("ok")
     internal fun probeController(): Boolean = request(EngineProtocol.PROBE_CONTROLLER).getBoolean("ok")
+    internal fun probePreviewCallback(): Boolean = request(EngineProtocol.PROBE_PREVIEW).getBoolean("ok")
     fun stop(reason: String = "engine_host_stop") {
         stopRequestedAt = SystemClock.elapsedRealtime()
         AppState.appendLog("[BOT-DIAG] PEERLINK_STOP component=engine_host reason=$reason observedAtMs=$stopRequestedAt")
@@ -220,6 +221,7 @@ internal object EngineProtocol {
     const val TRANSPORT_IO_READY = 18
     const val REVISION_POLICY = 19
     const val LOADING_DIAGNOSTICS = 20
+    const val PROBE_PREVIEW = 21
     const val STATUS = 100
     const val NATIVE_STATE = 101
     const val DIAGNOSTIC = 102

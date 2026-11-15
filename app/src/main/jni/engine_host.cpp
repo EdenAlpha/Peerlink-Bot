@@ -1,5 +1,6 @@
 // Original build-B entry points, owned input DTOs, and real Android JNI input.
-// No fake JavaVM, connection-state writes or replacement game callbacks.
+// No fake JavaVM or connection-state writes. Preview inputs temporarily wrap
+// the menu tick and restore it before forwarding the original callback.
 #include <jni.h>
 #include <dlfcn.h>
 #include <android/asset_manager_jni.h>
@@ -29,6 +30,10 @@ uint32_t peerlink_lab_uid_participants(uintptr_t, uint32_t, uint32_t, uint32_t);
 uintptr_t peerlink_original_online_inputs_v224(uintptr_t, uint32_t, uint32_t);
 long peerlink_live_match_context_input(uintptr_t, const char *);
 long peerlink_original_preview_proceed_v271(uintptr_t);
+long peerlink_preview_drive(uintptr_t);
+long peerlink_preview_probe(uintptr_t);
+void peerlink_preview_stop();
+void peerlink_preview_diagnostics(char *, size_t);
 }
 
 #define TAG "PeerlinkEngineHost"
@@ -370,6 +375,9 @@ JNIEXPORT jstring JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeLoadingD
     std::string text = "MATCH_LOADING hostStage=" + std::to_string(g_match_stage) +
         " previewEventSubmitted=" + std::to_string(g_preview_proceeded) +
         " userDataSyncComplete=" + std::to_string(g_user_sync_complete);
+    char preview[512];
+    peerlink_preview_diagnostics(preview, sizeof(preview));
+    text += " "; text += preview;
     uintptr_t user_sync = attached_task(lock.manager, g_user_sync_task, g_base + 0x990d9c8);
     if (user_sync) text += " userDataSyncState=" + std::to_string(*reinterpret_cast<uint32_t *>(user_sync + 0x70));
     uintptr_t root = entry<uintptr_t (*)()>(0x7a87db8)();
@@ -532,8 +540,12 @@ JNIEXPORT jint JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeAdvanceMatc
         entry<void (*)(uintptr_t, const char *)>(0x6aa70a8)(flow + 0x118, "Online/Match/MatchProcessPreMenu");
         g_match_stage = 2;
     }
-    if (g_match_stage == 2 && !g_preview_proceeded && peerlink_original_preview_proceed_v271(g_base) == 1)
-        g_preview_proceeded = true;
+    if (g_match_stage == 2 && !g_preview_proceeded) {
+        long preview = peerlink_preview_drive(g_base);
+        if (preview == -2) { peerlink_preview_stop(); return -209; }
+        if (preview < 0) { peerlink_preview_stop(); return -210; }
+        if (preview == 1) g_preview_proceeded = true;
+    }
     // Explicit controller configuration for the test, permitted only by the
     // current room's server response. These are original input setters, not
     // proof that the server field's full native model mapping has been ported.
@@ -670,6 +682,17 @@ JNIEXPORT jboolean JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeProbeCo
     entry<void (*)()>(0x6772fbc)();
     if (env->ExceptionCheck() || !neutral_event(env)) return JNI_FALSE;
     return entry<unsigned char (*)(uint32_t)>(0x6773d1c)(0) ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT jboolean JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativePreviewProbe(
+        JNIEnv *, jobject, jlong base) {
+    if (!valid(base) || !g_core_ready || g_match_stage) return JNI_FALSE;
+    TaskLock lock;
+    return lock.manager && peerlink_preview_probe(g_base) >= 0 ? JNI_TRUE : JNI_FALSE;
+}
+JNIEXPORT void JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeStopPreview(
+        JNIEnv *, jobject, jlong base) {
+    if (valid(base)) peerlink_preview_stop();
 }
 JNIEXPORT jlong JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeLoad(
         JNIEnv *env, jobject, jstring path) {

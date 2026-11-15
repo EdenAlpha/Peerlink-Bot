@@ -95,12 +95,14 @@ class BotEngineService : Service() {
                 }
                 EngineProtocol.PASS -> result.putBoolean("ok", pressPass())
                 EngineProtocol.PROBE_CONTROLLER -> result.putBoolean("ok", EngineRuntime.probeController())
+                EngineProtocol.PROBE_PREVIEW -> result.putBoolean("ok", EngineRuntime.probePreviewCallback())
                 EngineProtocol.STOP -> {
                     diagnostic("PEERLINK_STOP component=engine_service reason=stop_command")
                     sampleDiagnostics()
                     diagnosticTask?.cancel(false)
                     testing = false
                     pollTask?.cancel(false)
+                    EngineRuntime.stopPreview()
                     EngineRuntime.neutral()
                     keyDown = false
                     result.putBoolean("ok", true)
@@ -182,6 +184,8 @@ class BotEngineService : Service() {
                     -206 -> "The bot's user-data synchronization stopped before completion"
                     -207 -> "The bot's user-data synchronization timed out"
                     -208 -> "The bot's server match context was rejected"
+                    -209 -> "The bot's match-preview menu did not finish loading"
+                    -210 -> "The bot could not queue its match-preview step on the game thread"
                     else -> "Bot match setup failed"
                 }
                 "$reason (native stage $advance)"

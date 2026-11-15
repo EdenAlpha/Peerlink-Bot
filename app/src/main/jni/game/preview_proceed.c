@@ -6,6 +6,7 @@ long peerlink_original_preview_proceed_v271(uptr base){
  uptr flow=*(uptr*)(base+0xa53b6e8),task=flow?*(uptr*)(flow+0x190):0;
  uptr storage=*(uptr*)(base+0x99ed5a0),map=storage?*(uptr*)storage:0;
  if(!flow||!task||!map||!(*(unsigned char*)(flow+0x170)&1))return -2;
+ if(*(unsigned*)(flow+0x120)!=7)return -8;
  uptr a=*(uptr*)(task+0x70),e=*(uptr*)(task+0x78);if(!a||e<a||(e-a)%0xe0||e-a>0x1c00)return -3;
  uptr last=e>=a+0xe0?e-0xe0:0;if(!last||strcmp(value((unsigned char*)last),"Match/Settings/MatchPreview"))return -4;
  unsigned char in[24]={14,'p','r','o','c','e','e','d',0},out[24]={0};

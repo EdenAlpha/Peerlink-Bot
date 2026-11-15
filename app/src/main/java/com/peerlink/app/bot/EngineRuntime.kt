@@ -231,7 +231,9 @@ internal object EngineRuntime {
     }
     fun neutral() = onRuntime { if (base != 0L) nativeNeutralInput(base) }
     fun probeController(): Boolean = onRuntime { base != 0L && nativeProbeController(base) }
-    fun closeHost() { gameHost?.close(); gameHost = null }
+    fun probePreviewCallback(): Boolean = onRuntime { base != 0L && nativePreviewProbe(base) }
+    fun stopPreview() = onRuntime { if (base != 0L) nativeStopPreview(base) }
+    fun closeHost() { stopPreview(); gameHost?.close(); gameHost = null }
 
     private external fun nativeLoad(path: String): Long
     private external fun nativeBeginIntroduction(base: Long, peer: Long, connectingStart: Long): Boolean
@@ -254,6 +256,8 @@ internal object EngineRuntime {
     private external fun nativeInputKey(base: Long, code: Int, action: Int): Boolean
     private external fun nativeNeutralInput(base: Long)
     private external fun nativeProbeController(base: Long): Boolean
+    private external fun nativePreviewProbe(base: Long): Boolean
+    private external fun nativeStopPreview(base: Long)
     private external fun nativeStart(base: Long, uid: Long): Long
     private external fun nativeSetPeers(base: Long, record: ByteArray): Boolean
     private external fun nativeOpenSession(base: Long, peer: Long, connectingStart: Long): Boolean

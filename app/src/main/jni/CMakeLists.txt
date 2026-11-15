@@ -47,7 +47,8 @@ add_library(peerlinkbackend SHARED
         game/online_inputs.c
         game/match_context.c
         game/participants.c
-        game/preview_proceed.c)
+        game/preview_proceed.c
+        game/preview_host.cpp)
 
 target_link_libraries(peerlinkbackend c++_shared log android dl)
 
