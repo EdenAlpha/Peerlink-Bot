@@ -176,7 +176,16 @@ class BotEngineService : Service() {
     private fun poll() {
         try {
             val advance = EngineRuntime.advanceMatch(controllerAllowed)
-            check(advance >= 0) { "Bot match setup failed (stage $advance)" }
+            check(advance >= 0) {
+                val reason = when (advance) {
+                    -205 -> "The bot's user-data task disappeared before completion"
+                    -206 -> "The bot's user-data synchronization stopped before completion"
+                    -207 -> "The bot's user-data synchronization timed out"
+                    -208 -> "The bot's server match context was rejected"
+                    else -> "Bot match setup failed"
+                }
+                "$reason (native stage $advance)"
+            }
             val state = snapshot()
             logNativeState(state)
             val line = state.status()

@@ -492,12 +492,6 @@ JNIEXPORT jint JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeAdvanceMatc
     if (!valid(base) || !g_match_stage) return -1;
     TaskLock lock;
     if (!lock.manager) return -2;
-    if (!g_controller_scanned) {
-        entry<void (*)()>(0x6772fbc)();
-        if (env->ExceptionCheck()) return -3;
-        if (!neutral_event(env)) return -4;
-        g_controller_scanned = true;
-    }
     uintptr_t model = *reinterpret_cast<uintptr_t *>(g_base + 0xa5bb188);
     if (model && *reinterpret_cast<unsigned char *>(model + 0x7f2)) return -201;
     if (g_match_stage == 1 && model && *reinterpret_cast<uint32_t *>(model + 0x7b8) == 5 &&
@@ -516,7 +510,17 @@ JNIEXPORT jint JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeAdvanceMatc
             __android_log_print(ANDROID_LOG_INFO, TAG, "ORIGINAL_USER_SYNC_COMPLETED_BEFORE_PREMATCH state=4");
         }
         entry<void (*)()>(0x6a9e2bc)();
-        if (peerlink_live_match_context_input(g_base, g_match_context_path.c_str()) <= 0) return -208;
+        if (!g_controller_scanned) {
+            entry<void (*)()>(0x6772fbc)();
+            if (env->ExceptionCheck()) return -3;
+            if (!neutral_event(env)) return -4;
+            g_controller_scanned = true;
+        }
+        long context_result = peerlink_live_match_context_input(g_base, g_match_context_path.c_str());
+        if (context_result <= 0) {
+            __android_log_print(ANDROID_LOG_ERROR, TAG, "original server match context rejected result=%ld", context_result);
+            return -208;
+        }
         entry<void (*)()>(0x7b2a060)();
         entry<uintptr_t (*)()>(0x7b2a3a8)();
         if (peerlink_squad_import(g_base, 0, g_uid, g_squad_path.c_str()) <= 0) return -202;
