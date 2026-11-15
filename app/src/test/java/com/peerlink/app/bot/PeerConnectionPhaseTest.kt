@@ -4,22 +4,22 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class PeerConnectionPhaseTest {
-    @Test fun matchSessionIsOpenedOnlyAfterTheOriginalIntroductionSucceeds() {
+    @Test fun matchSessionIsOpenedOnlyAfterOriginalNetworkIoIsReady() {
         var checks = 0
         var opens = 0
-        assertTrue(PeerConnectionPhase.openAfterIntroduction(
-            running = { true }, sdkVerdict = { if (++checks < 3) 0L else 1L },
+        assertTrue(PeerConnectionPhase.openAfterNetworkIo(
+            running = { true }, transportIoReady = { if (++checks < 3) 0 else 1 },
             openSession = { assertEquals(3, checks); opens++; true },
             pause = { assertEquals(0, opens) },
         ))
         assertEquals(1, opens)
     }
 
-    @Test fun cancelledIntroductionNeverStartsTheMatchSession() {
+    @Test fun cancelledNetworkIoWaitNeverStartsTheMatchSession() {
         var running = true
-        assertFalse(PeerConnectionPhase.openAfterIntroduction(
-            running = { running }, sdkVerdict = { 0L },
-            openSession = { fail("The introduction has not succeeded"); false },
+        assertFalse(PeerConnectionPhase.openAfterNetworkIo(
+            running = { running }, transportIoReady = { 0 },
+            openSession = { fail("The native network I/O is not ready"); false },
             pause = { running = false },
         ))
     }

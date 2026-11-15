@@ -114,6 +114,7 @@ object EngineHost {
         Bundle().apply { putLong("peer", peerUid); putLong("connectingStart", connectingStart) }).getBoolean("ok")
     internal fun beginIntroduction(peerUid: Long, connectingStart: Long): Boolean = request(EngineProtocol.BEGIN_INTRODUCTION,
         Bundle().apply { putLong("peer", peerUid); putLong("connectingStart", connectingStart) }).getBoolean("ok")
+    internal fun transportIoReady(): Int = request(EngineProtocol.TRANSPORT_IO_READY).getInt("state")
     internal fun configureTurn(input: ByteArray): Boolean = request(EngineProtocol.CONFIGURE_TURN,
         Bundle().apply { putByteArray("input", input) }).getBoolean("ok")
     internal fun turnRequest(): ByteArray = requireNotNull(
@@ -161,6 +162,7 @@ internal object EngineProtocol {
     const val PEER_TURN_ADDRESS = 15
     const val TURN_REQUEST = 16
     const val BEGIN_INTRODUCTION = 17
+    const val TRANSPORT_IO_READY = 18
     const val STATUS = 100
     const val NATIVE_STATE = 101
 }

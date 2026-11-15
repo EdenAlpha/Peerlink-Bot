@@ -6,26 +6,27 @@ import java.util.concurrent.TimeUnit
  * Match-data readiness remains a separate prerequisite for gameplay inputs.
  */
 internal object PeerConnectionPhase {
-    /** The configured transport consumes an already connected original NTL
-     * introduction. Starting its session before that verdict is rejected.
+    /** The configured transport consumes the original SDK's network-I/O
+     * handles, which are created asynchronously after SDK startup.
      */
-    fun openAfterIntroduction(
+    fun openAfterNetworkIo(
         running: () -> Boolean,
-        sdkVerdict: () -> Long,
+        transportIoReady: () -> Int,
         openSession: () -> Boolean,
-        progress: (Long) -> Unit = {},
+        progress: (Int) -> Unit = {},
         timeoutSeconds: Long = 90,
         pause: () -> Unit = { Thread.sleep(500) },
     ): Boolean {
         val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(timeoutSeconds)
         while (running()) {
-            val verdict = sdkVerdict()
-            progress(verdict)
-            if (verdict == 1L) {
-                check(openSession()) { "The original match session did not accept the completed peer introduction" }
+            val state = transportIoReady()
+            progress(state)
+            check(state >= 0) { "The original SDK network I/O is unavailable (stage $state)" }
+            if (state == 1) {
+                check(openSession()) { "The original match session did not accept its ready network I/O" }
                 return true
             }
-            check(System.nanoTime() < deadline) { "The initial peer handshake timed out" }
+            check(System.nanoTime() < deadline) { "The original network I/O startup timed out" }
             pause()
         }
         return false

@@ -678,6 +678,21 @@ JNIEXPORT jboolean JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeBeginIn
     return begin_introduction(static_cast<uint32_t>(peer), static_cast<uint32_t>(connecting_start)) ? JNI_TRUE : JNI_FALSE;
 }
 
+JNIEXPORT jint JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeTransportIoReady(
+        JNIEnv *, jobject, jlong base) {
+    if (!valid(base) || !g_client || !g_introduction_peer) return -1;
+    // Read the exact pointer chains used by original getters 7e02930/7e029c4.
+    // SDK Start returns before these asynchronous network-I/O objects exist.
+    // TaskMatchSession's P2P branch (config enum 1) keeps discovery running;
+    // stopping it here destroys the I/O needed by the configured transport.
+    for (uintptr_t offset : {uintptr_t(0x8f8), uintptr_t(0x900)}) {
+        uintptr_t holder = *reinterpret_cast<uintptr_t *>(g_client + offset);
+        uintptr_t io = holder ? *reinterpret_cast<uintptr_t *>(holder + 8) : 0;
+        if (io && *reinterpret_cast<uintptr_t *>(io + 8)) return 1;
+    }
+    return 0;
+}
+
 JNIEXPORT jboolean JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeOpenSession(
         JNIEnv *, jobject, jlong base, jlong peer, jlong connecting_start) {
     if (!valid(base) || !g_client || peer <= 0 || peer > 0xffffffffLL || peer == g_uid ||

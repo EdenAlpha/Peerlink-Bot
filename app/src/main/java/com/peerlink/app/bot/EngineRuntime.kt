@@ -124,6 +124,7 @@ internal object EngineRuntime {
     fun beginIntroduction(peerUid: Long, connectingStart: Long): Boolean = onRuntime {
         client != 0L && nativeBeginIntroduction(base, peerUid, connectingStart)
     }
+    fun transportIoReady(): Int = onRuntime { if (client == 0L) -1 else nativeTransportIoReady(base) }
 
     fun configureTurn(input: ByteArray): Boolean = onRuntime {
         client != 0L && nativeConfigureTurn(base, input)
@@ -223,6 +224,7 @@ internal object EngineRuntime {
 
     private external fun nativeLoad(path: String): Long
     private external fun nativeBeginIntroduction(base: Long, peer: Long, connectingStart: Long): Boolean
+    private external fun nativeTransportIoReady(base: Long): Int
     private external fun nativeConfigureTurn(base: Long, input: ByteArray): Boolean
     private external fun nativeTurnRequest(base: Long): ByteArray?
     private external fun nativeTurnAddress(base: Long): ByteArray?

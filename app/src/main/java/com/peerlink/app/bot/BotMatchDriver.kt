@@ -285,13 +285,13 @@ object BotMatchDriver {
             // server report. Waiting here for data channels blocks the gate
             // sequence that supplies the later game/session setup inputs.
             status("Connecting both game engines")
-            var lastIntroductionVerdict = -1L
-            if (!PeerConnectionPhase.openAfterIntroduction(
-                running = { running }, sdkVerdict = EngineHost::check,
+            var lastIntroductionVerdict = -1
+            if (!PeerConnectionPhase.openAfterNetworkIo(
+                running = { running }, transportIoReady = EngineHost::transportIoReady,
                 openSession = { EngineHost.openSession(opp, connectingStart) },
                 progress = { verdict ->
                     if (verdict != lastIntroductionVerdict) {
-                        log("original peer introduction verdict=$verdict")
+                        log("original network I/O state=$verdict")
                         lastIntroductionVerdict = verdict
                     }
                 },
