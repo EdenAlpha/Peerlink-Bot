@@ -34,7 +34,21 @@ def main():
         digest = hashlib.sha256()
         target = output / name
         with target.open("wb") as stream:
+            if "url" in item:
+                if not item["url"].startswith("https://"):
+                    raise ValueError("Resource source must use HTTPS")
+                with urllib.request.urlopen(item["url"], timeout=120) as response:
+                    if response.status != 200:
+                        raise RuntimeError("Original resource source rejected the request")
+                    while block := response.read(1024 * 1024):
+                        stream.write(block)
+                        digest.update(block)
+                        remaining -= len(block)
+                        if remaining < 0:
+                            raise RuntimeError("Original resource exceeds its pinned size")
             while remaining:
+                if "url" in item:
+                    raise RuntimeError("Truncated original live resource")
                 first_size = config["parts"][0]
                 part = 0 if position < first_size else 1
                 start = 0 if part == 0 else first_size
