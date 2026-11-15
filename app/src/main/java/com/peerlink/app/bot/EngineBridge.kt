@@ -214,6 +214,9 @@ object EngineBridge {
             log("the bot's id is not known yet -- the engine waits")
             return false
         }
+        // Download original match packs outside the five-minute native startup
+        // request. The room has not been created and no match is waiting yet.
+        GameResourcePacks.prepare(context)
         val up = prepareWithRetries(context, uid)
         log(if (up) "the engine is up for this session" else "the engine did NOT come up this session")
         return up

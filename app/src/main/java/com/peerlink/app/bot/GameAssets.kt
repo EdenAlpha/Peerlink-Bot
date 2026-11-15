@@ -125,6 +125,18 @@ internal object GameAssets {
             val source = File(projectRoot, name)
             integrity.ensure(File(nativeRoot, name), "native/$name") { source.inputStream() }
         }
+        val nativePaks = File(nativeRoot, "PesMobile/Content/Paks")
+        // The base ZIP has only five files. Other installed IoStore triplets
+        // and the original downloaded match packs are separate resources.
+        for (name in assets.list("").orEmpty().filter {
+            Regex("pc[0-9]{4}_mobile_and\\.(pak|utoc|ucas)").matches(it) && it != "pc0000_mobile_and.pak"
+        }.sorted()) {
+            val source = File(prepared.project, "Content/Paks/$name")
+            integrity.ensure(source, "packaged/$name") { assets.open(name) }
+            val fingerprint = source.inputStream().use(GameFileIntegrity::fingerprint)
+            GameResourcePacks.link(source, File(nativePaks, name), fingerprint, audit)
+        }
+        GameResourcePacks.verifyAndLink(owner, nativePaks, audit)
         check(installation() == identity) { "Installed game changed during verification; retry with the game update finished" }
         audit("[BOT-FILES] SUMMARY result=PASS verified=${integrity.verified} repaired=${integrity.repaired} " +
             "cpk=${names.size} resources=${resources.size} nativeResources=${resources.size} databaseTables=$databaseTables nativeDatabaseTables=44 " +

@@ -19,7 +19,7 @@ import org.junit.runner.RunWith
  */
 @RunWith(AndroidJUnit4::class)
 class BotEngineTurnPairPhoneTest {
-    @Test(timeout = 180_000) fun opensConfiguredTransportWithOriginalConnectionRecordsWhenNeeded() {
+    @Test(timeout = 600_000) fun opensConfiguredTransportWithOriginalConnectionRecordsWhenNeeded() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val args = InstrumentationRegistry.getArguments()
         val uid = args.getString("botUid")!!.toLong()
@@ -137,7 +137,9 @@ class BotEngineTurnPairPhoneTest {
                     EngineHost.setupMatch(peer, gameId, sid, squad))
                 assertTrue(EngineHost.startInputTest(true))
                 var synchronizedBeforePrematch = false
-                repeat(30) {
+                val holdSeconds = args.getString("matchLoadingProbeSeconds", "30").toInt()
+                require(holdSeconds in 30..300)
+                repeat(holdSeconds) {
                     Thread.sleep(1000)
                     val loading = EngineHost.snapshot()
                     Log.i("PeerlinkTurnTest", "MATCH_LOADING_PROBE_$role state=${loading.values.contentToString()}")
