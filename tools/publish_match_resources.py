@@ -30,7 +30,7 @@ def main():
 
     def restore(item):
         name = item["name"]
-        position, remaining = item["offset"], item["size"]
+        position, remaining = item.get("offset", 0), item["size"]
         digest = hashlib.sha256()
         target = output / name
         with target.open("wb") as stream:
