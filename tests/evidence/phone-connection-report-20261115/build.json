@@ -1,0 +1,17 @@
+{
+  "app_commit": "f1fd6f06f7013d9a444c4c11c7b86d43db88ef92",
+  "ci_run": 43663921495,
+  "artifact_id": 14141930507,
+  "apk_sha256": "c47c92cfcfbc27f29f2459ed3eaf65bd156ff89e04ae4977bb730ca25acdc00d",
+  "device": "ARM64 Android15/API35 Redroid; two app instances in separate Android users",
+  "physical_phone_evidence": "Previous b02d858 reaches original SDK verdict1 and base-session4; data channels remain0; handler exists. The driver never calls its server connection-report step.",
+  "policy_change": "Confirmed original SDK verdict1 and base-session4 permit the next server-report step; gameplay still requires both data channels and actual match/controller state.",
+  "local_native_test": "Actual production PeerSlot. Counterpart delays original data-model construction until a separate test-only confirmation signal. Shared driver phase returns at SDK1/session4 with channels3/3, then both original engines open channels14/15 to4.",
+  "test_signal_scope": "Local readiness barrier, not a Konami response or original game packet.",
+  "other_checks": "Three new JVM phase-policy tests; existing JVM tests;7framework tests on each API34/API35; ferry transport,44tables,owncontroller,15-second startup hold and no-peer guard passed.",
+  "diagnostic_hooks": false,
+  "native_state_patches": false,
+  "manual_engine_ticks": false,
+  "new_diagnostics": "Original published frame counter read at native snapshot index20; after match setup, sampled native snapshots go to the match log every5seconds.",
+  "unverified": "Live server connection-report acceptance, fresh game-ID/native match setup, foreground physical-phone kickoff or visible Pass response."
+}

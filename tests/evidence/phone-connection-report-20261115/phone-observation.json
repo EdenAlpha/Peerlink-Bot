@@ -1,0 +1,39 @@
+{
+  "app": "b02d858",
+  "native_before_handler": [
+    1,
+    1,
+    4,
+    0,
+    0,
+    0,
+    0,
+    0,
+    false
+  ],
+  "native_after_handler": [
+    1,
+    1,
+    4,
+    0,
+    0,
+    0,
+    0,
+    0,
+    true
+  ],
+  "eventually": [
+    1,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    1,
+    false
+  ],
+  "connection_report_reached": false,
+  "tunnel_capture_frames": 347,
+  "note": "Tunnel capture is the reflexive route; direct host traffic also exists and must not be inferred from the tunnel PCAP alone."
+}

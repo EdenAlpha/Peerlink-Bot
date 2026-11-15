@@ -60,7 +60,25 @@ use and phone-game kickoff require separate evidence.
 
 ## Verification
 
-The current connection-test APK is `b02d858`, published as
+The current connection-test APK is `f1fd6f0`, published as
+[`phone-engine-test-f1fd6f0`](https://github.com/EdenAlpha/Peerlink-Bot/releases/tag/phone-engine-test-f1fd6f0).
+The latest phone export confirms original SDK verdict1 and base-session4,
+followed by a wait for data channels that prevents the server connection
+report and game-ID setup. The driver now proceeds on confirmed peer transport;
+gameplay still requires actual data channels, match objects and controller
+readiness. The shared phase passed a paired native test whose counterpart
+holds data-model construction until connection confirmation. Evidence and
+scope are in
+[`tests/evidence/phone-connection-report-20261115`](tests/evidence/phone-connection-report-20261115/README.md).
+
+After native match setup, five-second diagnostic samples retain the original
+frame counter at native snapshot index20. No heartbeat or readiness flags are
+written. Live server acceptance and physical-phone kickoff remain unverified.
+
+Current APK SHA-256:
+`c47c92cfcfbc27f29f2459ed3eaf65bd156ff89e04ae4977bb730ca25acdc00d`.
+
+The previous routing-test APK was `b02d858`, published as
 [`phone-engine-test-b02d858`](https://github.com/EdenAlpha/Peerlink-Bot/releases/tag/phone-engine-test-b02d858).
 It keeps the game's host and reflexive candidates distinct through the local
 ferry. Raw host traffic and VPN traffic retain their own return sockets.
@@ -74,7 +92,7 @@ startup and the unanswered-peer checks passed. Evidence and precise test
 limits are in
 [`tests/evidence/phone-candidate-routes-20261115`](tests/evidence/phone-candidate-routes-20261115/README.md).
 
-Current APK SHA-256:
+Previous routing-fix APK (`b02d858`) SHA-256:
 `74bbb1e91e64e0409680c05308e270815cdcd4d9f2aed7494aa566ccce5f3ae6`.
 
 The previous connection-test APK was `3ddc561`.

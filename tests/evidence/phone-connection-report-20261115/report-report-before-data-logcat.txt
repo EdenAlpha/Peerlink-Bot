@@ -1,0 +1,19 @@
+11-15 01:42:36.447  2834  2865 I PeerlinkEngineHost: startup: engine=0 objects=0 kernel=0 running=1 activity=11 window=1 database=0 work=0 sessions=0
+11-15 01:42:36.810  2852  2869 I PeerlinkEngineHost: startup: engine=0 objects=0 kernel=0 running=1 activity=11 window=1 database=0 work=0 sessions=0
+11-15 01:42:39.020  2834  2866 I PeerlinkEngineHost: database startup result=44
+11-15 01:42:39.022  2719  2807 I PeerlinkPairTest: PAIR_A prepared; peerNat=271581328 beforePeerDelayMs=0
+11-15 01:42:39.533  2852  2870 I PeerlinkEngineHost: database startup result=44
+11-15 01:42:39.536  2742  2832 I PeerlinkPairTest: PAIR_B prepared; peerNat=270532787 beforePeerDelayMs=0
+11-15 01:42:51.075  2834  2866 I PeerlinkEngineHost: early channel input result=23
+11-15 01:42:51.344  2719  2807 I PeerlinkPairTest: TRANSPORT_REPORTED_BEFORE_PEER_MODEL state=[1, 1, 4, 3, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 753022, 1, 740]
+11-15 01:42:51.345  2742  2832 I PeerlinkPairTest: PEER_MODEL_RELEASED_AFTER_TRANSPORT_REPORT
+11-15 01:42:51.488  2719  2807 I PeerlinkPairTest: PAIR_A state=1,1,4,3,3,0,0,0,true
+11-15 01:42:51.673  2742  2832 I PeerlinkPairTest: PAIR_B state=1,1,4,0,0,0,0,0,false
+11-15 01:42:51.673  2742  2832 I PeerlinkPairTest: ORIGINAL_ANDROID_PAIR_B_BASE_SESSION_CONNECTED
+11-15 01:42:51.678  2852  2870 I PeerlinkEngineHost: early channel input result=23
+11-15 01:42:51.973  2719  2807 I PeerlinkPairTest: PAIR_A state=1,1,4,4,4,0,0,0,true
+11-15 01:42:51.973  2719  2807 I PeerlinkPairTest: ORIGINAL_ANDROID_PAIR_A_CHANNELS_CONNECTED
+11-15 01:42:51.973  2719  2807 I PeerlinkPairTest: PRODUCTION_FERRY_A_ORIGINAL_CHANNELS_CONNECTED
+11-15 01:42:52.008  2742  2832 I PeerlinkPairTest: PAIR_B state=1,1,4,4,4,0,0,0,true
+11-15 01:42:52.008  2742  2832 I PeerlinkPairTest: ORIGINAL_ANDROID_PAIR_B_CHANNELS_CONNECTED
+11-15 01:42:52.009  2742  2832 I PeerlinkPairTest: PRODUCTION_FERRY_B_ORIGINAL_CHANNELS_CONNECTED
