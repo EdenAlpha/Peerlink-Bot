@@ -78,19 +78,24 @@ internal object GameAssets {
         }
         check(repairs.isEmpty()) { "Source resource pack changed during verification" }
         prepared.database.mkdirs()
+        var databaseTables = 0
         GameArchive(File(assetDir, "dt200_mobile_all.cpk")).use { archive ->
             val tables = archive.names().filter { it.startsWith("common/etc/pesdb/") && it.endsWith(".bin") }
             val found = tables.map { it.substringAfterLast('/') }.toSet()
-            check(found == GameDatabaseSchema.strides.keys && tables.size == found.size) {
-                "Database tables differ: missing=${GameDatabaseSchema.strides.keys - found} unexpected=${found - GameDatabaseSchema.strides.keys}"
+            check(found.containsAll(GameDatabaseSchema.strides.keys) && tables.size == found.size) {
+                "Required database tables missing or duplicated: missing=${GameDatabaseSchema.strides.keys - found}"
             }
+            databaseTables = tables.size
+            audit("[BOT-FILES] DATABASE_SET nativeRequired=44 present=${tables.size} " +
+                "additional=${found - GameDatabaseSchema.strides.keys}")
             for (name in tables.sorted()) {
                 val decoded = GameArchive.decodeDatabase(archive.read(name))
                 val table = name.substringAfterLast('/')
-                val records = GameDatabaseSchema.validate(table, decoded.size)
+                val stride = GameDatabaseSchema.strides[table]
+                val records = if (stride != null) GameDatabaseSchema.validate(table, decoded.size) else null
                 val outputName = table.removeSuffix(".bin") + ".decoded"
                 audit("[BOT-FILES] DATABASE table=$table decodedBytes=${decoded.size} " +
-                    "recordStride=${GameDatabaseSchema.strides.getValue(table)} records=$records container=VALID")
+                    "recordStride=${stride ?: "not_in_native_builder"} records=${records ?: "not_checked"} container=VALID")
                 integrity.ensure(File(prepared.database, outputName), "database/$outputName") { decoded.inputStream() }
             }
         }
@@ -108,7 +113,7 @@ internal object GameAssets {
         }
         check(installation() == identity) { "Installed game changed during verification; retry with the game update finished" }
         audit("[BOT-FILES] SUMMARY result=PASS verified=${integrity.verified} repaired=${integrity.repaired} " +
-            "cpk=${names.size} resources=${resources.size} nativeResources=${resources.size} databaseTables=44 " +
+            "cpk=${names.size} resources=${resources.size} nativeResources=${resources.size} databaseTables=$databaseTables nativeDatabaseTables=44 " +
             "downloadedUpdates=NOT_CHECKED")
         return prepared
     }
