@@ -491,7 +491,6 @@ class BotMatchFlow(
                     AppState.appendLog("[BOT-FLOW  ] original SDK did not start the peer introduction")
                     return false
                 }
-                watchEngineVerdict()
             }
             AppState.appendLog("[BOT-FLOW  ] engine got the peer: $peerId " +
                 "(session said v4nat=$v4Nat v6nat=$v6Nat) -- its opponent is now " +
@@ -504,25 +503,6 @@ class BotMatchFlow(
             AppState.appendLog("[BOT-FLOW  ] engine hand off failed: $t")
             return false
         }
-    }
-
-    /** Read the original transport state; its SDK operations remain with the game. */
-    private fun watchEngineVerdict() {
-        Thread({
-            var last = -1L
-            val until = System.currentTimeMillis() + 15 * 60_000L
-            while (PeerSlot.engineAttached && System.currentTimeMillis() < until) {
-                val verdict = EngineHost.check()
-                if (verdict != last) {
-                    AppState.appendLog("[BOT-FLOW  ] native transport connected=${verdict == 1L} heard=${PeerSlot.engineHeard}")
-                    last = verdict
-                    if (verdict == 1L) {
-                        com.peerlink.app.service.PeerBotService.status("Game connection established — waiting for match setup")
-                    }
-                }
-                Thread.sleep(1_000)
-            }
-        }, "engine-verdict").apply { isDaemon = true }.start()
     }
 
     /** CMD_GET_GAME_ID -- builder form first, then the server-side fallbacks. */
