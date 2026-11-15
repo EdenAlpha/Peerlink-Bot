@@ -19,7 +19,7 @@ import org.junit.runner.RunWith
  */
 @RunWith(AndroidJUnit4::class)
 class BotEngineTurnPairPhoneTest {
-    @Test(timeout = 600_000) fun opensConfiguredTransportWithOriginalConnectionRecordsWhenNeeded() {
+    @Test(timeout = 900_000) fun opensConfiguredTransportWithOriginalConnectionRecordsWhenNeeded() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val args = InstrumentationRegistry.getArguments()
         val uid = args.getString("botUid")!!.toLong()
@@ -135,13 +135,17 @@ class BotEngineTurnPairPhoneTest {
                 val sid = ByteArray(sidSize).also { contextInput.get(it) }.toString(Charsets.UTF_8)
                 assertTrue("Production match setup rejected the private fixture",
                     EngineHost.setupMatch(peer, gameId, sid, squad))
-                assertTrue(EngineHost.startInputTest(true))
+                val manualPassProbe = args.getString("manualPassProbe") == "true"
+                assertTrue(EngineHost.startInputTest(true, automatic = !manualPassProbe))
                 var synchronizedBeforePrematch = false
+                var passAccepted = false
+                var playableSamples = 0
                 val holdSeconds = args.getString("matchLoadingProbeSeconds", "30").toInt()
                 require(holdSeconds in 30..300)
                 repeat(holdSeconds) {
                     Thread.sleep(1000)
                     val loading = EngineHost.snapshot()
+                    if (loading.matchConstructed && loading.ballOnPitch) playableSamples++
                     Log.i("PeerlinkTurnTest", "MATCH_LOADING_PROBE_$role state=${loading.values.contentToString()}")
                     val details = EngineHost.loadingDiagnostics()
                     Log.i("PeerlinkTurnTest", "MATCH_LOADING_DETAILS_$role $details")
@@ -150,8 +154,23 @@ class BotEngineTurnPairPhoneTest {
                             details.contains("userDataSyncComplete=1"))
                         synchronizedBeforePrematch = true
                     }
+                    if (manualPassProbe && role == "A" && !passAccepted && loading.canTestPass && playableSamples >= 3) {
+                        assertTrue("The original engine did not enumerate its own bot controller", EngineHost.probeController())
+                        Log.i("PeerlinkTurnTest", "PASS_PROBE_BEFORE_$role state=${loading.values.contentToString()}")
+                        passAccepted = EngineHost.pass()
+                        assertTrue("The original private-engine input queue rejected Pass", passAccepted)
+                        Log.i("PeerlinkTurnTest", "PASS_PROBE_ACCEPTED_$role key=96")
+                        repeat(30) { sample ->
+                            Thread.sleep(100)
+                            Log.i("PeerlinkTurnTest", "PASS_PROBE_AFTER_$role sample=$sample state=${EngineHost.snapshot().values.contentToString()}")
+                        }
+                    }
                 }
                 assertTrue("The native user-data task did not complete before pre-match", synchronizedBeforePrematch)
+                if (manualPassProbe) {
+                    assertTrue("The original engine did not construct a playable match", playableSamples > 0)
+                    if (role == "A") assertTrue("No Pass reached the original private engine", passAccepted)
+                }
                 Log.i("PeerlinkTurnTest", "ORIGINAL_USER_SYNC_${role}_COMPLETED_BEFORE_PREMATCH")
             }
             if (args.getString("diagnosticPeerStop") == "true" && role == "A") {

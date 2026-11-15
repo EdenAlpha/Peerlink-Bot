@@ -651,7 +651,10 @@ JNIEXPORT jlongArray JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeSnaps
         uintptr_t settings_root = *reinterpret_cast<uintptr_t *>(g_base + 0xa58de28);
         uintptr_t settings = settings_root ? *reinterpret_cast<uintptr_t *>(settings_root + 0x570) : 0;
         state[16] = work ? *reinterpret_cast<unsigned char *>(work + 0x6c4c0 + 0x102) : 0;
-        state[17] = settings ? *reinterpret_cast<unsigned char *>(settings + 0xd3) : 0;
+        // The original full-app match can run without this optional settings
+        // object (also observed in the retained QEMU host). Preserve absence
+        // separately from an existing settings object disabling controllers.
+        state[17] = settings ? *reinterpret_cast<unsigned char *>(settings + 0xd3) : -1;
     }
     jlongArray result = env->NewLongArray(kStateSize);
     if (result) env->SetLongArrayRegion(result, 0, kStateSize, state);

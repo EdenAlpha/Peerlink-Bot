@@ -183,8 +183,11 @@ object EngineHost {
         Bundle().apply { putLong("peer", peer); putLong("homeUid", homeUid); putByteArray("squad", squad) }, 60).getBoolean("ok")
     fun snapshot(): EngineSnapshot = EngineSnapshot(request(EngineProtocol.SNAPSHOT).getLongArray("state") ?: LongArray(19))
     internal fun loadingDiagnostics(): String = request(EngineProtocol.LOADING_DIAGNOSTICS).getString("details").orEmpty()
-    fun startInputTest(controllerAllowed: Boolean): Boolean = request(EngineProtocol.START_TEST,
-        Bundle().apply { putBoolean("controllerAllowed", controllerAllowed) }).getBoolean("ok")
+    fun startInputTest(controllerAllowed: Boolean, automatic: Boolean = true): Boolean = request(EngineProtocol.START_TEST,
+        Bundle().apply {
+            putBoolean("controllerAllowed", controllerAllowed)
+            putBoolean("automatic", automatic)
+        }).getBoolean("ok")
     fun pass(): Boolean = request(EngineProtocol.PASS).getBoolean("ok")
     internal fun probeController(): Boolean = request(EngineProtocol.PROBE_CONTROLLER).getBoolean("ok")
     internal fun probePreviewCallback(): Boolean = request(EngineProtocol.PROBE_PREVIEW).getBoolean("ok")
@@ -238,7 +241,8 @@ data class EngineSnapshot(val values: LongArray) {
     val metadataReady get() = field(5) == 5L && field(6) == 1L && field(7) == 0L
     val matchConstructed get() = field(8) == 17L && field(9) == 54L && field(10) == 22L
     val ballOnPitch get() = field(11) == 1L
-    val canTestPass get() = connected && matchConstructed && ballOnPitch && field(16) == 1L && field(17) == 1L
+    val canTestPass get() = connected && matchConstructed && ballOnPitch && field(16) == 1L &&
+        (field(17) == 1L || field(17) == -1L)
     val memoryMiB get() = field(18) / 1024
     val matchDataHandlerPresent get() = field(19) == 1L
     val ballSpeedMmPerSecond get() = field(15)

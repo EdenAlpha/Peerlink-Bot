@@ -89,9 +89,9 @@ class BotEngineService : Service() {
                 EngineProtocol.LOADING_DIAGNOSTICS -> result.putString("details", EngineRuntime.loadingDiagnostics())
                 EngineProtocol.START_TEST -> {
                     controllerAllowed = args.getBoolean("controllerAllowed")
-                    testing = controllerAllowed
+                    testing = controllerAllowed && args.getBoolean("automatic", true)
                     passes = 0
-                    result.putBoolean("ok", testing)
+                    result.putBoolean("ok", controllerAllowed)
                 }
                 EngineProtocol.PASS -> result.putBoolean("ok", pressPass())
                 EngineProtocol.PROBE_CONTROLLER -> result.putBoolean("ok", EngineRuntime.probeController())
@@ -210,9 +210,13 @@ class BotEngineService : Service() {
     private fun pressPass(): Boolean {
         if (!controllerAllowed || keyDown || !snapshot().canTestPass) return false
         if (!EngineRuntime.inputKey(96, true)) return false
+        diagnostic("BOT_INPUT key=96 action=down nativeAccepted=true destination=private_bot_engine")
         keyDown = true
         worker.schedule({
-            try { EngineRuntime.inputKey(96, false) } finally { keyDown = false }
+            try {
+                val accepted = EngineRuntime.inputKey(96, false)
+                diagnostic("BOT_INPUT key=96 action=up nativeAccepted=$accepted destination=private_bot_engine")
+            } finally { keyDown = false }
         }, 140, TimeUnit.MILLISECONDS)
         report("Bot Pass input sent — check the response in eFootball")
         return true

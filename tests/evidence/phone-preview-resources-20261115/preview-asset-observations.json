@@ -1,0 +1,59 @@
+{
+  "engine_sha256": "2cea0c85344d7d7f295aea1c2353621f02db78dbccd888a0a21a0508ac330659",
+  "candidate": "28eb933ccd18ae56abbe6043c2e896945bd6c4b0",
+  "scope": "Controlled Android 15 pair using original native menu code; external observer reads asset results and menu state. Restored resources change input files only.",
+  "observations": {
+    "missing_resources": [
+      {
+        "event": "ORIGINAL_PREVIEW_ASSET_PATH",
+        "pathLength": 105,
+        "path": "/Game/Assets/ui/Data/Widget/General/MatchFlow/EnvironmentPreview/EnvironmentPreview.EnvironmentPreview_C"
+      },
+      {
+        "event": "ORIGINAL_WIDGET_LOADED_ASSET_RESULT",
+        "present": false,
+        "name": null,
+        "className": null
+      }
+    ],
+    "restored_resources": [
+      {
+        "event": "ORIGINAL_PREVIEW_ASSET_PATH",
+        "pathLength": 105,
+        "path": "/Game/Assets/ui/Data/Widget/General/MatchFlow/EnvironmentPreview/EnvironmentPreview.EnvironmentPreview_C"
+      },
+      {
+        "event": "ORIGINAL_WIDGET_LOADED_ASSET_RESULT",
+        "present": true,
+        "name": "EnvironmentPreview_C",
+        "className": "WidgetBlueprintGeneratedClass"
+      },
+      {
+        "event": "PREVIEW_OPENING_WAIT",
+        "state": {
+          "menuState": 6,
+          "openingCallback": 0,
+          "requested": "Match/Settings/MatchPreview",
+          "managerReadySlot": true,
+          "widgetPresent": true,
+          "widgetFlag23c": 0,
+          "managerPending": [
+            0,
+            0,
+            0
+          ],
+          "pendingWidgets": [],
+          "managerName": "BP_WindowManager_C_2147482454",
+          "managerClass": "BP_WindowManager_C",
+          "contentRect": [
+            0,
+            0,
+            0,
+            0
+          ]
+        }
+      }
+    ]
+  },
+  "kickoff_verified": false
+}

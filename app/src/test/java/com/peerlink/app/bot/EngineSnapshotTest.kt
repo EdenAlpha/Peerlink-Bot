@@ -17,11 +17,20 @@ class EngineSnapshotTest {
         assertTrue(snapshot.metadataReady)
         assertFalse(snapshot.canTestPass)
     }
-    @Test fun bothOriginalDataChannelsAndControllerSettingsAreRequired() {
+    @Test fun bothOriginalDataChannelsAndEnabledPresentControllerSettingsAreRequired() {
         assertTrue(EngineSnapshot(state()).canTestPass)
         for (field in listOf(3, 4, 16, 17)) {
             assertFalse(EngineSnapshot(state().apply { this[field] = 0 }).canTestPass)
         }
+    }
+    @Test fun absentOptionalSettingsDoNotDisableAnActiveOriginalController() {
+        // Recorded Android/QEMU match: source is enabled, optional settings absent.
+        val values = state().apply { this[17] = -1 }
+        assertTrue(EngineSnapshot(values).canTestPass)
+        for (field in listOf(2, 3, 4, 8, 9, 10, 11, 16)) {
+            assertFalse(EngineSnapshot(values.copyOf().apply { this[field] = 0 }).canTestPass)
+        }
+        assertFalse(EngineSnapshot(values.copyOf().apply { this[17] = -2 }).canTestPass)
     }
     @Test fun offPitchTransitionSentinelsDoNotBecomeLivePlay() {
         val snapshot = EngineSnapshot(state().apply { this[11] = 0; this[14] = 100000 })
