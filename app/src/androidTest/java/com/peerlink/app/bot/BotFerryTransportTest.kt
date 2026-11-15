@@ -10,8 +10,8 @@ import java.net.*
 @RunWith(AndroidJUnit4::class)
 class BotFerryTransportTest {
     private fun socket(port: Int = 0) = DatagramSocket(InetSocketAddress("127.0.0.1", port)).apply { soTimeout = 3000 }
-    private fun DatagramSocket.sendTo(bytes: ByteArray, port: Int) =
-        send(DatagramPacket(bytes, bytes.size, InetSocketAddress("127.0.0.1", port)))
+    private fun DatagramSocket.sendTo(bytes: ByteArray, port: Int, ip: String = "127.0.0.1") =
+        send(DatagramPacket(bytes, bytes.size, InetSocketAddress(ip, port)))
     private fun DatagramSocket.receiveBytes(): ByteArray {
         val packet = DatagramPacket(ByteArray(4096), 4096); receive(packet)
         return packet.data.copyOf(packet.length)
@@ -26,7 +26,7 @@ class BotFerryTransportTest {
                 PeerSlot.arm(100, 200, "", "127.0.0.1", game.localPort)
                 PeerSlot.engineAttached = true
                 engine.sendTo(byteArrayOf(7), PeerSlot.ENGINE_PORT)
-                backend.receiveBytes() // Original opaque marker wrapped for the TUN route.
+                assertArrayEquals(byteArrayOf(7), game.receiveBytes())
 
                 val direct = byteArrayOf(0x45, 2, 3)
                 game.sendTo(direct, port)
@@ -47,10 +47,14 @@ class BotFerryTransportTest {
                 packet[25] = (8 + tunneled.size).toByte(); tunneled.copyInto(packet, 28)
                 backend.sendTo(packet, port)
                 assertArrayEquals(tunneled, engine.receiveBytes())
-                engine.sendTo(reply, PeerSlot.ENGINE_PORT)
+                engine.sendTo(reply, PeerSlot.ENGINE_REFLEXIVE_PORT, PeerSlot.REFLEXIVE_PEER_IP)
                 val returned = backend.receiveBytes()
                 assertArrayEquals(reply, returned.copyOfRange(28, returned.size))
                 assertArrayEquals(byteArrayOf(10, 77, 0, 2), returned.copyOfRange(16, 20))
+                // A tunneled packet must not change the other candidate's
+                // return route, even when both candidates are active.
+                engine.sendTo(reply, PeerSlot.ENGINE_PORT)
+                assertArrayEquals(reply, game.receiveBytes())
             } finally { PeerSlot.disarm() }
         } } }
     }

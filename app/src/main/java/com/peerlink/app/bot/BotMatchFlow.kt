@@ -472,17 +472,14 @@ class BotMatchFlow(
             val v4Nat = n(a4, "nat_type")
             val v6Nat = n(a6, "nat_type")
 
-            // The opponent the ENGINE is given is this app's own peer slot.  The
-            // tunnel carries the game alone, so the engine's frames can only meet
-            // the game's frames on loopback: it is told its peer is
-            // 127.0.0.1:1163 (and [::1]:1163), it punches there, the slot carries
-            // its frames to the game as the fabricated peer, and the game's frames
-            // are handed back to it. NAT words retain the session response values.
+            // Preserve distinct host/reflexive candidates through the local
+            // translation. Collapsing them onto one endpoint with translated
+            // NAT profiles prevents the original SDK handshake from finishing.
             val rec = EngineHost.buildPeerRecord(
                 peerId = peerId,
                 v4Host = PeerSlot.LOOPBACK_PEER_IP, v4HostPort = PeerSlot.ENGINE_PORT,
-                v4Reflexive = PeerSlot.LOOPBACK_PEER_IP,
-                v4ReflexivePort = PeerSlot.ENGINE_PORT, v4NatType = v4Nat,
+                v4Reflexive = PeerSlot.REFLEXIVE_PEER_IP,
+                v4ReflexivePort = PeerSlot.ENGINE_REFLEXIVE_PORT, v4NatType = v4Nat,
                 v6Host = "::", v6HostPort = 0,
                 v6Reflexive = "::", v6ReflexivePort = 0, v6NatType = 0,
             ) ?: return false
@@ -498,7 +495,8 @@ class BotMatchFlow(
             }
             AppState.appendLog("[BOT-FLOW  ] engine got the peer: $peerId " +
                 "(session said v4nat=$v4Nat v6nat=$v6Nat) -- its opponent is now " +
-                "${PeerSlot.LOOPBACK_PEER_IP}:${PeerSlot.ENGINE_PORT} -> $ok")
+                "host=${PeerSlot.LOOPBACK_PEER_IP}:${PeerSlot.ENGINE_PORT} " +
+                "reflexive=${PeerSlot.REFLEXIVE_PEER_IP}:${PeerSlot.ENGINE_REFLEXIVE_PORT} -> $ok")
             return ok
         } catch (t: Throwable) {
             // Anything failing in the hand-off must leave the app alive and

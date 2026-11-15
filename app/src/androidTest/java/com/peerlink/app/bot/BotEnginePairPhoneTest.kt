@@ -30,20 +30,25 @@ class BotEnginePairPhoneTest {
         val peerNat = args.getString("peerNat")?.toLongOrNull() ?: 271581233L
         val beforePeerDelay = args.getString("beforePeerDelayMs")?.toLongOrNull() ?: 0L
         val splitCandidates = args.getString("splitCandidates") == "true"
+        val productionFerry = args.getString("productionFerry") == "true"
+        require(!productionFerry || splitCandidates)
         require(peerNat in 0..0xffffffffL && beforePeerDelay in 0..180_000)
         val squad = File(context.filesDir, "early-channel-test/squad.dto").readBytes()
-        val ferry = if (role == "A") PairFerry(splitCandidates) else null
+        val ferry: AutoCloseable? = if (role != "A") null else if (productionFerry)
+            ProductionPairFerry(uid, peer) else PairFerry(splitCandidates)
         try {
             assertTrue(EngineBridge.stageEngine(context))
             assertTrue(EngineHost.lastError, EngineHost.prepare(context, uid))
             Log.i("PeerlinkPairTest", "PAIR_$role prepared; peerNat=$peerNat beforePeerDelayMs=$beforePeerDelay")
             if (beforePeerDelay > 0) Thread.sleep(beforePeerDelay)
-            val port = if (role == "A") 39201 else 39202
+            val port = if (role == "A" && productionFerry) PeerSlot.ENGINE_PORT else if (role == "A") 39201 else 39202
+            val reflexivePort = if (role == "A" && productionFerry) PeerSlot.ENGINE_REFLEXIVE_PORT else if (splitCandidates) port + 2 else port
             val record = requireNotNull(EngineHost.buildPeerRecord(peer,
                 "127.0.0.1", port, if (splitCandidates) "127.0.0.2" else "127.0.0.1",
-                if (splitCandidates) port + 2 else port, peerNat,
+                reflexivePort, peerNat,
                 "::", 0, "::", 0, 0))
             assertTrue(EngineHost.setPeers(record))
+            if (role == "A" && productionFerry) PeerSlot.engineAttached = true
             assertTrue(EngineHost.openSession(peer, start))
             val deadline = System.nanoTime() + 45_000_000_000L
             var prepared = false
@@ -66,6 +71,7 @@ class BotEnginePairPhoneTest {
                 Thread.sleep(100)
             }
             Log.i("PeerlinkPairTest", "ORIGINAL_ANDROID_PAIR_${role}_CHANNELS_CONNECTED")
+            if (productionFerry) Log.i("PeerlinkPairTest", "PRODUCTION_FERRY_${role}_ORIGINAL_CHANNELS_CONNECTED")
             Thread.sleep(5000)
             assertTrue("Original connection did not remain open", EngineHost.snapshot().connected)
             assertTrue(EngineHost.snapshot().matchDataHandlerPresent)
