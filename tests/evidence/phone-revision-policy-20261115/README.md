@@ -1,0 +1,23 @@
+# Server database revision policy
+
+The phone export `peerlink_match_1794741143595.zip` completed connection reporting, received the server game ID, opened both native match-data channels and accepted match setup. The first native failure was reason 8 / synchronization result 4 with database checking enabled: the original player/coach checksum comparison failed. Traffic was still being forwarded, no ferry drops were recorded, and no local stop had been requested. `phone-first-failure.txt` preserves those observations. This identifies the bot-side rejection; it does not establish which database update differs or the initiating side of every subsequent teardown.
+
+The standalone host omitted a normal startup setting. In the pinned original 11.1.1 library (SHA-256 `2cea0c85344d7d7f295aea1c2353621f02db78dbccd888a0a21a0508ac330659`), parser `0x7740314` reads `is_revision_check` into response string `+0x990`. Completion handler `0x773d85c` compares that field with the original YES enum and stores the boolean at services `+0x10` → configuration `+0x4dc` (instruction `0x773d9d0`). Configuration constructor `0x7e16210` defaults this byte to enabled. Model constructor `0x7a1df90` consumes the setting at model `+0xa30`; validator `0x7a2131c` compares checksums when enabled, and failure handling in `0x7a1edd4` records reason 8 / result 4.
+
+Commit `f795269cb51f8a1a440bf2888d2f58bcb9cb4c8e` fetches the current server environment and requires `result=NOERR` plus an explicit YES/NO value. It applies that value to the original configuration before introduction/model creation. It does not call the whole original environment completion handler or modify the native model's checksum, readiness, connection, phase or validation result. It refuses policy changes after introduction/model creation. Recent owned captures returned NO, but the production adapter does not assume or hard-code that value.
+
+The exact retained APK passed app unit tests and Android 14/15 host checks in [CI 43709048411](https://github.com/EdenAlpha/Peerlink-Bot/actions/runs/43709048411), then the following checks on ARM64 Android 15 in [lab run 43708742761](https://github.com/EdenAlpha/peerlink-efootball-disconnects/actions/runs/43708742761). No native observer or hook was installed. Each pair used two separately running Android app instances, the original installed game library, owned squad inputs, original configured transport and the production local ferry.
+
+| Check | Observed result |
+| --- | --- |
+| Controlled setting YES | Both original transports and channels connected; metadata synchronization completed; both native models retained enabled checking. |
+| Controlled setting NO | Both original transports and channels connected; metadata synchronization completed; both native models retained disabled checking. |
+| Policy change during a match | Refused for both sides in every pair; the model's policy remained unchanged. |
+| Controlled peer stop | Independent sampling retained the first native failure, packet-flow observations and both sides' player/coach database fingerprints in the main-process export log. |
+| File corruption and retained audit | Two same-size damaged working files were detected and repaired. The timestamped audit remained identical after the session log was cleared. |
+
+The file audit covered 108 working files: 47 CPK packs, five extracted resources, 47 decoded database tables, four generated command files and five native-path resources. All 44 required native table layouts were checked. The separately retained audit covers these assets and working copies; library staging checks run separately. The first preparation copied all 108 files; the deliberate-corruption rerun repaired exactly two.
+
+`build.json` records the artifact and APK hashes and the published asset's matching digest. The release republishes the tested artifact without rebuilding. The per-side instrumentation logs are unedited; diagnostics are filtered to policy, test, failure and packet-flow lines. No account credentials, squad payloads or game binaries are included.
+
+**Limits:** these pairs use matching installed databases and controlled setting inputs passed through the production parser. They do not exercise fresh authentication or the complete real-game match flow. The first-failure signature test deliberately stops a peer; it is not a reproduced checksum mismatch. A successful installed-file audit does not verify private downloaded game updates. If the current server requires revision checking, differing live databases may still require matching updates. Real-game phone kickoff and visible bot Pass remain unverified.

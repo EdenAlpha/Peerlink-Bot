@@ -1,0 +1,19 @@
+{
+  "commit": "f795269cb51f8a1a440bf2888d2f58bcb9cb4c8e",
+  "ci_run": 43709048411,
+  "artifact_id": 14159821677,
+  "artifact_sha256": "9861acd4b1dcdd411fd646f1ab859b57b7df6476c34bcc2ad3be80a8f78dead8",
+  "apk_sha256": "f3c7fc7251c9ac64d3bee56448835a40813ba6fcbd23c3c284b5917b723425ca",
+  "test_apk_sha256": "f6939ce5dcd92e68de43c757846b831835567443042d6115a9cd71a22cdf9cce",
+  "arm64_android_15_run": 43708742761,
+  "phone_game_kickoff_verified": false,
+  "native_test_matrix_passed": true,
+  "release": {
+    "url": "https://github.com/EdenAlpha/Peerlink-Bot/releases/tag/phone-engine-test-f795269",
+    "tag": "phone-engine-test-f795269",
+    "commit": "f795269cb51f8a1a440bf2888d2f58bcb9cb4c8e",
+    "asset_url": "https://github.com/EdenAlpha/Peerlink-Bot/releases/download/phone-engine-test-f795269/peerlink-debug.apk",
+    "asset_sha256": "sha256:f3c7fc7251c9ac64d3bee56448835a40813ba6fcbd23c3c284b5917b723425ca",
+    "publish_workflow_run": 43709914364
+  }
+}

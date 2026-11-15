@@ -112,7 +112,7 @@ This is parser/phase verification; physical-phone kickoff and visible bot Pass
 remain unverified. The original native engine, JNI, controller and ferry are
 unchanged by this patch.
 
-Current APK SHA-256:
+Diagnostic APK (`3ba7a82`) SHA-256:
 `c4bacacbfb9a05561802aee242bdc3eeeb6ed643b5ea94680d37092a3ca367c6`.
 
 The previous parser-test APK was `0979e4c`, published as
@@ -255,3 +255,16 @@ The original server-environment parser at `07740314` reads `is_revision_check` i
 The driver now fetches current `CMD_GET_SERVER_ENV` settings, requires an explicit successful YES/NO response, and copies that server policy into its configuration before introduction or model creation. Missing/invalid settings fail explicitly. The native model's checksums, phase, synchronization result and connection flags are never changed by this adapter. A policy change after introduction/model creation is refused. This addresses the confirmed missing startup setting; a fresh physical-phone match is still required to establish whether it clears the observed failure.
 
 The startup file audit is retained separately and exported as `game_file_audit.txt`, with timestamps and an explicit note that an engine may reuse a previous audit. The latest phone export contained no startup audit because the engine was already running when its session log began. Native failures now remain visible in the status text; first-failure diagnostics also include bounded player/coach checksum strings when available.
+
+The exact APK from `f795269` passed app unit tests, Android 14/15 host checks,
+and ARM64 Android 15 pair tests with both YES and NO policy inputs. Both native
+models inherited each selected setting, synchronized metadata and refused policy
+changes during the match. Controlled peer-stop diagnostics and retention of the
+file audit after a log reset also passed. See
+[`phone-revision-policy-20261115`](tests/evidence/phone-revision-policy-20261115/README.md).
+These tests used matching databases and do not establish real-game kickoff.
+
+Current test release:
+[`phone-engine-test-f795269`](https://github.com/EdenAlpha/Peerlink-Bot/releases/tag/phone-engine-test-f795269).
+APK SHA-256:
+`f3c7fc7251c9ac64d3bee56448835a40813ba6fcbd23c3c284b5917b723425ca`.

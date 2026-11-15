@@ -1,0 +1,5 @@
+11-15 11:34:47.929  2828  2866 I PeerlinkFileTest: [BOT-FILES] SUMMARY result=PASS verified=108 repaired=108 cpk=47 resources=5 nativeResources=5 databaseTables=47 nativeDatabaseTables=44 downloadedUpdates=NOT_CHECKED
+11-15 11:34:48.911  2828  2866 I PeerlinkFileTest: [BOT-FILES] MISMATCH file=database/Ball.decoded sourceBytes=3948 sourceSHA256=69db89f801c5653e2294b3e5b91b67c266ccd52f5769e40e150d947e8820cde7 copyBytes=3948 copySHA256=79fcde105ea4591eeade1d82c4f51267afa25705ed4f91fb168dd29974b200e7
+11-15 11:34:49.151  2828  2866 I PeerlinkFileTest: [BOT-FILES] MISMATCH file=native/PesMobile/Content/Paks/global.utoc sourceBytes=669 sourceSHA256=a8912ac9cf7c9b414a937feeea39ae6d01a3827898d43809b461ff80ea882373 copyBytes=669 copySHA256=08aa33fcdb9ad137dfca268ee4470ebe05ccd57bc23712f48d06ee1e62f20a2e
+11-15 11:34:49.153  2828  2866 I PeerlinkFileTest: [BOT-FILES] SUMMARY result=PASS verified=108 repaired=2 cpk=47 resources=5 nativeResources=5 databaseTables=47 nativeDatabaseTables=44 downloadedUpdates=NOT_CHECKED
+11-15 11:34:49.163  2828  2866 I PeerlinkFileTest: ORIGINAL_SOURCE_AUDIT_AND_SAME_SIZE_CACHE_REPAIR_PASSED
