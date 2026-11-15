@@ -1,0 +1,31 @@
+{
+  "attachment": "peerlink_match_1794717853785.zip",
+  "attachment_sha256": "f074458da6a23d239da90e052160ac8e47ce9b2668e5557e996c6400aa1954ed",
+  "tested_release": "phone-engine-test-4389161",
+  "times": "device local time",
+  "observations": [
+    {
+      "time": "05:41:08.065",
+      "event": "Original network-I/O readiness returned 1"
+    },
+    {
+      "time": "05:41:10.951",
+      "event": "Native configured transport selected",
+      "base_session": 1,
+      "configured_transport": true
+    },
+    {
+      "time": "05:41:16.492",
+      "event": "Original SDK peer verdict reached 1; peer heard"
+    },
+    {
+      "time": "05:41:18.189",
+      "event": "Driver stopped: The server's peer connection record has an invalid length"
+    }
+  ],
+  "server_connection_report_reached": false,
+  "game_id_reached": false,
+  "native_match_setup_reached": false,
+  "failed_reply_body_in_export": false,
+  "kickoff_verified": false
+}

@@ -60,28 +60,43 @@ use and phone-game kickoff require separate evidence.
 
 ## Verification
 
-The current connection-test APK is `4389161`, published as
-[`phone-engine-test-4389161`](https://github.com/EdenAlpha/Peerlink-Bot/releases/tag/phone-engine-test-4389161).
-It supplies the missing original TURN configuration and binary peer connection
-records, and waits for the engine's asynchronous network-I/O objects before
-opening its configured native P2P transport.
+The current connection-test APK is `0979e4c`, published as
+[`phone-engine-test-0979e4c`](https://github.com/EdenAlpha/Peerlink-Bot/releases/tag/phone-engine-test-0979e4c).
+The latest phone export reached configured native transport and SDK verdict 1,
+then the driver's peer-record length check stopped setup before GameID.
+This patch accepts GET/WATCH records without the size metadata supplied on
+SEND, uses their decoded byte length, and retains native-input bounds and
+validation of explicit sizes. It also reports declared/decoded counts on an
+actual mismatch. The failed reply body is not present in the phone export.
 
-The exact packaged APK passed a fresh, unhooked two-engine test on ARM64
-Android 15: both configured transports connected, both original channels 14/15
-reached state 4, and both survived the hold. The production-ferry/report-order
-pair, startup/controller/ferry checks and unanswered-peer negative check also
-passed. Android CI, JVM tests and Android 14/15 host tests passed. Evidence and
-precise limits are in
-[`tests/evidence/phone-configured-transport-20261115`](tests/evidence/phone-configured-transport-20261115/README.md).
-
-This was owned local P2P with original server-configuration callbacks. It did
-not allocate TURN or establish fresh Konami authentication, a physical-phone
-kickoff, or visible bot Pass response. Gameplay still requires actual data
-channels, match objects and controller readiness. Five-second diagnostic
-samples retain the original frame counter; no heartbeat/readiness flags are
-written.
+All JVM tests, including seven peer-record tests, and Android 14/15 host
+checks passed in
+[Android CI run 43678511111](https://github.com/EdenAlpha/Peerlink-Bot/actions/runs/43678511111).
+The new coverage exercises the production MessagePack decoder and shared
+connection phase. It is not a new native match test. The engine and ferry are
+unchanged; physical-phone kickoff and visible bot Pass still require a fresh
+match. Evidence is in
+[`tests/evidence/phone-peer-record-size-20261115`](tests/evidence/phone-peer-record-size-20261115/README.md).
 
 Current APK SHA-256:
+`a32fb24f69c098b97be03c54576a4a7ccb9e00e99bd63d40ccd0eb96ca427eb0`.
+
+The previous configuration-test APK was `4389161`, published as
+[`phone-engine-test-4389161`](https://github.com/EdenAlpha/Peerlink-Bot/releases/tag/phone-engine-test-4389161).
+It supplied original TURN configuration and binary peer connection records,
+and waited for asynchronous network-I/O objects before opening the configured
+native P2P transport.
+
+That exact packaged APK passed an unhooked two-engine test on ARM64 Android
+15: both configured transports connected, channels 14/15 reached state 4,
+and both survived the hold. The production-ferry/report-order pair,
+startup/controller/ferry checks and unanswered-peer negative check also
+passed. Its native test evidence and limits are in
+[`tests/evidence/phone-configured-transport-20261115`](tests/evidence/phone-configured-transport-20261115/README.md).
+The owned local pair did not allocate TURN or establish fresh Konami
+authentication, a physical-phone kickoff, or visible bot Pass response.
+
+Previous configuration-test APK SHA-256:
 `adf555320753775c247379732134db998f8774c1d5e0863d730d0bd99c94ae0a`.
 
 The previous connection-report APK was `f1fd6f0`, published as
