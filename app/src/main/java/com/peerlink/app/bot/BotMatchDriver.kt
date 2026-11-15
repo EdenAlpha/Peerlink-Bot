@@ -262,30 +262,25 @@ object BotMatchDriver {
             check(gs!!["game_sycom"] == "P2P") { "The server selected relay; this bot test requires P2P" }
             val connectingStart = (gs!!["connecting_start_time"] as? Number)?.toLong() ?: 0L
             check(flow.handPeerToEngine(oppBlock!!, opp, connectingStart)) { "The bot engine did not accept the server's session" }
-            // Connect the base session first, then construct its data handler,
-            // then wait for channels 14/15. The handler's constructor needs the
-            // connected session's configuration; the channels need the handler.
-            var channelInputsPrepared = false
-            val connectionDeadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(90)
+            // Confirm the original peer transport, then send the recorded
+            // server report. Waiting here for data channels blocks the gate
+            // sequence that supplies the later game/session setup inputs.
             status("Connecting both game engines")
             var lastConnectionState = ""
-            while (running) {
-                val state = EngineHost.snapshot()
-                val progress = state.values.take(8).joinToString(",") + ",${state.matchDataHandlerPresent}"
-                if (progress != lastConnectionState) {
-                    log("native connection state [core,sdk,session,channel14,channel15,model,complete,error,handler]=$progress")
-                    lastConnectionState = progress
-                }
-                if (!channelInputsPrepared && state.sessionConnected) {
-                    check(EngineHost.prepareChannels(opp, squadInput)) { "The bot's match-data channel setup was rejected" }
-                    channelInputsPrepared = true
-                    continue
-                }
-                if (channelInputsPrepared && state.connected) break
-                check(System.nanoTime() < connectionDeadline) { "The game connection timed out before both match-data channels opened" }
-                Thread.sleep(500)
-            }
-            if (!running) return
+            if (!PeerConnectionPhase.awaitTransport(
+                running = { running },
+                snapshot = EngineHost::snapshot,
+                prepareChannels = { EngineHost.prepareChannels(opp, squadInput) },
+                progress = { state ->
+                    val progress = state.values.take(8).joinToString(",") + ",${state.matchDataHandlerPresent}"
+                    if (progress != lastConnectionState) {
+                        log("native connection state [core,sdk,session,channel14,channel15,model,complete,error,handler]=$progress")
+                        lastConnectionState = progress
+                    }
+                },
+            )) return
+            log("original peer transport confirmed; reporting connection before waiting for match data")
+            status("Peer link connected — confirming match setup with the server")
 
             // -- check-res echo (capture block 105 body); retried on noise,
             //    otherwise logged and carried on (the game sends its own).

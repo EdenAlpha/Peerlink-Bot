@@ -19,6 +19,7 @@ class BotEngineService : Service() {
     private var keyDown = false
     private var pss = 0L
     private var nextMemorySample = 0L
+    private var nextNativeSample = 0L
     private val messenger = Messenger(object : Handler(Looper.getMainLooper()) {
         override fun handleMessage(message: Message) {
             val request = Message.obtain(message)
@@ -100,13 +101,22 @@ class BotEngineService : Service() {
     private fun snapshot(): EngineSnapshot {
         val now = SystemClock.elapsedRealtime()
         if (now >= nextMemorySample) { pss = Debug.getPss().toLong(); nextMemorySample = now + 5000 }
-        return EngineSnapshot(EngineRuntime.snapshot().copyOf(20).also { it[18] = pss })
+        return EngineSnapshot(EngineRuntime.snapshot().copyOf(21).also { it[18] = pss })
+    }
+    private fun logNativeState(state: EngineSnapshot) {
+        val now = SystemClock.elapsedRealtime()
+        if (now < nextNativeSample) return
+        nextNativeSample = now + 5000
+        runCatching { observer?.send(Message.obtain(null, EngineProtocol.NATIVE_STATE).apply {
+            data = Bundle().apply { putLongArray("state", state.values) }
+        }) }
     }
     private fun poll() {
         try {
             val advance = EngineRuntime.advanceMatch(controllerAllowed)
             check(advance >= 0) { "Bot match setup failed (stage $advance)" }
             val state = snapshot()
+            logNativeState(state)
             val line = state.status()
             if (line != lastStatus) report(line)
             val now = SystemClock.elapsedRealtime()
@@ -115,6 +125,7 @@ class BotEngineService : Service() {
             }
         } catch (error: Exception) {
             testing = false
+            runCatching { logNativeState(snapshot()) }
             EngineRuntime.neutral()
             report(error.message ?: "Bot match setup stopped")
         }

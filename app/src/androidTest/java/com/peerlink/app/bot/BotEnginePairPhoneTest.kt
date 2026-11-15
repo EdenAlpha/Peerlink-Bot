@@ -31,9 +31,13 @@ class BotEnginePairPhoneTest {
         val beforePeerDelay = args.getString("beforePeerDelayMs")?.toLongOrNull() ?: 0L
         val splitCandidates = args.getString("splitCandidates") == "true"
         val productionFerry = args.getString("productionFerry") == "true"
+        val serverBeforeData = args.getString("serverBeforeData") == "true"
         require(!productionFerry || splitCandidates)
         require(peerNat in 0..0xffffffffL && beforePeerDelay in 0..180_000)
         val squad = File(context.filesDir, "early-channel-test/squad.dto").readBytes()
+        // Test-only readiness signal, separate from all original game packets.
+        val reportSignal = if (serverBeforeData && role == "B")
+            DatagramSocket(InetSocketAddress("127.0.0.1", 39205)).apply { soTimeout = 60_000 } else null
         val ferry: AutoCloseable? = if (role != "A") null else if (productionFerry)
             ProductionPairFerry(uid, peer) else PairFerry(splitCandidates)
         try {
@@ -50,8 +54,27 @@ class BotEnginePairPhoneTest {
             assertTrue(EngineHost.setPeers(record))
             if (role == "A" && productionFerry) PeerSlot.engineAttached = true
             assertTrue(EngineHost.openSession(peer, start))
-            val deadline = System.nanoTime() + 45_000_000_000L
             var prepared = false
+            if (serverBeforeData && role == "A") {
+                assertTrue(PeerConnectionPhase.awaitTransport(
+                    running = { true }, snapshot = EngineHost::snapshot,
+                    prepareChannels = { EngineHost.prepareChannels(peer, squad) },
+                    progress = {}, timeoutSeconds = 45, pause = { Thread.sleep(100) },
+                ))
+                prepared = true
+                val transport = EngineHost.snapshot()
+                assertTrue(transport.transportConnected)
+                assertFalse(transport.canTestPass)
+                Log.i("PeerlinkPairTest", "TRANSPORT_REPORTED_BEFORE_PEER_MODEL state=${transport.values.contentToString()}")
+                DatagramSocket().use { it.send(DatagramPacket(byteArrayOf(1), 1, InetSocketAddress("127.0.0.1", 39205))) }
+            } else if (reportSignal != null) {
+                assertFalse(EngineHost.snapshot().matchDataHandlerPresent)
+                val signal = DatagramPacket(ByteArray(1), 1)
+                reportSignal.receive(signal)
+                assertEquals(1, signal.data[0].toInt())
+                Log.i("PeerlinkPairTest", "PEER_MODEL_RELEASED_AFTER_TRANSPORT_REPORT")
+            }
+            val deadline = System.nanoTime() + 45_000_000_000L
             var last = ""
             while (true) {
                 val state = EngineHost.snapshot()
@@ -80,6 +103,7 @@ class BotEnginePairPhoneTest {
             // Keep both peers alive through the other test's final assertion.
             Thread.sleep(1000)
             EngineHost.stop()
+            reportSignal?.close()
             ferry?.close()
         }
     }

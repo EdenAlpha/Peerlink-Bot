@@ -343,10 +343,13 @@ JNIEXPORT jint JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeAdvanceMatc
 
 JNIEXPORT jlongArray JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeSnapshot(
         JNIEnv *env, jobject, jlong base) {
-    jlong state[20]{};
+    jlong state[21]{};
     if (valid(base)) {
         TaskLock lock;
         state[0] = *reinterpret_cast<unsigned char *>(g_base + 0xa53b850);
+        // Read the application's original published frame counter. Never
+        // advance its heartbeat or manually tick the engine from this host.
+        state[20] = entry<uint32_t (*)()>(0x2f4b5bc)();
         state[1] = g_client ? entry<uint32_t (*)(uintptr_t)>(0x7e013ac)(g_client) : 0;
         uintptr_t manager = session_manager();
         if (manager) {
@@ -401,8 +404,8 @@ JNIEXPORT jlongArray JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeSnaps
         state[16] = work ? *reinterpret_cast<unsigned char *>(work + 0x6c4c0 + 0x102) : 0;
         state[17] = settings ? *reinterpret_cast<unsigned char *>(settings + 0xd3) : 0;
     }
-    jlongArray result = env->NewLongArray(20);
-    if (result) env->SetLongArrayRegion(result, 0, 20, state);
+    jlongArray result = env->NewLongArray(21);
+    if (result) env->SetLongArrayRegion(result, 0, 21, state);
     return result;
 }
 

@@ -28,6 +28,8 @@ object EngineHost {
             if (message.what == EngineProtocol.STATUS) {
                 val line = data.getString("status").orEmpty()
                 if (line.isNotBlank()) PeerBotService.status(line)
+            } else if (message.what == EngineProtocol.NATIVE_STATE) {
+                data.getLongArray("state")?.let { AppState.appendLog("[BOT-NATIVE] state=${it.contentToString()} (frame counter at index 20)") }
             } else pending.remove(message.arg1)?.complete(data)
         }
     })
@@ -146,11 +148,13 @@ internal object EngineProtocol {
     const val PROBE_CONTROLLER = 11
     const val PREPARE_CHANNELS = 12
     const val STATUS = 100
+    const val NATIVE_STATE = 101
 }
 
 data class EngineSnapshot(val values: LongArray) {
     private fun field(index: Int) = values.getOrElse(index) { 0 }
     val sessionConnected get() = field(2) == 4L
+    val transportConnected get() = sessionConnected && field(1) == 1L
     val connected get() = sessionConnected && field(3) == 4L && field(4) == 4L
     val metadataReady get() = field(5) == 5L && field(6) == 1L && field(7) == 0L
     val matchConstructed get() = field(8) == 17L && field(9) == 54L && field(10) == 22L
@@ -160,7 +164,8 @@ data class EngineSnapshot(val values: LongArray) {
     val matchDataHandlerPresent get() = field(19) == 1L
     val ballSpeedMmPerSecond get() = field(15)
     fun status(): String = when {
-        !connected -> "Connecting to your game"
+        !sessionConnected -> "Connecting to your game"
+        !connected -> "Peer link connected — opening match-data channels"
         !metadataReady -> "Connected — exchanging teams"
         !matchConstructed -> "Loading the match — continue in eFootball when ready"
         !ballOnPitch -> "Match loaded — waiting for play to resume"
