@@ -486,9 +486,9 @@ class BotMatchFlow(
             val ok = EngineHost.setPeers(rec)
             if (ok) {
                 PeerSlot.engineAttached = true
-                if (!EngineHost.openSession(peerId, connectingStart)) {
+                if (!EngineHost.beginIntroduction(peerId, connectingStart)) {
                     PeerSlot.engineAttached = false
-                    AppState.appendLog("[BOT-FLOW  ] original session manager did not accept the peer")
+                    AppState.appendLog("[BOT-FLOW  ] original SDK did not start the peer introduction")
                     return false
                 }
                 watchEngineVerdict()

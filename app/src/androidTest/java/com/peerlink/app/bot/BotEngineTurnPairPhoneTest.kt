@@ -44,7 +44,13 @@ class BotEngineTurnPairPhoneTest {
                 "::", 0, "::", 0, 0))
             assertTrue(EngineHost.setPeers(record))
             if (role == "A") PeerSlot.engineAttached = true
-            assertTrue(EngineHost.openSession(peer, start))
+            assertTrue(EngineHost.beginIntroduction(peer, start))
+            assertTrue(PeerConnectionPhase.openAfterIntroduction(
+                running = { true }, sdkVerdict = EngineHost::check,
+                openSession = { EngineHost.openSession(peer, start) },
+                progress = { Log.i("PeerlinkTurnTest", "TURN_${role}_INTRODUCTION verdict=$it") },
+                timeoutSeconds = 45, pause = { Thread.sleep(100) },
+            ))
             var prepared = false
             var acceptedPeerRecord = false
             var nextAnnouncement = 0L

@@ -121,6 +121,9 @@ internal object EngineRuntime {
     fun openSession(peerUid: Long, connectingStart: Long): Boolean = onRuntime {
         client != 0L && nativeOpenSession(base, peerUid, connectingStart)
     }
+    fun beginIntroduction(peerUid: Long, connectingStart: Long): Boolean = onRuntime {
+        client != 0L && nativeBeginIntroduction(base, peerUid, connectingStart)
+    }
 
     fun configureTurn(input: ByteArray): Boolean = onRuntime {
         client != 0L && nativeConfigureTurn(base, input)
@@ -219,6 +222,7 @@ internal object EngineRuntime {
     fun closeHost() { gameHost?.close(); gameHost = null }
 
     private external fun nativeLoad(path: String): Long
+    private external fun nativeBeginIntroduction(base: Long, peer: Long, connectingStart: Long): Boolean
     private external fun nativeConfigureTurn(base: Long, input: ByteArray): Boolean
     private external fun nativeTurnRequest(base: Long): ByteArray?
     private external fun nativeTurnAddress(base: Long): ByteArray?

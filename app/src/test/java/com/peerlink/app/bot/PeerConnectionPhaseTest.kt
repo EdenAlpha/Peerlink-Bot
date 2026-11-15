@@ -4,6 +4,26 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class PeerConnectionPhaseTest {
+    @Test fun matchSessionIsOpenedOnlyAfterTheOriginalIntroductionSucceeds() {
+        var checks = 0
+        var opens = 0
+        assertTrue(PeerConnectionPhase.openAfterIntroduction(
+            running = { true }, sdkVerdict = { if (++checks < 3) 0L else 1L },
+            openSession = { assertEquals(3, checks); opens++; true },
+            pause = { assertEquals(0, opens) },
+        ))
+        assertEquals(1, opens)
+    }
+
+    @Test fun cancelledIntroductionNeverStartsTheMatchSession() {
+        var running = true
+        assertFalse(PeerConnectionPhase.openAfterIntroduction(
+            running = { running }, sdkVerdict = { 0L },
+            openSession = { fail("The introduction has not succeeded"); false },
+            pause = { running = false },
+        ))
+    }
+
     @Test fun confirmedTransportCanProceedWithBothDataChannelsStillClosed() {
         val phoneState = EngineSnapshot(longArrayOf(1, 1, 4, 0, 0, 0, 0, 0))
         var preparations = 0

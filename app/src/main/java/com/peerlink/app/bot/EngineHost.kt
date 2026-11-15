@@ -112,6 +112,8 @@ object EngineHost {
         request(EngineProtocol.SET_PEERS, Bundle().apply { putByteArray("record", record) }).getBoolean("ok")
     fun openSession(peerUid: Long, connectingStart: Long): Boolean = request(EngineProtocol.OPEN_SESSION,
         Bundle().apply { putLong("peer", peerUid); putLong("connectingStart", connectingStart) }).getBoolean("ok")
+    internal fun beginIntroduction(peerUid: Long, connectingStart: Long): Boolean = request(EngineProtocol.BEGIN_INTRODUCTION,
+        Bundle().apply { putLong("peer", peerUid); putLong("connectingStart", connectingStart) }).getBoolean("ok")
     internal fun configureTurn(input: ByteArray): Boolean = request(EngineProtocol.CONFIGURE_TURN,
         Bundle().apply { putByteArray("input", input) }).getBoolean("ok")
     internal fun turnRequest(): ByteArray = requireNotNull(
@@ -158,6 +160,7 @@ internal object EngineProtocol {
     const val TURN_ADDRESS = 14
     const val PEER_TURN_ADDRESS = 15
     const val TURN_REQUEST = 16
+    const val BEGIN_INTRODUCTION = 17
     const val STATUS = 100
     const val NATIVE_STATE = 101
 }

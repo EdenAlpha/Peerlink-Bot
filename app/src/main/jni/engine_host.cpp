@@ -43,6 +43,8 @@ int g_match_stage = 0;
 bool g_preview_proceeded = false;
 bool g_controller_scanned = false;
 uint32_t g_channel_peer = 0;
+uint32_t g_introduction_peer = 0;
+uint32_t g_introduction_start = 0;
 
 struct EngineString { uint64_t words[3]; };
 struct EnginePair { EngineString identity, channel; };
@@ -100,6 +102,16 @@ uintptr_t session_manager() {
 uintptr_t turn_service() {
     uintptr_t services = entry<uintptr_t (*)()>(0x7e0afbc)();
     return services ? *reinterpret_cast<uintptr_t *>(services + 0x50) : 0;
+}
+bool begin_introduction(uint32_t peer, uint32_t connecting_start) {
+    if (g_introduction_peer)
+        return g_introduction_peer == peer && g_introduction_start == connecting_start;
+    uintptr_t sdk = entry<uintptr_t (*)()>(0x7db9468)();
+    if (!sdk) return false;
+    entry<void (*)(uintptr_t, uint32_t, uint32_t, uint32_t)>(0x7db99ec)(sdk, connecting_start, 0, 1);
+    g_introduction_peer = peer;
+    g_introduction_start = connecting_start;
+    return true;
 }
 
 // Bounded, owned IPC input. Credentials and certificates never enter logs.
@@ -659,6 +671,13 @@ JNIEXPORT jboolean JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativePeerTur
     return JNI_TRUE;
 }
 
+JNIEXPORT jboolean JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeBeginIntroduction(
+        JNIEnv *, jobject, jlong base, jlong peer, jlong connecting_start) {
+    if (!valid(base) || !g_client || peer <= 0 || peer > 0xffffffffLL || peer == g_uid ||
+        connecting_start <= 0 || connecting_start > 0xffffffffLL) return JNI_FALSE;
+    return begin_introduction(static_cast<uint32_t>(peer), static_cast<uint32_t>(connecting_start)) ? JNI_TRUE : JNI_FALSE;
+}
+
 JNIEXPORT jboolean JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeOpenSession(
         JNIEnv *, jobject, jlong base, jlong peer, jlong connecting_start) {
     if (!valid(base) || !g_client || peer <= 0 || peer > 0xffffffffLL || peer == g_uid ||
@@ -674,9 +693,7 @@ JNIEXPORT jboolean JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeOpenSes
     append_identity(config + 0x28, static_cast<uint32_t>(peer));
     uint32_t accepted = 0;
     if (entry<uint32_t (*)(const void *)>(0x7d52c14)(config) & 1) {
-        uintptr_t sdk = entry<uintptr_t (*)()>(0x7db9468)();
-        if (sdk) {
-            entry<void (*)(uintptr_t, uint32_t, uint32_t, uint32_t)>(0x7db99ec)(sdk, static_cast<uint32_t>(connecting_start), 0, 1);
+        if (begin_introduction(static_cast<uint32_t>(peer), static_cast<uint32_t>(connecting_start))) {
             uintptr_t holder = *reinterpret_cast<uintptr_t *>(g_base + 0xa535738);
             uintptr_t provider = holder ? *reinterpret_cast<uintptr_t *>(holder) : 0;
             // TaskMatchSession enters through OnlineSystemMultiplay, which

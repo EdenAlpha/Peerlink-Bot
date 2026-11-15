@@ -55,6 +55,7 @@ class BotEngineService : Service() {
                 }
                 EngineProtocol.SET_PEERS -> result.putBoolean("ok", EngineRuntime.setPeers(requireNotNull(args.getByteArray("record"))))
                 EngineProtocol.OPEN_SESSION -> result.putBoolean("ok", EngineRuntime.openSession(args.getLong("peer"), args.getLong("connectingStart")))
+                EngineProtocol.BEGIN_INTRODUCTION -> result.putBoolean("ok", EngineRuntime.beginIntroduction(args.getLong("peer"), args.getLong("connectingStart")))
                 EngineProtocol.CHECK -> result.putLong("verdict", EngineRuntime.check())
                 EngineProtocol.CONFIGURE_TURN -> result.putBoolean("ok", EngineRuntime.configureTurn(
                     requireNotNull(args.getByteArray("input"))))
