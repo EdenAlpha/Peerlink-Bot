@@ -84,3 +84,26 @@ settings; existing disabled settings, inactive sources and incomplete match
 states still block Pass. The room's controller authorization remains required
 by the service. The focused follow-up test samples the home side before and
 after a private-engine Pass, separately from its native queue acceptance.
+
+
+## Exact released APK: bounded home-input follow-up
+
+Candidate `6c7d0a9`, CI `43753290885`, was installed from its hashed artifact and
+ran on the same fresh Android 15 pair. Both test methods **passed** within their
+900-second limits (414.635 s HOME, 411.284 s AWAY). Each collected 300 loading
+samples, including 112 playable samples. HOME submitted one A/Pass through the
+production private-engine input path after three playable samples. All 30
+100-ms follow-up samples were stationary. Ball motion first appeared about
+24 seconds after the press, and the two engines ended at the same position.
+This establishes accepted input submission and sustained matching simulation,
+not a confirmed specific Pass response. The optional settings were absent on
+HOME; AWAY later had a present enabled settings object. No screen input or
+external native observer was used.
+
+`android15-pass-submission-observation.json` retains sanitized samples and exact
+artifact/release provenance. `retained-qemu-transition-inventory.json` preserves
+a sanitized reference from the earlier QEMU transition logs without publishing
+account/session data. The released APK digest matches the installed test APK:
+`06380410641bd082e508779e7ccba679554325ae2c70eed77eb2b5853e5a47b4`.
+The first resource preparation downloads approximately 2.2 GB and reuses verified
+cached files. The physical Infinix/full-game connection remains untested.

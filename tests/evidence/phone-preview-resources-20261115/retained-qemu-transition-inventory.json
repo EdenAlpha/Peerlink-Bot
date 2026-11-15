@@ -1,0 +1,151 @@
+{
+  "originalEngineSha256": "2cea0c85344d7d7f295aea1c2353621f02db78dbccd888a0a21a0508ac330659",
+  "source": "Retained two-engine-full-app-v278 console/command files",
+  "scope": "Sanitized sequence only; excludes credentials, account/session DTOs and raw console logs",
+  "roles": {
+    "A": {
+      "firstMatchTransitions": [
+        [
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          1
+        ],
+        [
+          3,
+          2,
+          0
+        ],
+        [
+          8,
+          1,
+          0
+        ],
+        [
+          8,
+          3,
+          0
+        ],
+        [
+          8,
+          8,
+          0
+        ],
+        [
+          13,
+          2,
+          0
+        ],
+        [
+          12,
+          0,
+          0
+        ],
+        [
+          16,
+          0,
+          0
+        ],
+        [
+          17,
+          0,
+          0
+        ],
+        [
+          23,
+          1,
+          0
+        ],
+        [
+          23,
+          2,
+          0
+        ],
+        [
+          17,
+          0,
+          0
+        ]
+      ],
+      "playOuter17Observed": true,
+      "menuContinueRequestObserved": true,
+      "earlyOptionalSettingsAbsentObserved": true
+    },
+    "B": {
+      "firstMatchTransitions": [
+        [
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          1
+        ],
+        [
+          3,
+          3,
+          0
+        ],
+        [
+          8,
+          1,
+          0
+        ],
+        [
+          8,
+          8,
+          0
+        ],
+        [
+          13,
+          2,
+          0
+        ],
+        [
+          12,
+          0,
+          0
+        ],
+        [
+          16,
+          0,
+          0
+        ],
+        [
+          17,
+          0,
+          0
+        ],
+        [
+          23,
+          1,
+          0
+        ],
+        [
+          23,
+          2,
+          0
+        ],
+        [
+          23,
+          5,
+          0
+        ],
+        [
+          17,
+          0,
+          0
+        ]
+      ],
+      "playOuter17Observed": true,
+      "menuContinueRequestObserved": true,
+      "earlyOptionalSettingsAbsentObserved": true
+    }
+  }
+}
