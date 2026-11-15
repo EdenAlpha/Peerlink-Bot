@@ -64,6 +64,11 @@ class BotEngineService : Service() {
                 EngineProtocol.CHECK -> result.putLong("verdict", EngineRuntime.check())
                 EngineProtocol.CONFIGURE_TURN -> result.putBoolean("ok", EngineRuntime.configureTurn(
                     requireNotNull(args.getByteArray("input"))))
+                EngineProtocol.REVISION_POLICY -> {
+                    check(args.containsKey("enabled")) { "Server revision policy is missing" }
+                    result.putBoolean("ok", EngineRuntime.configureRevisionCheck(args.getBoolean("enabled")))
+                    diagnostic("SERVER_REVISION_POLICY enabled=${args.getBoolean("enabled")} accepted=${result.getBoolean("ok")}")
+                }
                 EngineProtocol.TURN_REQUEST -> result.putByteArray("request", EngineRuntime.turnRequest())
                 EngineProtocol.TURN_ADDRESS -> result.putByteArray("address", EngineRuntime.turnAddress())
                 EngineProtocol.PEER_TURN_ADDRESS -> result.putBoolean("ok", EngineRuntime.peerTurnAddress(
@@ -148,6 +153,7 @@ class BotEngineService : Service() {
             val state = snapshot(passive = true)
             connectionTrace.sample(state, SystemClock.elapsedRealtime()).forEach {
                 diagnostic(it.text, it.firstFailure)
+                if (it.firstFailure) diagnostic(EngineRuntime.databaseDiagnostics())
             }
         } catch (error: Exception) {
             diagnostic("MONITOR_UNAVAILABLE error=${error.javaClass.simpleName}; native cause not observed")
@@ -179,7 +185,8 @@ class BotEngineService : Service() {
             pollTask?.cancel(false)
             runCatching { logNativeState(snapshot()) }
             EngineRuntime.neutral()
-            report(error.message ?: "Bot match setup stopped")
+            val failure = runCatching { snapshot() }.getOrNull()
+            report(if (failure?.nativeFailed == true) failure.status() else error.message ?: "Bot match setup stopped")
         }
     }
     private fun pressPass(): Boolean {

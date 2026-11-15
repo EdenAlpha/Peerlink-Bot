@@ -132,6 +132,12 @@ internal object EngineRuntime {
     fun configureTurn(input: ByteArray): Boolean = onRuntime {
         client != 0L && nativeConfigureTurn(base, input)
     }
+
+    fun configureRevisionCheck(enabled: Boolean): Boolean = onRuntime {
+        client != 0L && nativeConfigureRevisionCheck(base, enabled)
+    }
+
+    fun databaseDiagnostics(): String = onRuntime { nativeDatabaseDiagnostics(base) }
     fun turnRequest(): ByteArray? = onRuntime { if (client == 0L) null else nativeTurnRequest(base) }
 
     fun turnAddress(): ByteArray? = onRuntime { if (client == 0L) null else nativeTurnAddress(base) }
@@ -231,6 +237,8 @@ internal object EngineRuntime {
     private external fun nativeBeginIntroduction(base: Long, peer: Long, connectingStart: Long): Boolean
     private external fun nativeTransportIoReady(base: Long): Int
     private external fun nativeConfigureTurn(base: Long, input: ByteArray): Boolean
+    private external fun nativeConfigureRevisionCheck(base: Long, enabled: Boolean): Boolean
+    private external fun nativeDatabaseDiagnostics(base: Long): String
     private external fun nativeTurnRequest(base: Long): ByteArray?
     private external fun nativeTurnAddress(base: Long): ByteArray?
     private external fun nativePeerTurnAddress(base: Long, input: ByteArray): Boolean

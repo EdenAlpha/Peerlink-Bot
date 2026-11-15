@@ -38,6 +38,9 @@ class BotEngineTurnPairPhoneTest {
             assertTrue(EngineHost.lastError, EngineHost.prepare(context, uid))
             assertTrue("File verification did not reach the exported log",
                 AppState.getLogs().contains("[BOT-FILES] SUMMARY result=PASS"))
+            val revisionCheck = MatchServerSettings.revisionCheck(mapOf("result" to "NOERR",
+                "is_revision_check" to args.getString("revisionCheck", "YES")))
+            assertTrue("Could not apply the server revision policy", EngineHost.configureRevisionCheck(revisionCheck))
             assertTrue(EngineHost.turnRequest().size in 5..1028)
             assertTrue(EngineHost.configureTurn(input))
             val record = requireNotNull(EngineHost.buildPeerRecord(peer,
@@ -103,6 +106,11 @@ class BotEngineTurnPairPhoneTest {
             assertEquals(0L, connected.values[23])
             assertEquals(1L, connected.values[26])
             assertEquals(2L, connected.values[28])
+            assertEquals("Original model did not inherit the configured server policy", if (revisionCheck) 1L else 0L, connected.values[25])
+            assertTrue("Native metadata synchronization did not complete", connected.metadataReady)
+            assertFalse("Changing policy during an active match must be refused", EngineHost.configureRevisionCheck(!revisionCheck))
+            assertEquals(if (revisionCheck) 1L else 0L, EngineHost.snapshot().values[25])
+            Log.i("PeerlinkTurnTest", "ORIGINAL_SERVER_REVISION_POLICY_${role}_VERIFIED enabled=$revisionCheck")
             assertTrue("Independent native monitor did not reach the export log",
                 AppState.getLogs().contains("[BOT-DIAG] NATIVE_STATE"))
             Log.i("PeerlinkTurnTest", "ORIGINAL_CONFIGURED_TURN_${role}_DIAGNOSTICS_ACTIVE")
@@ -117,6 +125,7 @@ class BotEngineTurnPairPhoneTest {
                 assertTrue("Peer process stopped but no native failure reached the export", logs.contains("FIRST_NATIVE_FAILURE"))
                 assertTrue(logs.contains("disconnectInitiator=unresolved"))
                 assertTrue(logs.contains("trigger=first_native_failure"))
+                assertTrue("Database signatures missing from failure export", logs.contains("DATABASE_SIGNATURES localPlayer="))
                 Log.i("PeerlinkTurnTest", "ORIGINAL_CONFIGURED_TURN_A_PEER_STOP_OBSERVED")
                 logs.lineSequence().filter { it.contains("[BOT-DIAG]") || it.contains("[BOT-FLOW]") }
                     .forEach { Log.i("PeerlinkTurnTest", "EXPORT_DIAGNOSTIC $it") }

@@ -245,3 +245,13 @@ Before startup, PeerLink now streams SHA-256 comparisons between the installed g
 `GameFileIntegrityPhoneTest` deliberately changes one byte in a cached database and one native resource, preserving their sizes; it checks both are detected and restored from the original sources. The standalone `GameArchiveRegression` compares all 44 decoded tables against independent lab output.
 
 Verified file-audit build: [phone-engine-test-21929d2](https://github.com/EdenAlpha/Peerlink-Bot/releases/tag/phone-engine-test-21929d2). Exact APK, Android corruption repair, native pair and controlled-disconnect evidence: [phone-file-audit-20261115](tests/evidence/phone-file-audit-20261115/README.md).
+
+### Native database-revision policy
+
+The physical-phone export `peerlink_match_1794741143595.zip` reached successful connection reporting, a server game ID, both native match-data channels, and accepted match setup. Its first native failure was reason 8 / synchronization result 4: player/coach database checksum comparison. The ferry still forwarded traffic, with no recorded drops and no local stop request.
+
+The original server-environment parser at `07740314` reads `is_revision_check` into response field `+990`. Its normal completion handler `0773d85c` compares that string with the original YES enumeration and stores the result in services `+10` → configuration `+4dc`. Model constructor `07a1df90` consumes that flag; validator `07a2131c` performs the checksum comparison when enabled. The standalone phone host previously kept the constructor's default enabled policy.
+
+The driver now fetches current `CMD_GET_SERVER_ENV` settings, requires an explicit successful YES/NO response, and copies that server policy into its configuration before introduction or model creation. Missing/invalid settings fail explicitly. The native model's checksums, phase, synchronization result and connection flags are never changed by this adapter. A policy change after introduction/model creation is refused. This addresses the confirmed missing startup setting; a fresh physical-phone match is still required to establish whether it clears the observed failure.
+
+The startup file audit is retained separately and exported as `game_file_audit.txt`, with timestamps and an explicit note that an engine may reuse a previous audit. The latest phone export contained no startup audit because the engine was already running when its session log began. Native failures now remain visible in the status text; first-failure diagnostics also include bounded player/coach checksum strings when available.

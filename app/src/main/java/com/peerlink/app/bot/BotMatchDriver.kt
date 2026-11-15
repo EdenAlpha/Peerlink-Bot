@@ -93,6 +93,20 @@ object BotMatchDriver {
         val self = gate.uid
         try {
             check(EngineHost.isReady) { "Bot simulation is not ready; start a new room" }
+            // The regular client applies CMD_GET_SERVER_ENV before constructing
+            // its match-data model. A standalone host otherwise retains the
+            // native default, which can reject a server-permitted revision.
+            while (running) {
+                val environment = gate.step("CMD_GET_SERVER_ENV")
+                if (transient(environment["result"]?.toString())) { Thread.sleep(RETRY_MS); continue }
+                val revisionCheck = MatchServerSettings.revisionCheck(environment)
+                check(EngineHost.configureRevisionCheck(revisionCheck)) {
+                    "The bot could not apply the server's database revision policy"
+                }
+                log("SERVER_MATCH_SETTINGS source=CMD_GET_SERVER_ENV is_revision_check=${if (revisionCheck) "YES" else "NO"} nativeApplied=true")
+                break
+            }
+            if (!running) return
             val squadReply = flow.userSquad(gate, self)
             check(squadReply["result"] == "NOERR") { "Could not read the bot's current squad" }
             val squadInput = SquadInput.encode(squadReply, self)

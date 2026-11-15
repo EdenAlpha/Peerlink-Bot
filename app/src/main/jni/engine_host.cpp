@@ -279,6 +279,55 @@ JNIEXPORT jstring JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeStartupI
     return env->NewStringUTF(text);
 }
 
+JNIEXPORT jboolean JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeConfigureRevisionCheck(
+        JNIEnv *, jobject, jlong base, jboolean enabled) {
+    if (!valid(base) || !g_client) return JNI_FALSE;
+    TaskLock lock;
+    // Apply only before introduction/model creation, just as the normal client
+    // does after CMD_GET_SERVER_ENV. 07740314 parses is_revision_check into
+    // response+990; 0773d85c compares it with YES and stores config+4dc.
+    // 07a1df90 then copies that policy into the new model. This never writes a
+    // model phase, checksum, connection flag or validation result.
+    if (!lock.manager || g_introduction_peer || *reinterpret_cast<uintptr_t *>(g_base + 0xa5bb188))
+        return JNI_FALSE;
+    uintptr_t services = entry<uintptr_t (*)()>(0x7e0afbc)();
+    uintptr_t config = services ? *reinterpret_cast<uintptr_t *>(services + 0x10) : 0;
+    if (!config) return JNI_FALSE;
+    auto *policy = reinterpret_cast<unsigned char *>(config + 0x4dc);
+    *policy = enabled == JNI_TRUE ? 1 : 0;
+    __android_log_print(ANDROID_LOG_INFO, TAG, "server revision policy applied enabled=%u", *policy);
+    return *policy == (enabled == JNI_TRUE ? 1 : 0) ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT jstring JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeDatabaseDiagnostics(
+        JNIEnv *env, jobject, jlong base) {
+    if (!valid(base)) return env->NewStringUTF("DATABASE_SIGNATURES unavailable=engine_not_loaded");
+    TaskLock lock;
+    uintptr_t model = *reinterpret_cast<uintptr_t *>(g_base + 0xa5bb188);
+    if (!lock.manager || !model) return env->NewStringUTF("DATABASE_SIGNATURES unavailable=no_model");
+    auto checksum = [](uintptr_t object) -> std::string {
+        auto *bytes = reinterpret_cast<const unsigned char *>(object);
+        auto *words = reinterpret_cast<const uintptr_t *>(object);
+        size_t size = (bytes[0] & 1) ? words[1] : bytes[0] >> 1;
+        if (!size) return "empty";
+        if (size != 32) return "unavailable";
+        const char *data = (bytes[0] & 1) ? reinterpret_cast<const char *>(words[2]) : reinterpret_cast<const char *>(bytes + 1);
+        if (!data) return "unavailable";
+        for (size_t i = 0; i < size; ++i)
+            if (!((data[i] >= '0' && data[i] <= '9') || (data[i] >= 'A' && data[i] <= 'F') ||
+                  (data[i] >= 'a' && data[i] <= 'f'))) return "unavailable";
+        return std::string(data, size);
+    };
+    std::string text = "DATABASE_SIGNATURES localPlayer=" + checksum(model + 0x560 + 0x130) +
+        " localCoach=" + checksum(model + 0x560 + 0x148);
+    uintptr_t first = *reinterpret_cast<uintptr_t *>(model + 8), last = *reinterpret_cast<uintptr_t *>(model + 16);
+    if (first && last >= first && (last - first) % 0x510 == 0 && (last - first) / 0x510 <= 24)
+        for (uintptr_t row = first; row < last; row += 0x510)
+            if (*reinterpret_cast<uint32_t *>(row + 0x410) != g_uid)
+                text += " peerPlayer=" + checksum(row + 0x480) + " peerCoach=" + checksum(row + 0x498);
+    return env->NewStringUTF(text.c_str());
+}
+
 JNIEXPORT jboolean JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativePrepareChannels(
         JNIEnv *env, jobject, jlong base, jlong peer, jstring squad) {
     if (!valid(base) || !g_client || !squad || peer <= 0 || peer > 0xffffffffLL || peer == g_uid)

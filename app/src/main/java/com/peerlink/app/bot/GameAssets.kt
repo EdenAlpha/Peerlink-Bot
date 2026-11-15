@@ -12,12 +12,26 @@ internal object GameAssets {
     }
 
     fun prepare(owner: Context, status: (String) -> Unit, audit: (String) -> Unit = {}): Prepared {
-        try { return prepareChecked(owner, status, audit) }
+        val report = StringBuilder("PeerLink startup file audit\nstartedAtMillis=${System.currentTimeMillis()}\n" +
+            "This is the last startup audit; exporting or reusing an engine does not rerun it.\n")
+        val record: (String) -> Unit = { line -> report.appendLine(line); audit(line) }
+        try { return prepareChecked(owner, status, record) }
         catch (error: Exception) {
-            audit("[BOT-FILES] SUMMARY result=FAIL error=${error.javaClass.simpleName}: ${error.message}")
+            record("[BOT-FILES] SUMMARY result=FAIL error=${error.javaClass.simpleName}: ${error.message}")
             throw error
+        } finally {
+            report.appendLine("finishedAtMillis=${System.currentTimeMillis()}")
+            runCatching {
+                val temporary = File.createTempFile(".file-audit-", ".tmp", owner.filesDir)
+                try {
+                    temporary.outputStream().use { it.write(report.toString().toByteArray()); it.fd.sync() }
+                    check(temporary.renameTo(auditReportFile(owner))) { "Cannot save startup file audit" }
+                } finally { temporary.delete() }
+            }.onFailure { audit("[BOT-FILES] REPORT_SAVE_FAILED error=${it.javaClass.simpleName}") }
         }
     }
+
+    fun auditReportFile(owner: Context): File = File(owner.filesDir, "bot-startup-file-audit.txt")
 
     private fun prepareChecked(owner: Context, status: (String) -> Unit, audit: (String) -> Unit): Prepared {
         val game = owner.createPackageContext("jp.konami.pesam", Context.CONTEXT_IGNORE_SECURITY)

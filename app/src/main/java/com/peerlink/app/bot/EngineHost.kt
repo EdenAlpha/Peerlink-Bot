@@ -164,6 +164,8 @@ object EngineHost {
     internal fun beginIntroduction(peerUid: Long, connectingStart: Long): Boolean = request(EngineProtocol.BEGIN_INTRODUCTION,
         Bundle().apply { putLong("peer", peerUid); putLong("connectingStart", connectingStart) }).getBoolean("ok")
     internal fun transportIoReady(): Int = request(EngineProtocol.TRANSPORT_IO_READY).getInt("state")
+    internal fun configureRevisionCheck(enabled: Boolean): Boolean = request(EngineProtocol.REVISION_POLICY,
+        Bundle().apply { putBoolean("enabled", enabled) }).getBoolean("ok")
     internal fun configureTurn(input: ByteArray): Boolean = request(EngineProtocol.CONFIGURE_TURN,
         Bundle().apply { putByteArray("input", input) }).getBoolean("ok")
     internal fun turnRequest(): ByteArray = requireNotNull(
@@ -215,6 +217,7 @@ internal object EngineProtocol {
     const val TURN_REQUEST = 16
     const val BEGIN_INTRODUCTION = 17
     const val TRANSPORT_IO_READY = 18
+    const val REVISION_POLICY = 19
     const val STATUS = 100
     const val NATIVE_STATE = 101
     const val DIAGNOSTIC = 102
@@ -236,6 +239,7 @@ data class EngineSnapshot(val values: LongArray) {
     val matchDataHandlerPresent get() = field(19) == 1L
     val ballSpeedMmPerSecond get() = field(15)
     fun status(): String = when {
+        nativeFailed -> "Bot connection failed: $nativeFailureReason"
         !sessionConnected -> "Connecting to your game"
         !connected -> "Peer link connected — opening match-data channels"
         !metadataReady -> "Connected — exchanging teams"

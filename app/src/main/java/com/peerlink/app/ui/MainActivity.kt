@@ -383,6 +383,9 @@ class MainActivity : AppCompatActivity(), NsdDiscovery.NsdCallback {
                                 // Bundle EVERYTHING into a single zip file.
                                 val entries = mutableListOf<ZipEntryData>()
                                 entries.add(ZipEntryData(name = "match_log.txt", text = fullLog))
+                                val fileAudit = com.peerlink.app.bot.GameAssets.auditReportFile(this@MainActivity)
+                                entries.add(ZipEntryData(name = "game_file_audit.txt", text =
+                                    runCatching { fileAudit.readText() }.getOrDefault("No completed startup file audit is available.\n")))
                                 val javaCrash = com.peerlink.app.core.CrashLogger.getLastReport(this@MainActivity)
                                 if (!javaCrash.isNullOrBlank()) {
                                     entries.add(ZipEntryData(name = "java_crash_report.txt", text = javaCrash))
@@ -422,6 +425,7 @@ class MainActivity : AppCompatActivity(), NsdDiscovery.NsdCallback {
                                             )
                                             appendLine("Contents:")
                                             appendLine("- match_log.txt : full session log")
+                                            appendLine("- game_file_audit.txt : last startup file audit, retained across session-log resets")
                                             if (!javaCrash.isNullOrBlank()) appendLine("- java_crash_report.txt : latest Java exception report")
                                             if (udpTrace.isNotBlank()) {
                                                 appendLine("- udp_trace.csv : UDP timing trace")
