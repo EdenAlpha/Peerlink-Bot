@@ -47,8 +47,19 @@ internal class NativeTurnExchange(
         val encoded = reply["address"] as? String ?: return
         if (encoded.isBlank()) return
         val bytes = Base64.getDecoder().decode(encoded.filterNot(Char::isWhitespace))
-        val size = (reply["address_data_size"] as? Number)?.toInt()
-        require(bytes.size in 1..2048 && size == bytes.size) { "The server's peer connection record has an invalid length" }
+        require(bytes.size in 1..2048) {
+            "The server's peer connection record has an invalid decoded length (${bytes.size} bytes)"
+        }
+        // SEND includes address_data_size, but GET/WATCH may return only the
+        // Base64 address. Its decoded byte count is the native input length.
+        // If a reply explicitly supplies a size, still reject a mismatch.
+        if (reply.containsKey("address_data_size")) {
+            val size = reply["address_data_size"] as? Number
+            require(size != null && size.toLong() == bytes.size.toLong()) {
+                "The server's peer connection record size does not match its decoded length " +
+                    "(declared=${size?.toLong() ?: "non-numeric"}, decoded=${bytes.size})"
+            }
+        }
         if (!bytes.contentEquals(received)) {
             check(acceptPeer(bytes)) { "The bot engine rejected the peer's connection record" }
             received = bytes.copyOf()
