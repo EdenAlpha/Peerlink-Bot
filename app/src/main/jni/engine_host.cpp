@@ -17,6 +17,8 @@
 #include <ctime>
 #include <string>
 #include <cmath>
+#include <vector>
+#include <utility>
 #include <unistd.h>
 
 extern "C" {
@@ -44,6 +46,12 @@ uint32_t g_channel_peer = 0;
 
 struct EngineString { uint64_t words[3]; };
 struct EnginePair { EngineString identity, channel; };
+struct TurnServerRow {
+    uint32_t zone, padding;
+    EngineString address;
+    uint32_t port, tls_port;
+};
+static_assert(sizeof(TurnServerRow) == 40, "build-B TURN response row ABI");
 static_assert(sizeof(EngineString) == 24 && sizeof(EnginePair) == 48, "build-B libc++ ABI");
 static_assert(offsetof(ANativeActivity, vm) == 8 && offsetof(ANativeActivity, clazz) == 24,
               "build-B ANativeActivity ABI requires LP64");
@@ -89,6 +97,32 @@ uintptr_t session_manager() {
     uintptr_t provider = holder ? *reinterpret_cast<uintptr_t *>(holder) : 0;
     return provider ? *reinterpret_cast<uintptr_t *>(provider + 0x100) : 0;
 }
+uintptr_t turn_service() {
+    uintptr_t services = entry<uintptr_t (*)()>(0x7e0afbc)();
+    return services ? *reinterpret_cast<uintptr_t *>(services + 0x50) : 0;
+}
+
+// Bounded, owned IPC input. Credentials and certificates never enter logs.
+struct TurnInputReader {
+    const unsigned char *data;
+    size_t size, position = 0;
+    bool ok = true;
+    uint32_t number() {
+        if (position > size || size - position < 4) { ok = false; return 0; }
+        const auto *p = data + position;
+        position += 4;
+        return (uint32_t(p[0]) << 24) | (uint32_t(p[1]) << 16) | (uint32_t(p[2]) << 8) | p[3];
+    }
+    std::string blob(size_t maximum, bool allow_empty = false) {
+        uint32_t count = number();
+        if (!ok || (!count && !allow_empty) || count > maximum || position > size || size - position < count) {
+            ok = false; return {};
+        }
+        std::string value(reinterpret_cast<const char *>(data + position), count);
+        position += count;
+        return value;
+    }
+};
 
 struct TaskLock {
     uintptr_t manager;
@@ -343,7 +377,7 @@ JNIEXPORT jint JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeAdvanceMatc
 
 JNIEXPORT jlongArray JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeSnapshot(
         JNIEnv *env, jobject, jlong base) {
-    jlong state[21]{};
+    jlong state[23]{};
     if (valid(base)) {
         TaskLock lock;
         state[0] = *reinterpret_cast<unsigned char *>(g_base + 0xa53b850);
@@ -359,9 +393,15 @@ JNIEXPORT jlongArray JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeSnaps
                 state[2] = entry<uint32_t (*)(uintptr_t)>(0x7cedee8)(session);
                 state[3] = entry<uint32_t (*)(uintptr_t, uint32_t)>(0x7cee08c)(session, 14);
                 state[4] = entry<uint32_t (*)(uintptr_t, uint32_t)>(0x7cee08c)(session, 15);
+                uintptr_t strategy = *reinterpret_cast<uintptr_t *>(session + 0x110);
+                uintptr_t type = strategy ? *reinterpret_cast<uintptr_t *>(strategy) : 0;
+                if (type == g_base + 0x992e570) state[21] = 1; // Original NTL fallback.
+                else if (type == g_base + 0x992e858) state[21] = 2; // Original configured TURN transport.
             }
             entry<void (*)(uintptr_t)>(0x8c1f0d0)(manager + 8);
         }
+        uintptr_t turn = turn_service();
+        if (turn) state[22] = entry<uint32_t (*)(uintptr_t)>(0x7e236e0)(turn);
         uintptr_t model = *reinterpret_cast<uintptr_t *>(g_base + 0xa5bb188);
         if (model) {
             state[5] = *reinterpret_cast<uint32_t *>(model + 0x7b8);
@@ -404,8 +444,8 @@ JNIEXPORT jlongArray JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeSnaps
         state[16] = work ? *reinterpret_cast<unsigned char *>(work + 0x6c4c0 + 0x102) : 0;
         state[17] = settings ? *reinterpret_cast<unsigned char *>(settings + 0xd3) : 0;
     }
-    jlongArray result = env->NewLongArray(21);
-    if (result) env->SetLongArrayRegion(result, 0, 21, state);
+    jlongArray result = env->NewLongArray(23);
+    if (result) env->SetLongArrayRegion(result, 0, 23, state);
     return result;
 }
 
@@ -506,6 +546,93 @@ JNIEXPORT jboolean JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeSetPeer
     uint32_t result = entry<uint32_t (*)(uintptr_t, const void *, uint32_t)>(0x7db96b4)(0, record, 1);
     free(record);
     return result & 1 ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT jboolean JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeConfigureTurn(
+        JNIEnv *env, jobject, jlong base, jbyteArray input) {
+    if (!valid(base) || !g_client || !input) return JNI_FALSE;
+    jsize count = env->GetArrayLength(input);
+    if (count < 8 || count > 131072) return JNI_FALSE;
+    std::vector<unsigned char> bytes(static_cast<size_t>(count));
+    env->GetByteArrayRegion(input, 0, count, reinterpret_cast<jbyte *>(bytes.data()));
+    if (env->ExceptionCheck() || memcmp(bytes.data(), "TRN1", 4)) return JNI_FALSE;
+    TurnInputReader reader{bytes.data(), bytes.size(), 4};
+    uint32_t servers = reader.number();
+    if (servers < 1 || servers > 64) return JNI_FALSE;
+    struct RowInput { uint32_t zone, port, tls_port; std::string address; };
+    std::vector<RowInput> inputs;
+    bool have_tls = false;
+    for (uint32_t i = 0; i < servers && reader.ok; ++i) {
+        RowInput row{reader.number(), reader.number(), reader.number(), reader.blob(253)};
+        if (row.port > 65535 || row.tls_port > 65535) reader.ok = false;
+        for (unsigned char c : row.address) if (c < 33 || c > 126) reader.ok = false;
+        have_tls = have_tls || row.tls_port;
+        inputs.push_back(std::move(row));
+    }
+    std::string id = reader.blob(1024), password = reader.blob(1024), origin = reader.blob(1024, true);
+    std::string certificate = reader.blob(2048);
+    if (!reader.ok || reader.position != reader.size || !have_tls ||
+        id.find('\0') != std::string::npos || password.find('\0') != std::string::npos ||
+        origin.find('\0') != std::string::npos) return JNI_FALSE;
+    TaskLock lock;
+    uintptr_t manager = session_manager(), turn = turn_service();
+    if (!lock.manager || !turn || !manager || *reinterpret_cast<uintptr_t *>(manager + 0x38)) return JNI_FALSE;
+    // The original response callback takes these owned parsed response DTOs.
+    // It copies the account/certificate and selects the original TLS endpoints.
+    alignas(8) unsigned char account[0x850]{};
+    auto construct = entry<void (*)(void *, const char *, size_t)>(0x2f3877c);
+    construct(account, id.data(), id.size());
+    construct(account + 0x18, password.data(), password.size());
+    construct(account + 0x30, origin.data(), origin.size());
+    memcpy(account + 0x48, certificate.data(), certificate.size());
+    *reinterpret_cast<uint32_t *>(account + 0x848) = 2048;
+    *reinterpret_cast<uint32_t *>(account + 0x84c) = static_cast<uint32_t>(certificate.size());
+    entry<void (*)(const void *)>(0x7e903dc)(account);
+    for (size_t offset : {size_t(0), size_t(0x18), size_t(0x30)})
+        destroy_string(*reinterpret_cast<EngineString *>(account + offset));
+    std::vector<TurnServerRow> rows(inputs.size());
+    for (size_t i = 0; i < inputs.size(); ++i) {
+        rows[i].zone = inputs[i].zone;
+        rows[i].port = inputs[i].port;
+        rows[i].tls_port = inputs[i].tls_port;
+        construct(&rows[i].address, inputs[i].address.data(), inputs[i].address.size());
+    }
+    TurnServerRow *begin = rows.data(), *end = begin + rows.size();
+    entry<void (*)(TurnServerRow **, TurnServerRow **)>(0x7e902ec)(&begin, &end);
+    for (auto &row : rows) destroy_string(row.address);
+    uintptr_t list = entry<uintptr_t (*)(uintptr_t)>(0x7e23468)(turn);
+    bool accepted = list && *reinterpret_cast<uintptr_t *>(list) != *reinterpret_cast<uintptr_t *>(list + 8);
+    __android_log_print(ANDROID_LOG_INFO, TAG, "original TURN configuration accepted=%u", accepted);
+    return accepted ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT jbyteArray JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeTurnAddress(
+        JNIEnv *env, jobject, jlong base) {
+    if (!valid(base) || !g_client) return nullptr;
+    TaskLock lock;
+    uintptr_t turn = turn_service();
+    if (!lock.manager || !turn) return nullptr;
+    uint32_t count = entry<uint32_t (*)(uintptr_t)>(0x7e236e0)(turn);
+    uintptr_t address = entry<uintptr_t (*)(uintptr_t)>(0x7e236ac)(turn);
+    if (!address || !count || count > 2048) return nullptr;
+    jbyteArray result = env->NewByteArray(static_cast<jsize>(count));
+    if (result) env->SetByteArrayRegion(result, 0, static_cast<jsize>(count), reinterpret_cast<const jbyte *>(address));
+    return result;
+}
+
+JNIEXPORT jboolean JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativePeerTurnAddress(
+        JNIEnv *env, jobject, jlong base, jbyteArray input) {
+    if (!valid(base) || !g_client || !input) return JNI_FALSE;
+    jsize count = env->GetArrayLength(input);
+    if (count < 1 || count > 2048) return JNI_FALSE;
+    std::vector<unsigned char> bytes(static_cast<size_t>(count));
+    env->GetByteArrayRegion(input, 0, count, reinterpret_cast<jbyte *>(bytes.data()));
+    if (env->ExceptionCheck()) return JNI_FALSE;
+    TaskLock lock;
+    uintptr_t turn = turn_service();
+    if (!lock.manager || !turn) return JNI_FALSE;
+    entry<void (*)(uintptr_t, const void *, uint32_t)>(0x7e23714)(turn, bytes.data(), static_cast<uint32_t>(count));
+    return JNI_TRUE;
 }
 
 JNIEXPORT jboolean JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeOpenSession(

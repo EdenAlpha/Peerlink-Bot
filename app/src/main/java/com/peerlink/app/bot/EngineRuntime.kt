@@ -122,6 +122,16 @@ internal object EngineRuntime {
         client != 0L && nativeOpenSession(base, peerUid, connectingStart)
     }
 
+    fun configureTurn(input: ByteArray): Boolean = onRuntime {
+        client != 0L && nativeConfigureTurn(base, input)
+    }
+
+    fun turnAddress(): ByteArray? = onRuntime { if (client == 0L) null else nativeTurnAddress(base) }
+
+    fun peerTurnAddress(input: ByteArray): Boolean = onRuntime {
+        client != 0L && nativePeerTurnAddress(base, input)
+    }
+
     /** Original SDK's own verdict. No connection state is changed here. */
     fun check(): Long = onRuntime {
         if (client == 0L) 0L else nativeCall(base, CLIENT_CHECK, client, 0, 0, 0)
@@ -208,6 +218,9 @@ internal object EngineRuntime {
     fun closeHost() { gameHost?.close(); gameHost = null }
 
     private external fun nativeLoad(path: String): Long
+    private external fun nativeConfigureTurn(base: Long, input: ByteArray): Boolean
+    private external fun nativeTurnAddress(base: Long): ByteArray?
+    private external fun nativePeerTurnAddress(base: Long, input: ByteArray): Boolean
     private external fun nativeConfigureFiles(base: Long, assets: String): Boolean
     private external fun nativeApplicationReady(base: Long): Boolean
     private external fun nativeStartupInfo(base: Long): String

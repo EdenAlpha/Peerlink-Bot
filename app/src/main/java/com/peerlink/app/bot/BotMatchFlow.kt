@@ -622,14 +622,16 @@ class BotMatchFlow(
         else -> 0L
     }
 
-    /** CMD_SEND_TURN_ADDRESS_DATA -- announce this side's address to the peer. */
+    fun turnServerList(g: KgsGate) = g.step("CMD_GET_TURN_SERVER_LIST")
+
+    /** CMD_SEND_TURN_ADDRESS_DATA -- carry the original engine's binary record. */
     fun sendTurnAddress(g: KgsGate, target: Long, addressB64: String, size: Int) =
         g.step("CMD_SEND_TURN_ADDRESS_DATA", linkedMapOf(
             "target_user_id" to target, "address" to addressB64,
             "address_data_size" to size,
         ))
 
-    /** CMD_GET_TURN_ADDRESS_DATA -- the gate answers with our own address. */
+    /** CMD_GET_TURN_ADDRESS_DATA -- receive a queued peer connection record. */
     fun getTurnAddress(g: KgsGate) = g.step("CMD_GET_TURN_ADDRESS_DATA")
 
     /** CMD_WATCH_TURN_ADDRESS_DATA -- yields the peer's announced address. */

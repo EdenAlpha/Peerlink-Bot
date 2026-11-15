@@ -11,12 +11,14 @@ internal object PeerConnectionPhase {
         snapshot: () -> EngineSnapshot,
         prepareChannels: () -> Boolean,
         progress: (EngineSnapshot) -> Unit,
+        exchangeAddresses: () -> Unit = {},
         timeoutSeconds: Long = 90,
         pause: () -> Unit = { Thread.sleep(500) },
     ): Boolean {
         val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(timeoutSeconds)
         var prepared = false
         while (running()) {
+            exchangeAddresses()
             val state = snapshot()
             progress(state)
             if (!prepared && state.sessionConnected) {

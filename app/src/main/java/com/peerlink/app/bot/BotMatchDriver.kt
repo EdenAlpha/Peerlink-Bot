@@ -1,6 +1,5 @@
 package com.peerlink.app.bot
 
-import android.util.Base64
 import com.peerlink.app.core.AppState
 import com.peerlink.app.service.PeerBotService
 import kotlin.concurrent.thread
@@ -8,10 +7,11 @@ import kotlin.concurrent.thread
 /**
  * Bot mode step 3 -- the state-driven driver (v2, 2026-10-15 late).
  *
- * The ladder is the proven order, byte-for-byte:
- *   seat -> entry side (HOME/leader) -> check_match_enable (OTZP- tolerated)
+ * The original transport also requires the authenticated TURN configuration
+ * and opaque native address exchange while its session is connecting.
+ *   transport configuration -> seat -> entry side (HOME/leader) -> check_match_enable
  *   -> match_ready (.53.2) -> go_match -> game_session -> opponent address
- *   -> check-res echo -> game_id -> send_session_id -> TURN announce/watch
+ *   -> original session + TURN exchange -> check-res echo -> game_id -> send_session_id
  *   -> antenna beat -> PeerSlot armed (live connection phase).
  *
  * v1 could stop silently, and the user's game then sat on "Waiting for
@@ -53,7 +53,6 @@ object BotMatchDriver {
     private const val ANTENNA_INTERVAL_MS = 5_000L
 
     /** TURN watch: poll for the peer address, then carry on without it. */
-    private const val WATCH_POLL_MS = 2_000L
     private const val WATCH_TIMEOUT_MS = 60_000L
 
     @Volatile
@@ -96,6 +95,18 @@ object BotMatchDriver {
             val squadReply = flow.userSquad(gate, self)
             check(squadReply["result"] == "NOERR") { "Could not read the bot's current squad" }
             val squadInput = SquadInput.encode(squadReply, self)
+            while (running) {
+                val turn = flow.turnServerList(gate)
+                val result = turn["result"]?.toString()
+                if (transient(result)) { Thread.sleep(RETRY_MS); continue }
+                check(result == "NOERR") { "The match transport configuration was refused: $result" }
+                check(EngineHost.configureTurn(TurnConfiguration.encode(turn))) {
+                    "The bot engine did not accept the server's match transport configuration"
+                }
+                log("original match transport configured from the authenticated server response")
+                break
+            }
+            if (!running) return
             status("room $roomNumber open -- join it from eFootball now")
 
             val oppSeen = waitForSeat(flow, gate, rid, self)
@@ -262,6 +273,14 @@ object BotMatchDriver {
             check(gs!!["game_sycom"] == "P2P") { "The server selected relay; this bot test requires P2P" }
             val connectingStart = (gs!!["connecting_start_time"] as? Number)?.toLong() ?: 0L
             check(flow.handPeerToEngine(oppBlock!!, opp, connectingStart)) { "The bot engine did not accept the server's session" }
+            val turnExchange = NativeTurnExchange(
+                localAddress = EngineHost::turnAddress,
+                acceptPeer = EngineHost::peerTurnAddress,
+                send = { address, size -> flow.sendTurnAddress(gate, opp, address, size) },
+                get = { flow.getTurnAddress(gate) },
+                watch = { flow.watchTurnAddress(gate) },
+                log = ::log,
+            )
             // Confirm the original peer transport, then send the recorded
             // server report. Waiting here for data channels blocks the gate
             // sequence that supplies the later game/session setup inputs.
@@ -271,10 +290,11 @@ object BotMatchDriver {
                 running = { running },
                 snapshot = EngineHost::snapshot,
                 prepareChannels = { EngineHost.prepareChannels(opp, squadInput) },
+                exchangeAddresses = turnExchange::pump,
                 progress = { state ->
-                    val progress = state.values.take(8).joinToString(",") + ",${state.matchDataHandlerPresent}"
+                    val progress = state.values.take(8).joinToString(",") + ",${state.matchDataHandlerPresent},${state.configuredTurnTransport}"
                     if (progress != lastConnectionState) {
-                        log("native connection state [core,sdk,session,channel14,channel15,model,complete,error,handler]=$progress")
+                        log("native connection state [core,sdk,session,channel14,channel15,model,complete,error,handler,configuredTurn]=$progress")
                         lastConnectionState = progress
                     }
                 },
@@ -317,30 +337,13 @@ object BotMatchDriver {
             val controllersAllowed = environment?.get("can_use_mobile_controller") == "YES"
             check(EngineHost.startInputTest(controllersAllowed)) { "Enable mobile controllers in the room settings for the bot control test" }
 
-            // -- TURN announce + watch (the watch polls for the peer address;
-            //    when it stays blank the slot learns the address from traffic).
-            val addr = "${BotMode.BOT_FAB_IP}:${BotMode.BOT_PORT}"
-            val blob = Base64.encodeToString(addr.toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
-            val sd = flow.sendTurnAddress(gate, opp, blob, addr.length)
-            log("turn announce -> ${sd["result"]}")
-            flow.getTurnAddress(gate)
-            val watchDeadline = System.currentTimeMillis() + 5_000L
-            var peerAddr = ""
-            while (running && peerAddr.isBlank() && System.currentTimeMillis() < watchDeadline) {
-                val watch = flow.watchTurnAddress(gate)
-                peerAddr = (watch["address"] as? String).orEmpty()
-                if (peerAddr.isBlank()) Thread.sleep(WATCH_POLL_MS)
-            }
-            log("turn watch -> peer address " +
-                (if (peerAddr.isBlank()) "pending (the slot learns it from traffic)"
-                 else peerAddr))
+            turnExchange.pump()
 
             // -- antenna beat (the liveness signal the server watches).
             val (setR, getR) = flow.antennaBeat(gate, rid, self, opp, gs!!)
             log("antenna set=${setR["result"]} get=${getR["result"]} " +
                 "finished=${getR["is_check_finished"]}")
 
-            PeerSlot.arm(opp, gate.uid, peerAddr, localIp, localPort)
             log("connection phase ARMED -- the ferry is live; the ENGINE owns " +
                 "every answer from here, the bot answers nothing")
             // The decisive moment: whether the engine is up.  With the
@@ -351,10 +354,15 @@ object BotMatchDriver {
             status(EngineHost.snapshot().status())
 
             // Mid-match liveness: re-push the antenna echo on a cadence.
+            var nextAntenna = System.currentTimeMillis() + ANTENNA_INTERVAL_MS
             while (running) {
-                Thread.sleep(ANTENNA_INTERVAL_MS)
+                Thread.sleep(1000)
                 if (!running) break
-                flow.antennaBeat(gate, rid, self, opp, gs!!)
+                turnExchange.pump()
+                if (System.currentTimeMillis() >= nextAntenna) {
+                    flow.antennaBeat(gate, rid, self, opp, gs!!)
+                    nextAntenna = System.currentTimeMillis() + ANTENNA_INTERVAL_MS
+                }
             }
         } catch (t: Throwable) {
             status(t.message ?: "Bot match setup stopped")

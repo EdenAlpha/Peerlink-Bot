@@ -112,6 +112,11 @@ object EngineHost {
         request(EngineProtocol.SET_PEERS, Bundle().apply { putByteArray("record", record) }).getBoolean("ok")
     fun openSession(peerUid: Long, connectingStart: Long): Boolean = request(EngineProtocol.OPEN_SESSION,
         Bundle().apply { putLong("peer", peerUid); putLong("connectingStart", connectingStart) }).getBoolean("ok")
+    internal fun configureTurn(input: ByteArray): Boolean = request(EngineProtocol.CONFIGURE_TURN,
+        Bundle().apply { putByteArray("input", input) }).getBoolean("ok")
+    internal fun turnAddress(): ByteArray? = request(EngineProtocol.TURN_ADDRESS).getByteArray("address")
+    internal fun peerTurnAddress(address: ByteArray): Boolean = request(EngineProtocol.PEER_TURN_ADDRESS,
+        Bundle().apply { putByteArray("address", address) }).getBoolean("ok")
     fun check(): Long = if (!isReady) 0 else runCatching { request(EngineProtocol.CHECK).getLong("verdict") }.getOrDefault(0)
     fun setupMatch(peer: Long, gameId: Long, sid: String, squad: ByteArray): Boolean =
         request(EngineProtocol.SETUP_MATCH, Bundle().apply {
@@ -147,6 +152,9 @@ internal object EngineProtocol {
     const val STOP = 10
     const val PROBE_CONTROLLER = 11
     const val PREPARE_CHANNELS = 12
+    const val CONFIGURE_TURN = 13
+    const val TURN_ADDRESS = 14
+    const val PEER_TURN_ADDRESS = 15
     const val STATUS = 100
     const val NATIVE_STATE = 101
 }
@@ -154,7 +162,10 @@ internal object EngineProtocol {
 data class EngineSnapshot(val values: LongArray) {
     private fun field(index: Int) = values.getOrElse(index) { 0 }
     val sessionConnected get() = field(2) == 4L
-    val transportConnected get() = sessionConnected && field(1) == 1L
+    // The configured TURN session owns its connection verdict. The NTL
+    // fallback uses the separate original SDK verdict as well.
+    val transportConnected get() = sessionConnected && (field(21) == 2L || field(1) == 1L)
+    val configuredTurnTransport get() = field(21) == 2L
     val connected get() = sessionConnected && field(3) == 4L && field(4) == 4L
     val metadataReady get() = field(5) == 5L && field(6) == 1L && field(7) == 0L
     val matchConstructed get() = field(8) == 17L && field(9) == 54L && field(10) == 22L

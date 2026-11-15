@@ -4,6 +4,7 @@ import android.app.Service
 import android.content.Intent
 import android.os.*
 import java.util.concurrent.ScheduledThreadPoolExecutor
+import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
 
 /** Private, bound, same-UID service. A native engine exit cannot take down the game VPN. */
@@ -13,6 +14,7 @@ class BotEngineService : Service() {
     private var controllerAllowed = false
     private var testing = false
     private var pollStarted = false
+    private var pollTask: ScheduledFuture<*>? = null
     private var lastStatus = ""
     private var nextPass = 0L
     private var passes = 0
@@ -54,6 +56,11 @@ class BotEngineService : Service() {
                 EngineProtocol.SET_PEERS -> result.putBoolean("ok", EngineRuntime.setPeers(requireNotNull(args.getByteArray("record"))))
                 EngineProtocol.OPEN_SESSION -> result.putBoolean("ok", EngineRuntime.openSession(args.getLong("peer"), args.getLong("connectingStart")))
                 EngineProtocol.CHECK -> result.putLong("verdict", EngineRuntime.check())
+                EngineProtocol.CONFIGURE_TURN -> result.putBoolean("ok", EngineRuntime.configureTurn(
+                    requireNotNull(args.getByteArray("input"))))
+                EngineProtocol.TURN_ADDRESS -> result.putByteArray("address", EngineRuntime.turnAddress())
+                EngineProtocol.PEER_TURN_ADDRESS -> result.putBoolean("ok", EngineRuntime.peerTurnAddress(
+                    requireNotNull(args.getByteArray("address"))))
                 EngineProtocol.PREPARE_CHANNELS -> result.putBoolean("ok", EngineRuntime.prepareChannels(
                     args.getLong("peer"), requireNotNull(args.getByteArray("squad"))))
                 EngineProtocol.SETUP_MATCH -> {
@@ -63,7 +70,7 @@ class BotEngineService : Service() {
                     result.putBoolean("ok", ok)
                     if (ok && !pollStarted) {
                         pollStarted = true
-                        worker.scheduleWithFixedDelay(::poll, 0, 500, TimeUnit.MILLISECONDS)
+                        pollTask = worker.scheduleWithFixedDelay(::poll, 0, 500, TimeUnit.MILLISECONDS)
                     }
                 }
                 EngineProtocol.SNAPSHOT -> result.putLongArray("state", snapshot().values)
@@ -77,6 +84,7 @@ class BotEngineService : Service() {
                 EngineProtocol.PROBE_CONTROLLER -> result.putBoolean("ok", EngineRuntime.probeController())
                 EngineProtocol.STOP -> {
                     testing = false
+                    pollTask?.cancel(false)
                     EngineRuntime.neutral()
                     keyDown = false
                     result.putBoolean("ok", true)
@@ -101,7 +109,7 @@ class BotEngineService : Service() {
     private fun snapshot(): EngineSnapshot {
         val now = SystemClock.elapsedRealtime()
         if (now >= nextMemorySample) { pss = Debug.getPss().toLong(); nextMemorySample = now + 5000 }
-        return EngineSnapshot(EngineRuntime.snapshot().copyOf(21).also { it[18] = pss })
+        return EngineSnapshot(EngineRuntime.snapshot().copyOf(23).also { it[18] = pss })
     }
     private fun logNativeState(state: EngineSnapshot) {
         val now = SystemClock.elapsedRealtime()
@@ -125,6 +133,7 @@ class BotEngineService : Service() {
             }
         } catch (error: Exception) {
             testing = false
+            pollTask?.cancel(false)
             runCatching { logNativeState(snapshot()) }
             EngineRuntime.neutral()
             report(error.message ?: "Bot match setup stopped")
