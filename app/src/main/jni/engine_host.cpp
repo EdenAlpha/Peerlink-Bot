@@ -39,7 +39,11 @@ uintptr_t g_client = 0;
 uint32_t g_uid = 0;
 bool g_core_ready = false;
 std::string g_squad_path;
+std::string g_match_context_path;
 int g_match_stage = 0;
+uintptr_t g_user_sync_task = 0;
+bool g_user_sync_complete = false;
+uint64_t g_user_sync_started_ms = 0;
 bool g_preview_proceeded = false;
 bool g_controller_scanned = false;
 uint32_t g_channel_peer = 0;
@@ -144,6 +148,33 @@ struct TaskLock {
     }
     ~TaskLock() { if (manager) entry<void (*)(uintptr_t)>(0x82298d0)(manager); }
 };
+uint64_t monotonic_ms() {
+    timespec now{};
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    return static_cast<uint64_t>(now.tv_sec) * 1000 + now.tv_nsec / 1000000;
+}
+// Task roots own their children. Find the task again under TaskLock before
+// reading it, rather than dereferencing a pointer that may have been detached.
+uintptr_t attached_task(uintptr_t manager, uintptr_t target, uintptr_t vtable) {
+    if (!manager || !target) return 0;
+    unsigned visited = 0;
+    auto walk = [&](auto &&self, uintptr_t node, unsigned depth) -> uintptr_t {
+        if (!node || depth > 16 || ++visited > 800) return 0;
+        if (node == target && *reinterpret_cast<uintptr_t *>(node) == vtable) return node;
+        uintptr_t first = *reinterpret_cast<uintptr_t *>(node + 0x40), child = first;
+        if (!first) return 0;
+        unsigned count = 0;
+        do {
+            uintptr_t next = *reinterpret_cast<uintptr_t *>(child + 0x50);
+            if (uintptr_t found = self(self, child, depth + 1)) return found;
+            child = next;
+        } while (child && child != first && ++count < 150 && visited <= 800);
+        return 0;
+    };
+    for (unsigned i = 0; i < 4; ++i)
+        if (uintptr_t found = walk(walk, *reinterpret_cast<uintptr_t *>(manager + 0x118 + i * 8), 0)) return found;
+    return 0;
+}
 bool input_event(JNIEnv *env, jobject event, bool motion) {
     if (!event || env->ExceptionCheck()) return false;
     void *android = dlopen("libandroid.so", RTLD_NOW);
@@ -337,7 +368,10 @@ JNIEXPORT jstring JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeLoadingD
     TaskLock lock;
     if (!lock.manager) return env->NewStringUTF("MATCH_LOADING unavailable=no_task_manager");
     std::string text = "MATCH_LOADING hostStage=" + std::to_string(g_match_stage) +
-        " previewEventSubmitted=" + std::to_string(g_preview_proceeded);
+        " previewEventSubmitted=" + std::to_string(g_preview_proceeded) +
+        " userDataSyncComplete=" + std::to_string(g_user_sync_complete);
+    uintptr_t user_sync = attached_task(lock.manager, g_user_sync_task, g_base + 0x990d9c8);
+    if (user_sync) text += " userDataSyncState=" + std::to_string(*reinterpret_cast<uint32_t *>(user_sync + 0x70));
     uintptr_t root = entry<uintptr_t (*)()>(0x7a87db8)();
     uintptr_t info = root ? *reinterpret_cast<uintptr_t *>(root + 0x20) : 0;
     if (info) {
@@ -434,14 +468,18 @@ JNIEXPORT jboolean JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeSetupMa
                 uintptr_t task = entry<uintptr_t (*)(const char *)>(0x7b488c8)("TaskSyncUserData");
                 uintptr_t task_root = *reinterpret_cast<uintptr_t *>(lock.manager + 0x118);
                 if (!task || !task_root) result = -103;
-                else entry<void (*)(uintptr_t, uintptr_t)>(0x822b6d0)(task_root, task);
-            }
-            if (result > 0) {
-                entry<void (*)()>(0x6a9e2bc)();
-                result = static_cast<int>(peerlink_live_match_context_input(g_base, context_path));
+                else {
+                    entry<void (*)(uintptr_t, uintptr_t)>(0x822b6d0)(task_root, task);
+                    g_user_sync_task = task;
+                    g_user_sync_started_ms = monotonic_ms();
+                }
             }
         }
-        if (result > 0) { g_match_stage = 1; g_squad_path = squad_path; }
+        if (result > 0) {
+            g_match_stage = 1;
+            g_squad_path = squad_path;
+            g_match_context_path = context_path;
+        }
     }
     env->ReleaseStringUTFChars(squad, squad_path);
     env->ReleaseStringUTFChars(context, context_path);
@@ -464,6 +502,21 @@ JNIEXPORT jint JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeAdvanceMatc
     if (model && *reinterpret_cast<unsigned char *>(model + 0x7f2)) return -201;
     if (g_match_stage == 1 && model && *reinterpret_cast<uint32_t *>(model + 0x7b8) == 5 &&
         *reinterpret_cast<unsigned char *>(model + 0x7f1)) {
+        if (!g_user_sync_complete) {
+            uintptr_t task = attached_task(lock.manager, g_user_sync_task, g_base + 0x990d9c8);
+            if (!task) return -205;
+            uint32_t state = *reinterpret_cast<uint32_t *>(task + 0x70);
+            // Original 7b48d08 writes 4 only after both native synchronization
+            // barriers and the participant/network-owner application. The
+            // working full-app host observed this before initializing the
+            // coordinator; phase-5 metadata alone is an earlier milestone.
+            if (state > 4) return -206;
+            if (state != 4) return monotonic_ms() - g_user_sync_started_ms >= 90000 ? -207 : 1;
+            g_user_sync_complete = true;
+            __android_log_print(ANDROID_LOG_INFO, TAG, "ORIGINAL_USER_SYNC_COMPLETED_BEFORE_PREMATCH state=4");
+        }
+        entry<void (*)()>(0x6a9e2bc)();
+        if (peerlink_live_match_context_input(g_base, g_match_context_path.c_str()) <= 0) return -208;
         entry<void (*)()>(0x7b2a060)();
         entry<uintptr_t (*)()>(0x7b2a3a8)();
         if (peerlink_squad_import(g_base, 0, g_uid, g_squad_path.c_str()) <= 0) return -202;

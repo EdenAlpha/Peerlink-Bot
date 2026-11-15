@@ -136,12 +136,21 @@ class BotEngineTurnPairPhoneTest {
                 assertTrue("Production match setup rejected the private fixture",
                     EngineHost.setupMatch(peer, gameId, sid, squad))
                 assertTrue(EngineHost.startInputTest(true))
+                var synchronizedBeforePrematch = false
                 repeat(30) {
                     Thread.sleep(1000)
                     val loading = EngineHost.snapshot()
                     Log.i("PeerlinkTurnTest", "MATCH_LOADING_PROBE_$role state=${loading.values.contentToString()}")
-                    Log.i("PeerlinkTurnTest", "MATCH_LOADING_DETAILS_$role ${EngineHost.loadingDiagnostics()}")
+                    val details = EngineHost.loadingDiagnostics()
+                    Log.i("PeerlinkTurnTest", "MATCH_LOADING_DETAILS_$role $details")
+                    if (details.contains("hostStage=2")) {
+                        assertTrue("Pre-match started before native user-data synchronization: $details",
+                            details.contains("userDataSyncComplete=1"))
+                        synchronizedBeforePrematch = true
+                    }
                 }
+                assertTrue("The native user-data task did not complete before pre-match", synchronizedBeforePrematch)
+                Log.i("PeerlinkTurnTest", "ORIGINAL_USER_SYNC_${role}_COMPLETED_BEFORE_PREMATCH")
             }
             if (args.getString("diagnosticPeerStop") == "true" && role == "A") {
                 // B closes its actual process after the same successful hold.
