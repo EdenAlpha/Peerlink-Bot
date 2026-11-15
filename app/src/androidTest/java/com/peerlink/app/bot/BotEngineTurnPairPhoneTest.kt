@@ -86,7 +86,7 @@ class BotEngineTurnPairPhoneTest {
                 }
                 assertTrue("The engine selected its fallback transport: $line", state.configuredTurnTransport)
                 if (!prepared && state.sessionConnected) {
-                    assertTrue(EngineHost.prepareChannels(peer, squad))
+                    assertTrue(EngineHost.prepareChannels(peer, squad, if (role == "A") uid else peer))
                     prepared = true
                 }
                 if (prepared && state.connected) break

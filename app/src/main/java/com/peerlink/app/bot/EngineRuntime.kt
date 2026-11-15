@@ -196,9 +196,9 @@ internal object EngineRuntime {
         return File(root, "squad.dto").apply { writeBytes(squad) }
     }
 
-    fun prepareChannels(peerUid: Long, squad: ByteArray): Boolean = onRuntime {
-        if (client == 0L || peerUid == ownerUid) return@onRuntime false
-        nativePrepareChannels(base, peerUid, storeSquad(squad).absolutePath)
+    fun prepareChannels(peerUid: Long, squad: ByteArray, homeUid: Long): Boolean = onRuntime {
+        if (client == 0L || peerUid == ownerUid || (homeUid != ownerUid && homeUid != peerUid)) return@onRuntime false
+        nativePrepareChannels(base, peerUid, homeUid, storeSquad(squad).absolutePath)
     }
 
     fun setupMatch(peerUid: Long, gameId: Long, sid: String, category: String,
@@ -246,7 +246,7 @@ internal object EngineRuntime {
     private external fun nativeApplicationReady(base: Long): Boolean
     private external fun nativeStartupInfo(base: Long): String
     private external fun nativeLoadDatabase(base: Long, path: String): Boolean
-    private external fun nativePrepareChannels(base: Long, peer: Long, squad: String): Boolean
+    private external fun nativePrepareChannels(base: Long, peer: Long, home: Long, squad: String): Boolean
     private external fun nativeSetupMatch(base: Long, peer: Long, squad: String, context: String): Boolean
     private external fun nativeSnapshot(base: Long, passive: Boolean): LongArray
     private external fun nativeAdvanceMatch(base: Long, controllerAllowed: Boolean): Int

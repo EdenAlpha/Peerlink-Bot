@@ -74,7 +74,7 @@ class BotEngineService : Service() {
                 EngineProtocol.PEER_TURN_ADDRESS -> result.putBoolean("ok", EngineRuntime.peerTurnAddress(
                     requireNotNull(args.getByteArray("address"))))
                 EngineProtocol.PREPARE_CHANNELS -> result.putBoolean("ok", EngineRuntime.prepareChannels(
-                    args.getLong("peer"), requireNotNull(args.getByteArray("squad"))))
+                    args.getLong("peer"), requireNotNull(args.getByteArray("squad")), args.getLong("homeUid")))
                 EngineProtocol.SETUP_MATCH -> {
                     val ok = EngineRuntime.setupMatch(args.getLong("peer"), args.getLong("gameId"),
                         requireNotNull(args.getString("sid")), "MYCLUB_LOBBY_ROOM_MATCH_1VS1",

@@ -4,6 +4,27 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class PeerConnectionPhaseTest {
+    @Test fun phaseReportCannotPrecedeNativeMetadataSynchronization() {
+        var synchronized = false
+        val values = LongArray(29).apply { this[2] = 4; this[3] = 4; this[4] = 4 }
+        assertTrue(PeerConnectionPhase.awaitMetadata(
+            running = { true },
+            snapshot = { EngineSnapshot(values.copyOf().apply {
+                this[5] = if (synchronized) 5 else 3; this[6] = 1
+            }) },
+            pause = { synchronized = true },
+        ))
+        assertTrue(synchronized)
+    }
+
+    @Test fun cancelledMetadataWaitCannotReportCompletion() {
+        var running = true
+        assertFalse(PeerConnectionPhase.awaitMetadata(
+            running = { running }, snapshot = { EngineSnapshot(LongArray(29)) },
+            pause = { running = false },
+        ))
+    }
+
     @Test fun nativeFailureIsReportedBeforeTheGenericNinetySecondTimeout() {
         val failed = EngineSnapshot(LongArray(29).apply {
             this[2] = 5; this[3] = 6; this[4] = 6; this[5] = 6

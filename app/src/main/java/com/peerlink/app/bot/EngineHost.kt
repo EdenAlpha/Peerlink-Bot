@@ -179,8 +179,8 @@ object EngineHost {
             putLong("peer", peer); putLong("gameId", gameId); putString("sid", sid)
             putString("keyword", GateCodec.sKeyword()); putByteArray("squad", squad)
         }, 60).getBoolean("ok")
-    fun prepareChannels(peer: Long, squad: ByteArray): Boolean = request(EngineProtocol.PREPARE_CHANNELS,
-        Bundle().apply { putLong("peer", peer); putByteArray("squad", squad) }, 60).getBoolean("ok")
+    fun prepareChannels(peer: Long, squad: ByteArray, homeUid: Long = ownerUid): Boolean = request(EngineProtocol.PREPARE_CHANNELS,
+        Bundle().apply { putLong("peer", peer); putLong("homeUid", homeUid); putByteArray("squad", squad) }, 60).getBoolean("ok")
     fun snapshot(): EngineSnapshot = EngineSnapshot(request(EngineProtocol.SNAPSHOT).getLongArray("state") ?: LongArray(19))
     fun startInputTest(controllerAllowed: Boolean): Boolean = request(EngineProtocol.START_TEST,
         Bundle().apply { putBoolean("controllerAllowed", controllerAllowed) }).getBoolean("ok")

@@ -43,6 +43,7 @@ int g_match_stage = 0;
 bool g_preview_proceeded = false;
 bool g_controller_scanned = false;
 uint32_t g_channel_peer = 0;
+uint32_t g_channel_home = 0;
 uint32_t g_introduction_peer = 0;
 uint32_t g_introduction_start = 0;
 
@@ -167,15 +168,17 @@ bool neutral_event(JNIEnv *env) {
 // The online model creates the original match-data connection and its channel
 // handlers. These owned room/roster inputs must precede the channel-ready wait;
 // the later game ID/start-request inputs are not available at this stage.
-int prepare_channel_inputs(uint32_t peer, const char *squad_path) {
-    if (g_channel_peer) return g_channel_peer == peer ? 1 : -104;
+int prepare_channel_inputs(uint32_t peer, const char *squad_path, uint32_t home) {
+    if (home != g_uid && home != peer) return -106;
+    if (g_channel_peer) return g_channel_peer == peer && g_channel_home == home ? 1 : -104;
+    uint32_t away = home == g_uid ? peer : g_uid;
     uintptr_t root = entry<uintptr_t (*)()>(0x7a87db8)();
     if (!root || !*reinterpret_cast<uintptr_t *>(root + 0x20)) return -100;
     int result = peerlink_squad_import(g_base, 0, g_uid, squad_path);
-    if (result > 0 && !peerlink_lab_uid_participants(g_base, g_uid, peer, g_uid)) result = -101;
+    if (result > 0 && !peerlink_lab_uid_participants(g_base, home, away, g_uid)) result = -101;
     if (result > 0) result = peerlink_player_cache_import(g_base, g_uid, squad_path);
-    if (result > 0 && !peerlink_original_online_inputs_v224(g_base, g_uid, peer)) result = -102;
-    if (result > 0) { g_channel_peer = peer; g_squad_path = squad_path; }
+    if (result > 0 && !peerlink_original_online_inputs_v224(g_base, home, away)) result = -102;
+    if (result > 0) { g_channel_peer = peer; g_channel_home = home; g_squad_path = squad_path; }
     return result;
 }
 }
@@ -329,9 +332,10 @@ JNIEXPORT jstring JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeDatabase
 }
 
 JNIEXPORT jboolean JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativePrepareChannels(
-        JNIEnv *env, jobject, jlong base, jlong peer, jstring squad) {
+        JNIEnv *env, jobject, jlong base, jlong peer, jlong home, jstring squad) {
     if (!valid(base) || !g_client || !squad || peer <= 0 || peer > 0xffffffffLL || peer == g_uid)
         return JNI_FALSE;
+    if (home != g_uid && home != peer) return JNI_FALSE;
     const char *path = env->GetStringUTFChars(squad, nullptr);
     if (!path) return JNI_FALSE;
     int result = -100;
@@ -345,7 +349,7 @@ JNIEXPORT jboolean JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativePrepare
             // configuration. Creating it while connecting yields an error
             // and the original model tears itself down on its next frame.
             result = session && entry<uint32_t (*)(uintptr_t)>(0x7cedee8)(session) == 4 ?
-                prepare_channel_inputs(static_cast<uint32_t>(peer), path) : -105;
+                prepare_channel_inputs(static_cast<uint32_t>(peer), path, static_cast<uint32_t>(home)) : -105;
             entry<void (*)(uintptr_t)>(0x8c1f0d0)(manager + 8);
         }
     }
@@ -367,7 +371,7 @@ JNIEXPORT jboolean JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeSetupMa
         TaskLock lock;
         uintptr_t root = entry<uintptr_t (*)()>(0x7a87db8)();
         if (lock.manager && root && *reinterpret_cast<uintptr_t *>(root + 0x20)) {
-            result = prepare_channel_inputs(static_cast<uint32_t>(peer), squad_path);
+            result = prepare_channel_inputs(static_cast<uint32_t>(peer), squad_path, g_channel_home ? g_channel_home : g_uid);
             if (result > 0) {
                 uintptr_t task = entry<uintptr_t (*)(const char *)>(0x7b488c8)("TaskSyncUserData");
                 uintptr_t task_root = *reinterpret_cast<uintptr_t *>(lock.manager + 0x118);

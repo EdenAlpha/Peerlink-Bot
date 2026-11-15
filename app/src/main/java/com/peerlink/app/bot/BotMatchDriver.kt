@@ -355,6 +355,23 @@ object BotMatchDriver {
             }
             log("game_id found")
             flow.sendSessionId(gate, gameId!!)
+            status("Connected — synchronizing team data")
+            if (!PeerConnectionPhase.awaitMetadata(
+                running = { running }, snapshot = EngineHost::snapshot,
+                exchangeAddresses = turnExchange::pump,
+            )) return
+            // The verified original-host sequence reports this real pre-play
+            // phase before starting its native pre-match process. A connected
+            // transport alone is not evidence that team synchronization ended.
+            while (running) {
+                val phase = gate.step("CMD_CHANGE_GAMEPHASE", PreMatchNotifications.dataSync(gameId!!))
+                val result = phase["result"]?.toString()
+                if (transient(result)) { Thread.sleep(RETRY_MS); continue }
+                check(result == "NOERR") { "The server refused the pre-match data-sync phase: $result" }
+                log("SERVER_MATCH_PHASE phase=DATASYNC result=NOERR nativeMetadataReady=true")
+                break
+            }
+            if (!running) return
             status("Connected — setting up the bot's match")
             check(EngineHost.setupMatch(opp, gameId!!, gate.sid, squadInput)) { "The bot's native match setup was rejected" }
             val room = flow.roomState(gate, rid)

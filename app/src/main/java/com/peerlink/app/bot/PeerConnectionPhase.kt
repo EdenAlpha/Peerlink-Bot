@@ -6,6 +6,25 @@ import java.util.concurrent.TimeUnit
  * Match-data readiness remains a separate prerequisite for gameplay inputs.
  */
 internal object PeerConnectionPhase {
+    fun awaitMetadata(
+        running: () -> Boolean,
+        snapshot: () -> EngineSnapshot,
+        exchangeAddresses: () -> Unit = {},
+        timeoutSeconds: Long = 90,
+        pause: () -> Unit = { Thread.sleep(100) },
+    ): Boolean {
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(timeoutSeconds)
+        while (running()) {
+            exchangeAddresses()
+            val state = snapshot()
+            check(!state.nativeFailed) { "Bot engine synchronization failed: ${state.nativeFailureReason}" }
+            if (state.connected && state.metadataReady) return true
+            check(System.nanoTime() < deadline) { "The original team-data synchronization timed out" }
+            pause()
+        }
+        return false
+    }
+
     /** The configured transport consumes the original SDK's network-I/O
      * handles, which are created asynchronously after SDK startup.
      */

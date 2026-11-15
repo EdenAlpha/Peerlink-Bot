@@ -58,7 +58,7 @@ class BotEnginePairPhoneTest {
             if (serverBeforeData && role == "A") {
                 assertTrue(PeerConnectionPhase.awaitTransport(
                     running = { true }, snapshot = EngineHost::snapshot,
-                    prepareChannels = { EngineHost.prepareChannels(peer, squad) },
+                    prepareChannels = { EngineHost.prepareChannels(peer, squad, if (role == "A") uid else peer) },
                     progress = {}, timeoutSeconds = 45, pause = { Thread.sleep(100) },
                 ))
                 prepared = true
@@ -85,7 +85,7 @@ class BotEnginePairPhoneTest {
                 }
                 if (!prepared && state.sessionConnected) {
                     Log.i("PeerlinkPairTest", "ORIGINAL_ANDROID_PAIR_${role}_BASE_SESSION_CONNECTED")
-                    assertTrue(EngineHost.prepareChannels(peer, squad))
+                    assertTrue(EngineHost.prepareChannels(peer, squad, if (role == "A") uid else peer))
                     prepared = true
                     continue
                 }
