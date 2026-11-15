@@ -60,9 +60,25 @@ use and phone-game kickoff require separate evidence.
 
 ## Verification
 
-The current connection-test APK is `3ddc561`, published as
-[`phone-engine-test-3ddc561`](https://github.com/EdenAlpha/Peerlink-Bot/releases/tag/phone-engine-test-3ddc561).
-It corrects the ordering between the base session, original online-model
+The current connection-test APK is `b02d858`, published as
+[`phone-engine-test-b02d858`](https://github.com/EdenAlpha/Peerlink-Bot/releases/tag/phone-engine-test-b02d858).
+It keeps the game's host and reflexive candidates distinct through the local
+ferry. Raw host traffic and VPN traffic retain their own return sockets.
+
+The prior APK's merged endpoints failed with the phone's asymmetric NAT
+profiles. With the same APK and unchanged NAT words, separate endpoints passed,
+including after a 130-second room wait. The new packaged APK then connected
+both original engines through the actual production `PeerSlot`: both base
+sessions and channels 14/15 reached state 4. Transport, engine/controller
+startup and the unanswered-peer checks passed. Evidence and precise test
+limits are in
+[`tests/evidence/phone-candidate-routes-20261115`](tests/evidence/phone-candidate-routes-20261115/README.md).
+
+Current APK SHA-256:
+`74bbb1e91e64e0409680c05308e270815cdcd4d9f2aed7494aa566ccce5f3ae6`.
+
+The previous connection-test APK was `3ddc561`.
+That build corrected the ordering between the base session, original online-model
 construction and data-channel readiness. The native guard rejects model
 construction until the base session is connected; data channels are then
 opened by the original GameDataConnection before later game-start inputs.
@@ -77,7 +93,7 @@ explicit local input fixture; it supplied no authenticated match ID and does
 not verify kickoff against the user's game. Filtered logs and scope are in
 [`tests/evidence/phone-channels-20261114`](tests/evidence/phone-channels-20261114/README.md).
 
-Current APK SHA-256:
+Previous channel-order APK (`3ddc561`) SHA-256:
 `087fdfec25efd70cc4630db693c88da93c49a2ad11336b75e38d3bfdf76d4899`.
 
 - APK compilation and JVM readiness tests run in Android CI.

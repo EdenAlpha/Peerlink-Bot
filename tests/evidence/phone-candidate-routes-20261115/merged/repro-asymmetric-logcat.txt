@@ -1,0 +1,20 @@
+11-15 00:48:39.300  3297  3327 I PeerlinkEngineHost: startup: engine=0 objects=0 kernel=0 running=1 activity=11 window=1 database=0 work=0 sessions=0
+11-15 00:48:39.301  3289  3325 I PeerlinkEngineHost: startup: engine=0 objects=0 kernel=0 running=1 activity=11 window=1 database=0 work=0 sessions=0
+11-15 00:48:41.666  3289  3326 I PeerlinkEngineHost: database startup result=44
+11-15 00:48:41.668  3221  3284 I PeerlinkPairTest: PAIR_A prepared; peerNat=271581328 beforePeerDelayMs=0
+11-15 00:48:41.708  3221  3284 I PeerlinkPairTest: PAIR_A state=1,0,1,1,1,0,0,0,false
+11-15 00:48:41.813  3297  3328 I PeerlinkEngineHost: database startup result=44
+11-15 00:48:41.814  3220  3290 I PeerlinkPairTest: PAIR_B prepared; peerNat=270532787 beforePeerDelayMs=0
+11-15 00:48:41.857  3220  3290 I PeerlinkPairTest: PAIR_B state=1,0,1,1,1,0,0,0,false
+11-15 00:48:51.955  3221  3285 I PeerlinkPairTest: PAIR_ENDPOINT index=0 source=/172.17.0.2:60688
+11-15 00:48:51.955  3221  3285 I PeerlinkPairTest: PAIR_FRAME from=0 op=80b bytes=48 kind=2 capability=none
+11-15 00:48:51.955  3221  3285 I PeerlinkPairTest: PAIR_FRAME from=0 op=80b bytes=48 kind=2 capability=none
+11-15 00:48:52.180  3221  3286 I PeerlinkPairTest: PAIR_ENDPOINT index=1 source=/172.17.0.2:26639
+11-15 00:48:52.180  3221  3286 I PeerlinkPairTest: PAIR_FRAME from=1 op=80b bytes=48 kind=2 capability=none
+11-15 00:48:52.180  3221  3286 I PeerlinkPairTest: PAIR_FRAME from=1 op=80b bytes=48 kind=2 capability=none
+11-15 00:48:52.196  3221  3286 I PeerlinkPairTest: PAIR_FRAME from=1 op=90b bytes=48 kind=2 capability=none
+11-15 00:48:52.196  3221  3286 I PeerlinkPairTest: PAIR_FRAME from=1 op=90b bytes=48 kind=2 capability=none
+11-15 00:48:52.210  3221  3285 I PeerlinkPairTest: PAIR_FRAME from=0 op=90b bytes=48 kind=2 capability=none
+11-15 00:48:52.210  3221  3285 I PeerlinkPairTest: PAIR_FRAME from=0 op=90b bytes=48 kind=2 capability=none
+11-15 00:49:12.449  3221  3284 I PeerlinkPairTest: PAIR_A state=1,0,6,6,6,0,0,0,false
+11-15 00:49:12.674  3220  3290 I PeerlinkPairTest: PAIR_B state=1,0,6,6,6,0,0,0,false

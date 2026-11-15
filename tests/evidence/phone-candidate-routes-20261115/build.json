@@ -1,0 +1,20 @@
+{
+  "app_commit": "b02d858b2987c4db48ae0b6f8e76c041b70518eb",
+  "ci_run": 43661287221,
+  "artifact_id": 14140596087,
+  "apk_sha256": "74bbb1e91e64e0409680c05308e270815cdcd4d9f2aed7494aa566ccce5f3ae6",
+  "device": "ARM64 Android 15/API35 Redroid; separate app instances in users0 and10",
+  "previous_apk_sha256": "087fdfec25efd70cc4630db693c88da93c49a2ad11336b75e38d3bfdf76d4899",
+  "server_profile_inputs": {
+    "peer_nat_a": 271581328,
+    "peer_nat_b": 270532787
+  },
+  "before": "The baseline symmetric profile connects; captured asymmetric profiles with merged endpoints fail.",
+  "after_fixture": "Same APK/engine, unchanged NAT words and payloads, separate host/reflexive endpoints: both channels connect, including after a130-second room wait.",
+  "after_production": "New packaged APK: both original engines connect through actual PeerSlot; direct and VPN carrier routing, original handlers, both channels and5-second hold pass.",
+  "other_checks": "Transport regression,44database tables, own controller,15-second startup hold and no-peer guard pass. JVM build plus7framework tests each API34/API35 pass.",
+  "diagnostic_hooks_during_retained_tests": false,
+  "native_connection_state_patches": false,
+  "native_protocol_packets_fabricated": false,
+  "fixture_scope": "Owned archived squad DTOs and a local carrier fixture. No fresh authenticated server room or match ID; foreground physical-phone kickoff and visible Pass response remain unconfirmed."
+}

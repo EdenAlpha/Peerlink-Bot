@@ -1,0 +1,141 @@
+{
+  "native_session_states": [
+    1,
+    6
+  ],
+  "native_frame_count": 22,
+  "packets": [
+    {
+      "direction": "game->bot",
+      "opcode": "080b",
+      "length": 48,
+      "capability_result": null
+    },
+    {
+      "direction": "game->bot",
+      "opcode": "080b",
+      "length": 48,
+      "capability_result": null
+    },
+    {
+      "direction": "bot->game",
+      "opcode": "080b",
+      "length": 48,
+      "capability_result": null
+    },
+    {
+      "direction": "game->bot",
+      "opcode": "090b",
+      "length": 48,
+      "capability_result": null
+    },
+    {
+      "direction": "game->bot",
+      "opcode": "090b",
+      "length": 48,
+      "capability_result": null
+    },
+    {
+      "direction": "bot->game",
+      "opcode": "080b",
+      "length": 48,
+      "capability_result": null
+    },
+    {
+      "direction": "game->bot",
+      "opcode": "080b",
+      "length": 48,
+      "capability_result": null
+    },
+    {
+      "direction": "bot->game",
+      "opcode": "090b",
+      "length": 48,
+      "capability_result": null
+    },
+    {
+      "direction": "bot->game",
+      "opcode": "090b",
+      "length": 48,
+      "capability_result": null
+    },
+    {
+      "direction": "game->bot",
+      "opcode": "080c",
+      "length": 256,
+      "capability_result": null
+    },
+    {
+      "direction": "bot->game",
+      "opcode": "090c",
+      "length": 256,
+      "capability_result": null
+    },
+    {
+      "direction": "game->bot",
+      "opcode": "080c",
+      "length": 64,
+      "capability_result": null
+    },
+    {
+      "direction": "bot->game",
+      "opcode": "090c",
+      "length": 64,
+      "capability_result": null
+    },
+    {
+      "direction": "game->bot",
+      "opcode": "080c",
+      "length": 64,
+      "capability_result": null
+    },
+    {
+      "direction": "bot->game",
+      "opcode": "090c",
+      "length": 64,
+      "capability_result": null
+    },
+    {
+      "direction": "game->bot",
+      "opcode": "080c",
+      "length": 64,
+      "capability_result": null
+    },
+    {
+      "direction": "bot->game",
+      "opcode": "090c",
+      "length": 64,
+      "capability_result": null
+    },
+    {
+      "direction": "game->bot",
+      "opcode": "080a",
+      "length": 48,
+      "capability_result": null
+    },
+    {
+      "direction": "bot->game",
+      "opcode": "090a",
+      "length": 56,
+      "capability_result": "00040001"
+    },
+    {
+      "direction": "game->bot",
+      "opcode": "080b",
+      "length": 48,
+      "capability_result": null
+    },
+    {
+      "direction": "bot->game",
+      "opcode": "090b",
+      "length": 48,
+      "capability_result": null
+    },
+    {
+      "direction": "bot->game",
+      "opcode": "090b",
+      "length": 48,
+      "capability_result": null
+    }
+  ]
+}

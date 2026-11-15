@@ -1,0 +1,8 @@
+11-15 01:10:56.334  8444  8459 I PeerlinkEngineHost: startup: engine=0 objects=0 kernel=0 running=1 activity=11 window=1 database=0 work=0 sessions=0
+11-15 01:10:58.653  8444  8460 I PeerlinkEngineHost: database startup result=44
+11-15 01:10:58.682  8413  8442 I PeerlinkChannelTest: BEFORE_CHANNEL_MODEL state=[1, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 633382, 0]
+11-15 01:10:58.683  8444  8460 I PeerlinkEngineHost: early channel input result=-105
+11-15 01:10:58.683  8413  8442 I PeerlinkChannelTest: PREMATURE_CHANNEL_SETUP_REJECTED state=[1, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 633382, 0]
+11-15 01:10:58.684  8444  8460 I PeerlinkEngineHost: early channel input result=-105
+11-15 01:11:03.694  8413  8442 I PeerlinkChannelTest: UNANSWERED_PEER_STATE state=[1, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 746043, 0]
+11-15 01:11:03.696  8413  8442 I PeerlinkChannelTest: UNANSWERED_PEER_NOT_REPORTED_AS_CONNECTED

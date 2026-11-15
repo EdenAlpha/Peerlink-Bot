@@ -36,9 +36,8 @@ object PeerSlot {
     const val REFLEXIVE_PEER_IP = "127.0.0.2"
 
     /**
-     * The loopback port the ENGINE is handed as its peer: its frames arrive on
-     * this slot's sockets and its answers travel back to the game. The game
-     * never sees this port -- it keeps punching the fabricated peer identity.
+     * Host-candidate alias handed to the engine. The reflexive candidate has
+     * its own address and socket so original NAT policy can distinguish them.
      */
     val ENGINE_PORT: Int get() = engineSock4?.localPort ?: error("Engine ferry is not armed")
     val ENGINE_REFLEXIVE_PORT: Int get() = engineReflexiveSock4?.localPort ?: error("Reflexive ferry is not armed")
@@ -284,11 +283,9 @@ object PeerSlot {
     }
 
     /**
-     * The engine's peer on this phone is the ferry itself: the engine is
-     * handed 127.0.0.1:1163 (and [::1]:1163) as the opponent, so its own
-     * frames arrive on these sockets and its answers travel back to the game
-     * over the backend. The tunnel carries the game alone, so this is the
-     * only place the engine's half can meet the game's half on one phone.
+     * Separate loopback aliases preserve the opponent's host and reflexive
+     * candidates. Original SDK payloads stay unchanged; only their local UDP
+     * transport is translated to the appropriate game route.
      */
     @Volatile
     private var engineSock4: DatagramSocket? = null
@@ -394,10 +391,9 @@ object PeerSlot {
     }
 
     /**
-     * The engine's frames go back to the game, over the backend's peer
-     * socket, in the shape the game expects: from the game-side peer
-     * identity, to the game. The PAYLOAD is never touched -- the engine's
-     * own bytes, end to end.
+     * Host-candidate frames return as raw UDP. Reflexive-candidate frames use
+     * the VPN carrier and fabricated peer address. The originating candidate
+     * selects its route; traffic on the other candidate cannot change it.
      */
     private fun startEngineReplyLoop(s4: DatagramSocket, reflexive4: DatagramSocket, s6: DatagramSocket?) {
         engineRxThread?.interrupt()

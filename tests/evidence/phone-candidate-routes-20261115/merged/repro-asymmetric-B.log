@@ -1,0 +1,21 @@
+
+com.peerlink.app.bot.BotEnginePairPhoneTest:
+Error in opensOriginalDataChannelsWithAnotherOriginalAndroidEngine(com.peerlink.app.bot.BotEnginePairPhoneTest):
+java.lang.AssertionError: Original engines did not connect: 1,0,6,6,6,0,0,0,false
+	at org.junit.Assert.fail(Assert.java:89)
+	at org.junit.Assert.assertTrue(Assert.java:42)
+	at com.peerlink.app.bot.BotEnginePairPhoneTest.opensOriginalDataChannelsWithAnotherOriginalAndroidEngine(BotEnginePairPhoneTest.kt:63)
+
+
+Time: 49.487
+There was 1 failure:
+1) opensOriginalDataChannelsWithAnotherOriginalAndroidEngine(com.peerlink.app.bot.BotEnginePairPhoneTest)
+java.lang.AssertionError: Original engines did not connect: 1,0,6,6,6,0,0,0,false
+	at org.junit.Assert.fail(Assert.java:89)
+	at org.junit.Assert.assertTrue(Assert.java:42)
+	at com.peerlink.app.bot.BotEnginePairPhoneTest.opensOriginalDataChannelsWithAnotherOriginalAndroidEngine(BotEnginePairPhoneTest.kt:63)
+
+FAILURES!!!
+Tests run: 1,  Failures: 1
+
+

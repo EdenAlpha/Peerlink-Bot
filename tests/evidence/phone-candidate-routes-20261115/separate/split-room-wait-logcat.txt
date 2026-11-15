@@ -1,0 +1,100 @@
+11-15 00:58:46.971  7215  7246 I PeerlinkEngineHost: startup: engine=0 objects=0 kernel=0 running=1 activity=11 window=1 database=0 work=0 sessions=0
+11-15 00:58:46.976  7214  7244 I PeerlinkEngineHost: startup: engine=0 objects=0 kernel=0 running=1 activity=11 window=1 database=0 work=0 sessions=0
+11-15 00:58:49.342  7214  7245 I PeerlinkEngineHost: database startup result=44
+11-15 00:58:49.344  7136  7202 I PeerlinkPairTest: PAIR_B prepared; peerNat=270532787 beforePeerDelayMs=130000
+11-15 00:58:49.473  7215  7247 I PeerlinkEngineHost: database startup result=44
+11-15 00:58:49.475  7130  7201 I PeerlinkPairTest: PAIR_A prepared; peerNat=271581328 beforePeerDelayMs=130000
+11-15 01:00:59.375  7136  7202 I PeerlinkPairTest: PAIR_B state=1,0,1,1,1,0,0,0,false
+11-15 01:00:59.508  7130  7201 I PeerlinkPairTest: PAIR_A state=1,0,1,1,1,0,0,0,false
+11-15 01:01:00.376  7130  7204 I PeerlinkPairTest: PAIR_ENDPOINT index=1 source=/172.17.0.2:16186
+11-15 01:01:00.376  7130  7204 I PeerlinkPairTest: PAIR_FRAME from=1 op=80b bytes=48 kind=1 capability=none
+11-15 01:01:00.377  7130  7206 I PeerlinkPairTest: PAIR_FRAME from=3 op=80b bytes=48 kind=2 capability=none
+11-15 01:01:00.508  7130  7203 I PeerlinkPairTest: PAIR_ENDPOINT index=0 source=/172.17.0.2:45587
+11-15 01:01:00.508  7130  7203 I PeerlinkPairTest: PAIR_FRAME from=0 op=80b bytes=48 kind=1 capability=none
+11-15 01:01:00.508  7130  7205 I PeerlinkPairTest: PAIR_FRAME from=2 op=80b bytes=48 kind=2 capability=none
+11-15 01:01:00.536  7130  7205 I PeerlinkPairTest: PAIR_FRAME from=2 op=90b bytes=48 kind=2 capability=none
+11-15 01:01:00.536  7130  7203 I PeerlinkPairTest: PAIR_FRAME from=0 op=90b bytes=48 kind=1 capability=none
+11-15 01:01:00.555  7130  7206 I PeerlinkPairTest: PAIR_FRAME from=3 op=90b bytes=48 kind=2 capability=none
+11-15 01:01:00.555  7130  7204 I PeerlinkPairTest: PAIR_FRAME from=1 op=90b bytes=48 kind=1 capability=none
+11-15 01:01:00.599  7130  7206 I PeerlinkPairTest: PAIR_FRAME from=3 op=80c bytes=256 kind=2 capability=none
+11-15 01:01:00.621  7130  7205 I PeerlinkPairTest: PAIR_FRAME from=2 op=80c bytes=256 kind=2 capability=none
+11-15 01:01:00.636  7130  7205 I PeerlinkPairTest: PAIR_FRAME from=2 op=90c bytes=256 kind=2 capability=none
+11-15 01:01:00.655  7130  7206 I PeerlinkPairTest: PAIR_FRAME from=3 op=90c bytes=256 kind=2 capability=none
+11-15 01:01:00.680  7130  7206 I PeerlinkPairTest: PAIR_FRAME from=3 op=80c bytes=64 kind=2 capability=none
+11-15 01:01:00.687  7130  7205 I PeerlinkPairTest: PAIR_FRAME from=2 op=90c bytes=64 kind=2 capability=none
+11-15 01:01:00.701  7130  7205 I PeerlinkPairTest: PAIR_FRAME from=2 op=80c bytes=64 kind=2 capability=none
+11-15 01:01:00.706  7130  7206 I PeerlinkPairTest: PAIR_FRAME from=3 op=90c bytes=64 kind=2 capability=none
+11-15 01:01:00.712  7130  7206 I PeerlinkPairTest: PAIR_FRAME from=3 op=80c bytes=64 kind=2 capability=none
+11-15 01:01:00.737  7130  7205 I PeerlinkPairTest: PAIR_FRAME from=2 op=90c bytes=64 kind=2 capability=none
+11-15 01:01:00.750  7130  7205 I PeerlinkPairTest: PAIR_FRAME from=2 op=80c bytes=64 kind=2 capability=none
+11-15 01:01:00.756  7130  7206 I PeerlinkPairTest: PAIR_FRAME from=3 op=90c bytes=64 kind=2 capability=none
+11-15 01:01:00.760  7130  7206 I PeerlinkPairTest: PAIR_FRAME from=3 op=80c bytes=64 kind=2 capability=none
+11-15 01:01:00.787  7130  7205 I PeerlinkPairTest: PAIR_FRAME from=2 op=90c bytes=64 kind=2 capability=none
+11-15 01:01:00.798  7130  7205 I PeerlinkPairTest: PAIR_FRAME from=2 op=80c bytes=64 kind=2 capability=none
+11-15 01:01:00.806  7130  7206 I PeerlinkPairTest: PAIR_FRAME from=3 op=90c bytes=64 kind=2 capability=none
+11-15 01:01:00.829  7130  7206 I PeerlinkPairTest: PAIR_FRAME from=3 op=80a bytes=48 kind=2 capability=none
+11-15 01:01:00.837  7130  7205 I PeerlinkPairTest: PAIR_FRAME from=2 op=90a bytes=56 kind=2 capability=00040000
+11-15 01:01:00.860  7130  7205 I PeerlinkPairTest: PAIR_FRAME from=2 op=80a bytes=48 kind=2 capability=none
+11-15 01:01:00.906  7130  7206 I PeerlinkPairTest: PAIR_FRAME from=3 op=90a bytes=56 kind=2 capability=00040000
+11-15 01:01:01.304  7136  7202 I PeerlinkPairTest: PAIR_B state=1,0,4,0,0,0,0,0,false
+11-15 01:01:01.304  7136  7202 I PeerlinkPairTest: ORIGINAL_ANDROID_PAIR_B_BASE_SESSION_CONNECTED
+11-15 01:01:01.306  7214  7245 I PeerlinkEngineHost: early channel input result=23
+11-15 01:01:01.317  7130  7206 I PeerlinkPairTest: PAIR_FRAME from=3 op=80b bytes=48 kind=2 capability=none
+11-15 01:01:01.318  7130  7204 I PeerlinkPairTest: PAIR_FRAME from=1 op=80b bytes=48 kind=1 capability=none
+11-15 01:01:01.338  7130  7205 I PeerlinkPairTest: PAIR_FRAME from=2 op=90b bytes=48 kind=2 capability=none
+11-15 01:01:01.338  7130  7203 I PeerlinkPairTest: PAIR_FRAME from=0 op=90b bytes=48 kind=1 capability=none
+11-15 01:01:01.378  7136  7202 I PeerlinkPairTest: PAIR_B state=1,1,4,0,0,0,0,0,true
+11-15 01:01:01.489  7130  7206 I PeerlinkPairTest: PAIR_FRAME from=3 op=80b bytes=48 kind=2 capability=none
+11-15 01:01:01.489  7130  7204 I PeerlinkPairTest: PAIR_FRAME from=1 op=80b bytes=48 kind=1 capability=none
+11-15 01:01:01.490  7130  7205 I PeerlinkPairTest: PAIR_FRAME from=2 op=90b bytes=48 kind=2 capability=none
+11-15 01:01:01.490  7130  7203 I PeerlinkPairTest: PAIR_FRAME from=0 op=90b bytes=48 kind=1 capability=none
+11-15 01:01:01.532  7130  7206 I PeerlinkPairTest: PAIR_FRAME from=3 op=80c bytes=256 kind=2 capability=none
+11-15 01:01:01.532  7130  7205 I PeerlinkPairTest: PAIR_FRAME from=2 op=90c bytes=256 kind=2 capability=none
+11-15 01:01:01.548  7130  7203 I PeerlinkPairTest: PAIR_FRAME from=0 op=80b bytes=48 kind=1 capability=none
+11-15 01:01:01.548  7130  7205 I PeerlinkPairTest: PAIR_FRAME from=2 op=80b bytes=48 kind=2 capability=none
+11-15 01:01:01.548  7130  7204 I PeerlinkPairTest: PAIR_FRAME from=1 op=90b bytes=48 kind=1 capability=none
+11-15 01:01:01.548  7130  7206 I PeerlinkPairTest: PAIR_FRAME from=3 op=90b bytes=48 kind=2 capability=none
+11-15 01:01:01.564  7130  7206 I PeerlinkPairTest: PAIR_FRAME from=3 op=80c bytes=64 kind=2 capability=none
+11-15 01:01:01.565  7130  7205 I PeerlinkPairTest: PAIR_FRAME from=2 op=90c bytes=64 kind=2 capability=none
+11-15 01:01:01.602  7130  7205 I PeerlinkPairTest: PAIR_FRAME from=2 op=80c bytes=256 kind=2 capability=none
+11-15 01:01:01.602  7130  7206 I PeerlinkPairTest: PAIR_FRAME from=3 op=90c bytes=256 kind=2 capability=none
+11-15 01:01:01.635  7130  7205 I PeerlinkPairTest: PAIR_FRAME from=2 op=80c bytes=64 kind=2 capability=none
+11-15 01:01:01.635  7130  7206 I PeerlinkPairTest: PAIR_FRAME from=3 op=90c bytes=64 kind=2 capability=none
+11-15 01:01:01.681  7130  7201 I PeerlinkPairTest: PAIR_A state=1,0,4,0,0,0,0,0,false
+11-15 01:01:01.681  7130  7201 I PeerlinkPairTest: ORIGINAL_ANDROID_PAIR_A_BASE_SESSION_CONNECTED
+11-15 01:01:01.682  7215  7247 I PeerlinkEngineHost: early channel input result=23
+11-15 01:01:01.699  7130  7205 I PeerlinkPairTest: PAIR_FRAME from=2 op=80b bytes=48 kind=2 capability=none
+11-15 01:01:01.700  7130  7203 I PeerlinkPairTest: PAIR_FRAME from=0 op=80b bytes=48 kind=1 capability=none
+11-15 01:01:01.700  7130  7206 I PeerlinkPairTest: PAIR_FRAME from=3 op=90b bytes=48 kind=2 capability=none
+11-15 01:01:01.702  7130  7204 I PeerlinkPairTest: PAIR_FRAME from=1 op=90b bytes=48 kind=1 capability=none
+11-15 01:01:01.722  7130  7206 I PeerlinkPairTest: PAIR_FRAME from=3 op=80b bytes=48 kind=2 capability=none
+11-15 01:01:01.722  7130  7204 I PeerlinkPairTest: PAIR_FRAME from=1 op=80b bytes=48 kind=1 capability=none
+11-15 01:01:01.722  7130  7205 I PeerlinkPairTest: PAIR_FRAME from=2 op=90b bytes=48 kind=2 capability=none
+11-15 01:01:01.722  7130  7203 I PeerlinkPairTest: PAIR_FRAME from=0 op=90b bytes=48 kind=1 capability=none
+11-15 01:01:01.731  7130  7206 I PeerlinkPairTest: PAIR_FRAME from=3 op=8d74 bytes=259 kind=-1 capability=none
+11-15 01:01:01.747  7130  7205 I PeerlinkPairTest: PAIR_FRAME from=2 op=80c bytes=256 kind=2 capability=none
+11-15 01:01:01.747  7130  7206 I PeerlinkPairTest: PAIR_FRAME from=3 op=90c bytes=256 kind=2 capability=none
+11-15 01:01:01.748  7130  7205 I PeerlinkPairTest: PAIR_FRAME from=2 op=72ab bytes=24 kind=-1 capability=none
+11-15 01:01:01.763  7130  7205 I PeerlinkPairTest: PAIR_FRAME from=2 op=80c bytes=64 kind=2 capability=none
+11-15 01:01:01.764  7130  7206 I PeerlinkPairTest: PAIR_FRAME from=3 op=90c bytes=64 kind=2 capability=none
+11-15 01:01:01.768  7130  7206 I PeerlinkPairTest: PAIR_FRAME from=3 op=69b0 bytes=26 kind=-1 capability=none
+11-15 01:01:01.776  7130  7206 I PeerlinkPairTest: PAIR_FRAME from=3 op=80c bytes=256 kind=2 capability=none
+11-15 01:01:01.776  7130  7205 I PeerlinkPairTest: PAIR_FRAME from=2 op=90c bytes=256 kind=2 capability=none
+11-15 01:01:01.785  7130  7205 I PeerlinkPairTest: PAIR_FRAME from=2 op=7903 bytes=35 kind=-1 capability=none
+11-15 01:01:01.805  7130  7206 I PeerlinkPairTest: PAIR_FRAME from=3 op=4fd6 bytes=25 kind=-1 capability=none
+11-15 01:01:01.808  7130  7206 I PeerlinkPairTest: PAIR_FRAME from=3 op=80c bytes=64 kind=2 capability=none
+11-15 01:01:01.808  7130  7205 I PeerlinkPairTest: PAIR_FRAME from=2 op=90c bytes=64 kind=2 capability=none
+11-15 01:01:01.811  7130  7201 I PeerlinkPairTest: PAIR_A state=1,0,4,3,3,0,0,0,true
+11-15 01:01:01.842  7130  7206 I PeerlinkPairTest: PAIR_FRAME from=3 op=78e1 bytes=34 kind=-1 capability=none
+11-15 01:01:01.853  7136  7202 I PeerlinkPairTest: PAIR_B state=1,1,4,4,4,0,0,0,true
+11-15 01:01:01.853  7136  7202 I PeerlinkPairTest: ORIGINAL_ANDROID_PAIR_B_CHANNELS_CONNECTED
+11-15 01:01:01.860  7130  7205 I PeerlinkPairTest: PAIR_FRAME from=2 op=5fc6 bytes=25 kind=-1 capability=none
+11-15 01:01:01.880  7130  7206 I PeerlinkPairTest: PAIR_FRAME from=3 op=55cc bytes=41 kind=-1 capability=none
+11-15 01:01:01.897  7130  7205 I PeerlinkPairTest: PAIR_FRAME from=2 op=69f0 bytes=32 kind=-1 capability=none
+11-15 01:01:01.917  7130  7206 I PeerlinkPairTest: PAIR_FRAME from=3 op=68f1 bytes=170 kind=-1 capability=none
+11-15 01:01:01.922  7130  7203 I PeerlinkPairTest: PAIR_FRAME from=0 op=80b bytes=48 kind=1 capability=none
+11-15 01:01:01.922  7130  7205 I PeerlinkPairTest: PAIR_FRAME from=2 op=80b bytes=48 kind=2 capability=none
+11-15 01:01:01.922  7130  7204 I PeerlinkPairTest: PAIR_FRAME from=1 op=90b bytes=48 kind=1 capability=none
+11-15 01:01:01.922  7130  7206 I PeerlinkPairTest: PAIR_FRAME from=3 op=90b bytes=48 kind=2 capability=none
+11-15 01:01:02.053  7130  7201 I PeerlinkPairTest: PAIR_A state=1,0,4,4,4,1,1,0,true
+11-15 01:01:02.053  7130  7201 I PeerlinkPairTest: ORIGINAL_ANDROID_PAIR_A_CHANNELS_CONNECTED
