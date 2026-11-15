@@ -125,6 +125,7 @@ internal object EngineRuntime {
     fun configureTurn(input: ByteArray): Boolean = onRuntime {
         client != 0L && nativeConfigureTurn(base, input)
     }
+    fun turnRequest(): ByteArray? = onRuntime { if (client == 0L) null else nativeTurnRequest(base) }
 
     fun turnAddress(): ByteArray? = onRuntime { if (client == 0L) null else nativeTurnAddress(base) }
 
@@ -219,6 +220,7 @@ internal object EngineRuntime {
 
     private external fun nativeLoad(path: String): Long
     private external fun nativeConfigureTurn(base: Long, input: ByteArray): Boolean
+    private external fun nativeTurnRequest(base: Long): ByteArray?
     private external fun nativeTurnAddress(base: Long): ByteArray?
     private external fun nativePeerTurnAddress(base: Long, input: ByteArray): Boolean
     private external fun nativeConfigureFiles(base: Long, assets: String): Boolean

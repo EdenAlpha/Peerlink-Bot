@@ -114,6 +114,8 @@ object EngineHost {
         Bundle().apply { putLong("peer", peerUid); putLong("connectingStart", connectingStart) }).getBoolean("ok")
     internal fun configureTurn(input: ByteArray): Boolean = request(EngineProtocol.CONFIGURE_TURN,
         Bundle().apply { putByteArray("input", input) }).getBoolean("ok")
+    internal fun turnRequest(): ByteArray = requireNotNull(
+        request(EngineProtocol.TURN_REQUEST).getByteArray("request")) { "The engine's transport account parameters are unavailable" }
     internal fun turnAddress(): ByteArray? = request(EngineProtocol.TURN_ADDRESS).getByteArray("address")
     internal fun peerTurnAddress(address: ByteArray): Boolean = request(EngineProtocol.PEER_TURN_ADDRESS,
         Bundle().apply { putByteArray("address", address) }).getBoolean("ok")
@@ -155,6 +157,7 @@ internal object EngineProtocol {
     const val CONFIGURE_TURN = 13
     const val TURN_ADDRESS = 14
     const val PEER_TURN_ADDRESS = 15
+    const val TURN_REQUEST = 16
     const val STATUS = 100
     const val NATIVE_STATE = 101
 }

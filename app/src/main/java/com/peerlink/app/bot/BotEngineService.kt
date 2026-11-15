@@ -58,6 +58,7 @@ class BotEngineService : Service() {
                 EngineProtocol.CHECK -> result.putLong("verdict", EngineRuntime.check())
                 EngineProtocol.CONFIGURE_TURN -> result.putBoolean("ok", EngineRuntime.configureTurn(
                     requireNotNull(args.getByteArray("input"))))
+                EngineProtocol.TURN_REQUEST -> result.putByteArray("request", EngineRuntime.turnRequest())
                 EngineProtocol.TURN_ADDRESS -> result.putByteArray("address", EngineRuntime.turnAddress())
                 EngineProtocol.PEER_TURN_ADDRESS -> result.putBoolean("ok", EngineRuntime.peerTurnAddress(
                     requireNotNull(args.getByteArray("address"))))

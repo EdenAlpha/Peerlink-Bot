@@ -96,7 +96,7 @@ object BotMatchDriver {
             check(squadReply["result"] == "NOERR") { "Could not read the bot's current squad" }
             val squadInput = SquadInput.encode(squadReply, self)
             while (running) {
-                val turn = flow.turnServerList(gate)
+                val turn = flow.turnServerList(gate, EngineHost.turnRequest())
                 val result = turn["result"]?.toString()
                 if (transient(result)) { Thread.sleep(RETRY_MS); continue }
                 check(result == "NOERR") { "The match transport configuration was refused: $result" }

@@ -622,7 +622,15 @@ class BotMatchFlow(
         else -> 0L
     }
 
-    fun turnServerList(g: KgsGate) = g.step("CMD_GET_TURN_SERVER_LIST")
+    fun turnServerList(g: KgsGate, nativeRequest: ByteArray): LinkedHashMap<String, Any?> {
+        require(nativeRequest.size in 5..1028)
+        val input = java.nio.ByteBuffer.wrap(nativeRequest)
+        val limit = input.int.toLong() and 0xffffffffL
+        val parameter = ByteArray(input.remaining()).also { input.get(it) }.toString(Charsets.UTF_8)
+        return g.step("CMD_GET_TURN_SERVER_LIST", linkedMapOf(
+            "turn_account_param" to parameter, "turn_time_limit" to limit,
+        ))
+    }
 
     /** CMD_SEND_TURN_ADDRESS_DATA -- carry the original engine's binary record. */
     fun sendTurnAddress(g: KgsGate, target: Long, addressB64: String, size: Int) =

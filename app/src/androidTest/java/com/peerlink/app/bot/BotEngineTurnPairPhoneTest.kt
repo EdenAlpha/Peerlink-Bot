@@ -35,6 +35,7 @@ class BotEngineTurnPairPhoneTest {
         try {
             assertTrue(EngineBridge.stageEngine(context))
             assertTrue(EngineHost.lastError, EngineHost.prepare(context, uid))
+            assertTrue(EngineHost.turnRequest().size in 5..1028)
             assertTrue(EngineHost.configureTurn(input))
             val record = requireNotNull(EngineHost.buildPeerRecord(peer,
                 "127.0.0.1", if (role == "A") PeerSlot.ENGINE_PORT else 39202,

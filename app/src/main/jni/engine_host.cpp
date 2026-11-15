@@ -548,6 +548,30 @@ JNIEXPORT jboolean JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeSetPeer
     return result & 1 ? JNI_TRUE : JNI_FALSE;
 }
 
+JNIEXPORT jbyteArray JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeTurnRequest(
+        JNIEnv *env, jobject, jlong base) {
+    if (!valid(base) || !g_client) return nullptr;
+    TaskLock lock;
+    uintptr_t turn = turn_service();
+    if (!lock.manager || !turn) return nullptr;
+    // The original request preparer at 0x7e90154 uses exactly these getters.
+    EngineString parameter = entry<EngineString (*)(uintptr_t)>(0x7e23024)(turn);
+    const auto *raw = reinterpret_cast<const unsigned char *>(&parameter);
+    size_t size = (raw[0] & 1) ? parameter.words[1] : raw[0] >> 1;
+    const auto *text = (raw[0] & 1) ? reinterpret_cast<const unsigned char *>(parameter.words[2]) : raw + 1;
+    uint32_t limit = entry<uint32_t (*)(uintptr_t)>(0x7e23220)(turn);
+    jbyteArray result = nullptr;
+    if (text && size && size <= 1024) {
+        std::vector<unsigned char> bytes(size + 4);
+        for (unsigned i = 0; i < 4; ++i) bytes[i] = static_cast<unsigned char>(limit >> (24 - i * 8));
+        memcpy(bytes.data() + 4, text, size);
+        result = env->NewByteArray(static_cast<jsize>(bytes.size()));
+        if (result) env->SetByteArrayRegion(result, 0, static_cast<jsize>(bytes.size()), reinterpret_cast<const jbyte *>(bytes.data()));
+    }
+    destroy_string(parameter);
+    return result;
+}
+
 JNIEXPORT jboolean JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeConfigureTurn(
         JNIEnv *env, jobject, jlong base, jbyteArray input) {
     if (!valid(base) || !g_client || !input) return JNI_FALSE;
