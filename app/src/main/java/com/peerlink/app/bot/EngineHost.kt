@@ -1,6 +1,8 @@
 package com.peerlink.app.bot
 
 import android.content.*
+import android.app.ActivityManager
+import android.app.ApplicationExitInfo
 import android.os.*
 import com.peerlink.app.core.AppState
 import com.peerlink.app.service.PeerBotService
@@ -17,6 +19,10 @@ object EngineHost {
     @Volatile private var ownerUid = 0L
     @Volatile private var service: Messenger? = null
     private var context: Context? = null
+    @Volatile private var enginePid = 0
+    @Volatile private var engineStartedAt = 0L
+    @Volatile private var stopRequestedAt = 0L
+    private var nextFlowReportAt = 0L
     private var binding: CountDownLatch? = null
     private val preparation = Any()
     private val pending = ConcurrentHashMap<Int, CompletableFuture<Bundle>>()
@@ -30,6 +36,15 @@ object EngineHost {
                 if (line.isNotBlank()) PeerBotService.status(line)
             } else if (message.what == EngineProtocol.NATIVE_STATE) {
                 data.getLongArray("state")?.let { AppState.appendLog("[BOT-NATIVE] state=${it.contentToString()} (frame counter at index 20)") }
+            } else if (message.what == EngineProtocol.DIAGNOSTIC) {
+                val firstFailure = data.getBoolean("firstFailure")
+                val observedAt = data.getLong("observedAtMs")
+                AppState.appendLog("[BOT-DIAG] ${data.getString("line")} " +
+                    "hostStopRequestedAtMs=$stopRequestedAt receivedAtMs=${SystemClock.elapsedRealtime()}")
+                if (firstFailure || observedAt >= nextFlowReportAt) {
+                    nextFlowReportAt = observedAt + 5000
+                    PeerSlot.logFlow(if (firstFailure) "first_native_failure" else "native_monitor")
+                }
             } else pending.remove(message.arg1)?.complete(data)
         }
     })
@@ -38,11 +53,37 @@ object EngineHost {
             service = Messenger(binder)
             synchronized(this@EngineHost) { binding?.countDown() }
         }
-        override fun onServiceDisconnected(name: ComponentName) = disconnected()
-        override fun onBindingDied(name: ComponentName) = disconnected()
-        override fun onNullBinding(name: ComponentName) = disconnected()
+        override fun onServiceDisconnected(name: ComponentName) = disconnected("onServiceDisconnected")
+        override fun onBindingDied(name: ComponentName) = disconnected("onBindingDied")
+        override fun onNullBinding(name: ComponentName) = disconnected("onNullBinding")
     }
-    private fun disconnected() {
+    private fun disconnected(callback: String) {
+        AppState.appendLog("[BOT-DIAG] ENGINE_SERVICE_LOST callback=$callback observedAtMs=${SystemClock.elapsedRealtime()} " +
+            "hostStopRequestedAtMs=$stopRequestedAt; checking Android process exit record")
+        PeerSlot.logFlow("engine_service_lost")
+        val lostPid = enginePid
+        val since = engineStartedAt
+        Thread({
+            runCatching {
+                val manager = context?.getSystemService(ActivityManager::class.java)
+                val exit = if (lostPid > 0 && Build.VERSION.SDK_INT >= 30)
+                    manager?.getHistoricalProcessExitReasons(context!!.packageName, lostPid, 4)
+                        ?.firstOrNull { it.timestamp >= since } else null
+                val reason = when (exit?.reason) {
+                    ApplicationExitInfo.REASON_CRASH_NATIVE -> "native_crash"
+                    ApplicationExitInfo.REASON_CRASH -> "java_crash"
+                    ApplicationExitInfo.REASON_LOW_MEMORY -> "low_memory"
+                    ApplicationExitInfo.REASON_ANR -> "not_responding"
+                    ApplicationExitInfo.REASON_USER_REQUESTED -> "user_or_system_stop"
+                    ApplicationExitInfo.REASON_EXIT_SELF -> "process_exited_itself"
+                    ApplicationExitInfo.REASON_SIGNALED -> "signal"
+                    null -> "not_available"
+                    else -> "android_reason_${exit.reason}"
+                }
+                AppState.appendLog("[BOT-DIAG] ANDROID_ENGINE_EXIT pid=$lostPid reason=$reason " +
+                    "status=${exit?.status} timeMs=${exit?.timestamp} pssKiB=${exit?.pss}; unavailable does not prove absence of a crash")
+            }.onFailure { AppState.appendLog("[BOT-DIAG] ANDROID_ENGINE_EXIT unavailable=${it.javaClass.simpleName}") }
+        }, "bot-exit-report").start()
         service = null
         isReady = false
         PeerSlot.engineAttached = false
@@ -87,8 +128,11 @@ object EngineHost {
     fun prepare(owner: Context, uid: Long): Boolean = synchronized(preparation) {
         if (isReady) return ownerUid == uid
         try {
+            stopRequestedAt = 0
+            engineStartedAt = System.currentTimeMillis()
             bind(owner)
             val result = request(EngineProtocol.PREPARE, Bundle().apply { putLong("uid", uid) }, 300)
+            enginePid = result.getInt("pid")
             isReady = result.getBoolean("ok")
             if (isReady) ownerUid = uid
             else lastError = result.getString("reason") ?: "The bot simulation did not start"
@@ -135,7 +179,10 @@ object EngineHost {
         Bundle().apply { putBoolean("controllerAllowed", controllerAllowed) }).getBoolean("ok")
     fun pass(): Boolean = request(EngineProtocol.PASS).getBoolean("ok")
     internal fun probeController(): Boolean = request(EngineProtocol.PROBE_CONTROLLER).getBoolean("ok")
-    fun stop() {
+    fun stop(reason: String = "engine_host_stop") {
+        stopRequestedAt = SystemClock.elapsedRealtime()
+        AppState.appendLog("[BOT-DIAG] PEERLINK_STOP component=engine_host reason=$reason observedAtMs=$stopRequestedAt")
+        PeerSlot.logFlow("engine_host_stop")
         runCatching { request(EngineProtocol.STOP) }
         isReady = false
         ownerUid = 0
@@ -165,6 +212,7 @@ internal object EngineProtocol {
     const val TRANSPORT_IO_READY = 18
     const val STATUS = 100
     const val NATIVE_STATE = 101
+    const val DIAGNOSTIC = 102
 }
 
 data class EngineSnapshot(val values: LongArray) {

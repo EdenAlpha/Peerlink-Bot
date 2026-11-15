@@ -3,6 +3,7 @@ package com.peerlink.app.bot
 import android.util.Log
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import com.peerlink.app.core.AppState
 import java.io.File
 import java.net.DatagramPacket
 import java.net.DatagramSocket
@@ -94,10 +95,33 @@ class BotEngineTurnPairPhoneTest {
             assertFalse(EngineHost.snapshot().canTestPass)
             Log.i("PeerlinkTurnTest", "ORIGINAL_CONFIGURED_TURN_${role}_CHANNELS_CONNECTED")
             Thread.sleep(3000)
-            assertTrue(EngineHost.snapshot().connected)
+            val connected = EngineHost.snapshot()
+            assertTrue(connected.connected)
+            assertEquals(29, connected.values.size)
+            assertEquals(0L, connected.values[23])
+            assertEquals(1L, connected.values[26])
+            assertEquals(2L, connected.values[28])
+            assertTrue("Independent native monitor did not reach the export log",
+                AppState.getLogs().contains("[BOT-DIAG] NATIVE_STATE"))
+            Log.i("PeerlinkTurnTest", "ORIGINAL_CONFIGURED_TURN_${role}_DIAGNOSTICS_ACTIVE")
+            if (args.getString("diagnosticPeerStop") == "true" && role == "A") {
+                // B closes its actual process after the same successful hold.
+                // Observe exported logs only: no driver/RPC polling to hide
+                // whether the service monitor works during an HTTP wait.
+                val failureDeadline = System.nanoTime() + 60_000_000_000L
+                while (!AppState.getLogs().contains("FIRST_NATIVE_FAILURE") && System.nanoTime() < failureDeadline)
+                    Thread.sleep(100)
+                val logs = AppState.getLogs()
+                assertTrue("Peer process stopped but no native failure reached the export", logs.contains("FIRST_NATIVE_FAILURE"))
+                assertTrue(logs.contains("disconnectInitiator=unresolved"))
+                assertTrue(logs.contains("trigger=first_native_failure"))
+                Log.i("PeerlinkTurnTest", "ORIGINAL_CONFIGURED_TURN_A_PEER_STOP_OBSERVED")
+                logs.lineSequence().filter { it.contains("[BOT-DIAG]") || it.contains("[BOT-FLOW]") }
+                    .forEach { Log.i("PeerlinkTurnTest", "EXPORT_DIAGNOSTIC $it") }
+            }
         } finally {
             Thread.sleep(1000)
-            EngineHost.stop()
+            EngineHost.stop("configured_pair_test_finished")
             mailbox.close()
             ferry?.close()
         }

@@ -4,6 +4,21 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class PeerConnectionPhaseTest {
+    @Test fun nativeFailureIsReportedBeforeTheGenericNinetySecondTimeout() {
+        val failed = EngineSnapshot(LongArray(29).apply {
+            this[2] = 5; this[3] = 6; this[4] = 6; this[5] = 6
+            this[7] = 1; this[23] = 8; this[24] = 4
+        })
+        val error = assertThrows(IllegalStateException::class.java) {
+            PeerConnectionPhase.awaitTransport(
+                running = { true }, snapshot = { failed }, progress = {},
+                prepareChannels = { fail("Failed native state cannot start a new model"); false },
+                pause = { fail("Do not hide the native reason behind a later timeout") },
+            )
+        }
+        assertTrue(error.message!!.contains("database checksum comparison failed"))
+    }
+
     @Test fun matchSessionIsOpenedOnlyAfterOriginalNetworkIoIsReady() {
         var checks = 0
         var opens = 0

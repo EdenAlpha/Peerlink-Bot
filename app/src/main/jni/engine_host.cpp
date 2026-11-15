@@ -389,7 +389,10 @@ JNIEXPORT jint JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeAdvanceMatc
 
 JNIEXPORT jlongArray JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeSnapshot(
         JNIEnv *env, jobject, jlong base) {
-    jlong state[23]{};
+    // Append-only IPC layout. Diagnostic fields are reads under the same
+    // original task lock; they never change the engine's connection verdict.
+    constexpr unsigned kStateSize = 29;
+    jlong state[kStateSize]{};
     if (valid(base)) {
         TaskLock lock;
         state[0] = *reinterpret_cast<unsigned char *>(g_base + 0xa53b850);
@@ -415,12 +418,21 @@ JNIEXPORT jlongArray JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeSnaps
         uintptr_t turn = turn_service();
         if (turn) state[22] = entry<uint32_t (*)(uintptr_t)>(0x7e236e0)(turn);
         uintptr_t model = *reinterpret_cast<uintptr_t *>(g_base + 0xa5bb188);
+        state[23] = *reinterpret_cast<uint32_t *>(g_base + 0xa5bb198);
         if (model) {
             state[5] = *reinterpret_cast<uint32_t *>(model + 0x7b8);
             state[6] = *reinterpret_cast<unsigned char *>(model + 0x7f1);
             state[7] = *reinterpret_cast<unsigned char *>(model + 0x7f2);
             uintptr_t handle = *reinterpret_cast<uintptr_t *>(model + 0x848);
             state[19] = handle && *reinterpret_cast<uintptr_t *>(handle);
+            state[24] = *reinterpret_cast<uint32_t *>(model + 0xa34);
+            state[25] = *reinterpret_cast<unsigned char *>(model + 0xa30);
+            state[26] = 1;
+            state[27] = *reinterpret_cast<unsigned char *>(model + 0x7f0);
+            uintptr_t first = *reinterpret_cast<uintptr_t *>(model + 8);
+            uintptr_t last = *reinterpret_cast<uintptr_t *>(model + 16);
+            if (last >= first && last - first <= 24 * 0x510 && (last - first) % 0x510 == 0)
+                state[28] = (last - first) / 0x510;
         }
         uintptr_t match = *reinterpret_cast<uintptr_t *>(g_base + 0xa533ec0);
         uintptr_t core = match ? *reinterpret_cast<uintptr_t *>(match + 0x2f8) : 0;
@@ -456,8 +468,8 @@ JNIEXPORT jlongArray JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeSnaps
         state[16] = work ? *reinterpret_cast<unsigned char *>(work + 0x6c4c0 + 0x102) : 0;
         state[17] = settings ? *reinterpret_cast<unsigned char *>(settings + 0xd3) : 0;
     }
-    jlongArray result = env->NewLongArray(23);
-    if (result) env->SetLongArrayRegion(result, 0, 23, state);
+    jlongArray result = env->NewLongArray(kStateSize);
+    if (result) env->SetLongArrayRegion(result, 0, kStateSize, state);
     return result;
 }
 

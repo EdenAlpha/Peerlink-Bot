@@ -66,7 +66,8 @@ object BotMatchDriver {
         return true
     }
 
-    fun stop() {
+    fun stop(reason: String = "driver_stop") {
+        log("PEERLINK_STOP component=match_driver reason=$reason observedAtMs=${android.os.SystemClock.elapsedRealtime()}")
         running = false
     }
 
@@ -376,6 +377,8 @@ object BotMatchDriver {
                 }
             }
         } catch (t: Throwable) {
+            log("DRIVER_EXCEPTION type=${t.javaClass.simpleName} observedAtMs=${android.os.SystemClock.elapsedRealtime()}; recording flow before leaving driver")
+            PeerSlot.logFlow("driver_exception")
             status(t.message ?: "Bot match setup stopped")
         } finally {
             running = false

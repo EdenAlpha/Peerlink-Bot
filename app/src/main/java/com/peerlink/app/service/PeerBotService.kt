@@ -124,11 +124,11 @@ class PeerBotService : Service() {
     override fun onDestroy() {
         active = null
         running = false
-        BotMatchDriver.stop()
-        PeerSlot.disarm()
+        BotMatchDriver.stop("bot_service_onDestroy")
+        PeerSlot.disarm("bot_service_onDestroy")
         if (BotMode.active) stopService(Intent(this, PeerLinkVpnService::class.java))
         BotMode.stop()
-        Thread({ EngineHost.stop() }, "bot-engine-stop").start()
+        Thread({ EngineHost.stop("bot_service_onDestroy") }, "bot-engine-stop").start()
         AppState.appendLog("[BOT-SVC   ] bot session service stopped")
         super.onDestroy()
     }

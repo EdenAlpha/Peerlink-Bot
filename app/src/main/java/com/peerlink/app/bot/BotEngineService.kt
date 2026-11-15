@@ -22,6 +22,8 @@ class BotEngineService : Service() {
     private var pss = 0L
     private var nextMemorySample = 0L
     private var nextNativeSample = 0L
+    private var diagnosticTask: ScheduledFuture<*>? = null
+    private val connectionTrace = NativeConnectionTrace()
     private val messenger = Messenger(object : Handler(Looper.getMainLooper()) {
         override fun handleMessage(message: Message) {
             val request = Message.obtain(message)
@@ -42,6 +44,7 @@ class BotEngineService : Service() {
             when (message.what) {
                 EngineProtocol.PREPARE -> {
                     result.putBoolean("ok", EngineRuntime.prepare(this, args.getLong("uid")))
+                    result.putInt("pid", Process.myPid())
                     if (!result.getBoolean("ok")) result.putString("reason", lastStatus.ifBlank { "Bot simulation could not start" })
                 }
                 EngineProtocol.PEER_RECORD -> {
@@ -86,6 +89,9 @@ class BotEngineService : Service() {
                 EngineProtocol.PASS -> result.putBoolean("ok", pressPass())
                 EngineProtocol.PROBE_CONTROLLER -> result.putBoolean("ok", EngineRuntime.probeController())
                 EngineProtocol.STOP -> {
+                    diagnostic("PEERLINK_STOP component=engine_service reason=stop_command")
+                    sampleDiagnostics()
+                    diagnosticTask?.cancel(false)
                     testing = false
                     pollTask?.cancel(false)
                     EngineRuntime.neutral()
@@ -93,6 +99,19 @@ class BotEngineService : Service() {
                     result.putBoolean("ok", true)
                 }
                 else -> error("Unknown bot engine command")
+            }
+            if (message.what == EngineProtocol.BEGIN_INTRODUCTION || message.what == EngineProtocol.OPEN_SESSION) {
+                diagnostic("NATIVE_COMMAND command=${if (message.what == EngineProtocol.OPEN_SESSION) "open_session" else "begin_introduction"} accepted=${result.getBoolean("ok")}")
+                if (result.getBoolean("ok") && diagnosticTask == null)
+                    diagnosticTask = worker.scheduleWithFixedDelay(::sampleDiagnostics, 0, 100, TimeUnit.MILLISECONDS)
+            }
+            if (message.what == EngineProtocol.PREPARE_CHANNELS || message.what == EngineProtocol.PEER_TURN_ADDRESS || message.what == EngineProtocol.SETUP_MATCH) {
+                diagnostic("NATIVE_COMMAND command=${when (message.what) {
+                    EngineProtocol.PREPARE_CHANNELS -> "prepare_channels"
+                    EngineProtocol.PEER_TURN_ADDRESS -> "peer_connection_record"
+                    else -> "setup_match"
+                }} accepted=${result.getBoolean("ok")}")
+                sampleDiagnostics()
             }
         } catch (error: Exception) {
             // Never put session IDs, requests or native memory into a public log/export.
@@ -112,7 +131,27 @@ class BotEngineService : Service() {
     private fun snapshot(): EngineSnapshot {
         val now = SystemClock.elapsedRealtime()
         if (now >= nextMemorySample) { pss = Debug.getPss().toLong(); nextMemorySample = now + 5000 }
-        return EngineSnapshot(EngineRuntime.snapshot().copyOf(23).also { it[18] = pss })
+        return EngineSnapshot(EngineRuntime.snapshot().copyOf(29).also { it[18] = pss })
+    }
+    private fun diagnostic(line: String, firstFailure: Boolean = false) {
+        runCatching { observer?.send(Message.obtain(null, EngineProtocol.DIAGNOSTIC).apply {
+            data = Bundle().apply {
+                putString("line", line)
+                putBoolean("firstFailure", firstFailure)
+                putLong("observedAtMs", SystemClock.elapsedRealtime())
+            }
+        }) }
+    }
+    private fun sampleDiagnostics() {
+        try {
+            val state = snapshot()
+            connectionTrace.sample(state, SystemClock.elapsedRealtime()).forEach {
+                diagnostic(it.text, it.firstFailure)
+            }
+        } catch (error: Exception) {
+            diagnostic("MONITOR_UNAVAILABLE error=${error.javaClass.simpleName}; native cause not observed")
+            diagnosticTask?.cancel(false)
+        }
     }
     private fun logNativeState(state: EngineSnapshot) {
         val now = SystemClock.elapsedRealtime()
@@ -153,6 +192,8 @@ class BotEngineService : Service() {
         return true
     }
     override fun onDestroy() {
+        diagnostic("PEERLINK_STOP component=engine_service reason=android_onDestroy action=close_host_and_exit")
+        diagnosticTask?.cancel(false)
         testing = false
         runCatching { EngineRuntime.neutral() }
         EngineRuntime.closeHost()

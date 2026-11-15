@@ -47,6 +47,7 @@ internal object PeerConnectionPhase {
             exchangeAddresses()
             val state = snapshot()
             progress(state)
+            check(!state.nativeFailed) { "Bot engine connection failed: ${state.nativeFailureReason}. See FIRST_NATIVE_FAILURE in the match log." }
             if (!prepared && state.sessionConnected) {
                 check(prepareChannels()) { "The bot's match-data channel setup was rejected" }
                 prepared = true

@@ -60,9 +60,32 @@ use and phone-game kickoff require separate evidence.
 
 ## Verification
 
-The current connection-test APK is `eaf7f2a`, published as
+The phone export after `eaf7f2a` shows that peer-record parsing now completes,
+but the original bot session and data channels fail before server match setup.
+The initiating side and underlying cause are not established by that export.
+Two headless engines working together does not verify the full game's peer.
+
+The next diagnostic build adds independent 100 ms native sampling from peer
+introduction onward. State changes and a 5 s heartbeat reach the normal match
+log. `FIRST_NATIVE_FAILURE` preserves the first observed error, preceding state,
+sampling gap, model reason, sync result, database-check setting and frame count.
+Mapped reasons come from original build 11.1.1 model initialization/tick code;
+unmapped codes and a generic transport error remain explicitly uncertain.
+The driver reports a native failure immediately instead of replacing it with a
+later generic connection timeout.
+
+`BOT-FLOW` separates host/VPN routes and counts game reception, sends to the
+bot, bot reception and sends toward the game, including packet ages and drop
+reasons. A UDP send proves local socket acceptance, not application receipt.
+`PEERLINK_STOP` records explicit engine, driver, ferry and VPN shutdown paths.
+Service loss requests Android's process exit reason when available. These
+records cannot read the full game's private internal error or prove the
+disconnect initiator when the original engine only reports a generic failure.
+They are diagnostics, not a claimed phone-game connection fix.
+
+The preceding connection-test APK is `eaf7f2a`, published as
 [`phone-engine-test-eaf7f2a`](https://github.com/EdenAlpha/Peerlink-Bot/releases/tag/phone-engine-test-eaf7f2a).
-The latest phone export identifies the precise parser error: the server
+The preceding phone export identified the precise parser error: the server
 reported 7 valid bytes inside a decoded 20-byte buffer. The driver required
 equal lengths and stopped before the server connection report and GameID.
 Original callback `0x7e8f444` passes the declared payload count to the original

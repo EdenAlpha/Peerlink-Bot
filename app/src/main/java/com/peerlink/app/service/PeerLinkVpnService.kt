@@ -193,7 +193,7 @@ class PeerLinkVpnService : VpnService() {
             // the source was the notification Stop button.
             AppState.appendLog("[VPN-STOP  ] STOP_VPN intent received — source: ${if (intent.getStringExtra("source") != null) intent.getStringExtra("source") else "notification Stop button or external"}")
             startupCancelled.set(true)
-            stopVpn()
+            stopVpn(reason = "stop_vpn_intent")
             return START_NOT_STICKY
         }
 
@@ -414,7 +414,7 @@ class PeerLinkVpnService : VpnService() {
             if (vpnInterface == null) {
                 AppState.appendLog("[T-STATE   ] builder.establish() returned null prepared=${VpnService.prepare(this) == null}")
                 AppState.appendLog("[VPN-START ] ERROR: VPN interface establish failed")
-                stopVpn()
+                stopVpn(reason = "vpn_interface_unavailable")
                 AppState.sessionError.set("Android could not create the VPN interface")
                 AppState.sessionPhase.set(PeerSessionPhase.ERROR)
                 return
@@ -504,7 +504,7 @@ class PeerLinkVpnService : VpnService() {
                         if (!stats.backendRunning && !stopVpnGuard.get()) {
                             AppState.sessionError.set("The packet connection stopped. Reconnect to your player.")
                             AppState.appendLog("[VPN-UNDER ] Native packet workers stopped; closing the VPN session")
-                            stopVpn()
+                            stopVpn(reason = "native_packet_workers_stopped")
                         }
                     }
                 },
@@ -637,7 +637,7 @@ class PeerLinkVpnService : VpnService() {
             saveSessionState()
         } catch (e: Exception) {
             AppState.appendLog("[VPN-START ] Start error: ${e.message}")
-            stopVpn()
+            stopVpn(reason = "vpn_start_exception")
             if (!startupCancelled.get()) {
                 AppState.sessionError.set(e.message ?: "Peer tunnel setup failed")
                 AppState.sessionPhase.set(PeerSessionPhase.ERROR)
@@ -724,7 +724,7 @@ class PeerLinkVpnService : VpnService() {
             val iface = builder.establish()
             if (iface == null) {
                 AppState.appendLog("[VPN-START ] ERROR: VPN interface establish failed (bot mode)")
-                stopVpn()
+                stopVpn(reason = "bot_vpn_interface_unavailable")
                 AppState.sessionError.set("Android could not create the VPN interface")
                 AppState.sessionPhase.set(PeerSessionPhase.ERROR)
                 return
@@ -848,7 +848,7 @@ class PeerLinkVpnService : VpnService() {
             saveSessionState()
         } catch (e: Exception) {
             AppState.appendLog("[VPN-START ] Start error: ${e.message}")
-            stopVpn()
+            stopVpn(reason = "bot_vpn_start_exception")
             if (!startupCancelled.get()) {
                 AppState.sessionError.set(e.message ?: "Bot-mode tunnel setup failed")
                 AppState.sessionPhase.set(PeerSessionPhase.ERROR)
@@ -1160,8 +1160,12 @@ class PeerLinkVpnService : VpnService() {
         }
     }
 
-    private fun stopVpn(clearSavedSession: Boolean = true) {
+    private fun stopVpn(clearSavedSession: Boolean = true, reason: String) {
         if (!stopVpnGuard.compareAndSet(false, true)) return
+        if (com.peerlink.app.bot.BotMode.active) {
+            AppState.appendLog("[BOT-DIAG] PEERLINK_STOP component=vpn reason=$reason observedAtMs=${android.os.SystemClock.elapsedRealtime()}")
+            com.peerlink.app.bot.PeerSlot.logFlow("vpn_stop")
+        }
         AppState.isRunning.set(false)
         AppState.sessionPhase.set(PeerSessionPhase.STOPPING)
         MatchAutomationEngine.stop()
@@ -1493,7 +1497,7 @@ class PeerLinkVpnService : VpnService() {
         // START_STICKY means we'll be restarted; the next onStartCommand
         // will re-establish the tunnel if AppState.isRunning is still true.
         AppState.appendLog("[T-STATE   ] VPN service onRevoke — tearing down tunnel but staying alive")
-        stopVpn()
+        stopVpn(reason = "android_vpn_permission_revoked")
         super.onRevoke()
     }
 
@@ -1504,7 +1508,7 @@ class PeerLinkVpnService : VpnService() {
         serviceDestroyed.set(true)
         // Preserve recovery preferences for system-driven recreation; explicit
         // Stop already cleared them. Do not discard a queued native cleanup.
-        stopVpn(clearSavedSession = false)
+        stopVpn(clearSavedSession = false, reason = "vpn_service_onDestroy")
         super.onDestroy()
         finishStoppedUiIfReady()
     }
