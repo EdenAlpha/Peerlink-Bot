@@ -111,6 +111,10 @@ class BotEngineTurnPairPhoneTest {
             assertFalse("Changing policy during an active match must be refused", EngineHost.configureRevisionCheck(!revisionCheck))
             assertEquals(if (revisionCheck) 1L else 0L, EngineHost.snapshot().values[25])
             Log.i("PeerlinkTurnTest", "ORIGINAL_SERVER_REVISION_POLICY_${role}_VERIFIED enabled=$revisionCheck")
+            val side = if (role == "A") 0 else 1
+            assertTrue("Native game-side assignment disagrees with the owned room fixture",
+                EngineHost.loadingDiagnostics().contains("ownSide=$side"))
+            Log.i("PeerlinkTurnTest", "ORIGINAL_ROOM_SIDE_${role}_VERIFIED ownSide=$side")
             assertTrue("Independent native monitor did not reach the export log",
                 AppState.getLogs().contains("[BOT-DIAG] NATIVE_STATE"))
             Log.i("PeerlinkTurnTest", "ORIGINAL_CONFIGURED_TURN_${role}_DIAGNOSTICS_ACTIVE")
@@ -136,6 +140,7 @@ class BotEngineTurnPairPhoneTest {
                     Thread.sleep(1000)
                     val loading = EngineHost.snapshot()
                     Log.i("PeerlinkTurnTest", "MATCH_LOADING_PROBE_$role state=${loading.values.contentToString()}")
+                    Log.i("PeerlinkTurnTest", "MATCH_LOADING_DETAILS_$role ${EngineHost.loadingDiagnostics()}")
                 }
             }
             if (args.getString("diagnosticPeerStop") == "true" && role == "A") {

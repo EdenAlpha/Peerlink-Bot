@@ -331,6 +331,64 @@ JNIEXPORT jstring JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeDatabase
     return env->NewStringUTF(text.c_str());
 }
 
+JNIEXPORT jstring JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeLoadingDiagnostics(
+        JNIEnv *env, jobject, jlong base) {
+    if (!valid(base)) return env->NewStringUTF("MATCH_LOADING unavailable=engine_not_loaded");
+    TaskLock lock;
+    if (!lock.manager) return env->NewStringUTF("MATCH_LOADING unavailable=no_task_manager");
+    std::string text = "MATCH_LOADING hostStage=" + std::to_string(g_match_stage) +
+        " previewEventSubmitted=" + std::to_string(g_preview_proceeded);
+    uintptr_t root = entry<uintptr_t (*)()>(0x7a87db8)();
+    uintptr_t info = root ? *reinterpret_cast<uintptr_t *>(root + 0x20) : 0;
+    if (info) {
+        uintptr_t context = entry<uintptr_t (*)(uintptr_t)>(0x7a58998)(info);
+        if (context) text += " ownSide=" + std::to_string(*reinterpret_cast<uint32_t *>(context + 0x2c));
+    }
+    uintptr_t flow = *reinterpret_cast<uintptr_t *>(g_base + 0xa53b6e8);
+    uintptr_t task = flow ? *reinterpret_cast<uintptr_t *>(flow + 0x190) : 0;
+    if (flow) text += " flowState=" + std::to_string(*reinterpret_cast<uint32_t *>(flow + 0x120));
+    if (task) {
+        uintptr_t first = *reinterpret_cast<uintptr_t *>(task + 0x70), end = *reinterpret_cast<uintptr_t *>(task + 0x78);
+        if (first && end > first && (end - first) % 0xe0 == 0 && (end - first) / 0xe0 <= 32) {
+            auto *leaf = reinterpret_cast<const unsigned char *>(end - 0xe0);
+            auto *words = reinterpret_cast<const uintptr_t *>(leaf);
+            size_t count = (leaf[0] & 1) ? words[1] : leaf[0] >> 1;
+            const char *name = (leaf[0] & 1) ? reinterpret_cast<const char *>(words[2]) : reinterpret_cast<const char *>(leaf + 1);
+            if (name && count && count <= 160) {
+                bool safe = true;
+                for (size_t i = 0; i < count; ++i)
+                    if (!((name[i] >= 'A' && name[i] <= 'Z') || (name[i] >= 'a' && name[i] <= 'z') ||
+                          (name[i] >= '0' && name[i] <= '9') || name[i] == '/' || name[i] == '_')) safe = false;
+                if (safe) text += " leaf=" + std::string(name, count);
+            }
+            // Original 6aa8fac sets this on the client's completion event.
+            // It is not an indication that the process was never started.
+            text += " leafCompletionSignal=" + std::to_string(leaf[0x50]);
+        }
+    }
+    unsigned visited = 0;
+    auto walk = [&](auto &&self, uintptr_t node, unsigned depth) -> void {
+        if (!node || depth > 16 || ++visited > 800) return;
+        if (*reinterpret_cast<uintptr_t *>(node) == g_base + 0x996fde8) {
+            uintptr_t roster = *reinterpret_cast<uintptr_t *>(node + 0x90);
+            uintptr_t secondary = *reinterpret_cast<uintptr_t *>(node + 0x98);
+            text += " preMatchTaskState=" + std::to_string(*reinterpret_cast<uint32_t *>(node + 0xa0));
+            if (roster) text += " squadTransferState=" + std::to_string(*reinterpret_cast<uint32_t *>(roster + 0x70));
+            if (secondary) text += " secondarySyncState=" + std::to_string(*reinterpret_cast<uint32_t *>(secondary + 0x70));
+        }
+        uintptr_t first = *reinterpret_cast<uintptr_t *>(node + 0x40), child = first;
+        if (!first) return;
+        unsigned count = 0;
+        do {
+            uintptr_t next = *reinterpret_cast<uintptr_t *>(child + 0x50);
+            self(self, child, depth + 1);
+            child = next;
+        } while (child && child != first && ++count < 150 && visited <= 800);
+    };
+    for (unsigned i = 0; i < 4; ++i) walk(walk, *reinterpret_cast<uintptr_t *>(lock.manager + 0x118 + i * 8), 0);
+    return env->NewStringUTF(text.c_str());
+}
+
 JNIEXPORT jboolean JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativePrepareChannels(
         JNIEnv *env, jobject, jlong base, jlong peer, jlong home, jstring squad) {
     if (!valid(base) || !g_client || !squad || peer <= 0 || peer > 0xffffffffLL || peer == g_uid)

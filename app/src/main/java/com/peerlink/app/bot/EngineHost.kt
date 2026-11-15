@@ -182,6 +182,7 @@ object EngineHost {
     fun prepareChannels(peer: Long, squad: ByteArray, homeUid: Long = ownerUid): Boolean = request(EngineProtocol.PREPARE_CHANNELS,
         Bundle().apply { putLong("peer", peer); putLong("homeUid", homeUid); putByteArray("squad", squad) }, 60).getBoolean("ok")
     fun snapshot(): EngineSnapshot = EngineSnapshot(request(EngineProtocol.SNAPSHOT).getLongArray("state") ?: LongArray(19))
+    internal fun loadingDiagnostics(): String = request(EngineProtocol.LOADING_DIAGNOSTICS).getString("details").orEmpty()
     fun startInputTest(controllerAllowed: Boolean): Boolean = request(EngineProtocol.START_TEST,
         Bundle().apply { putBoolean("controllerAllowed", controllerAllowed) }).getBoolean("ok")
     fun pass(): Boolean = request(EngineProtocol.PASS).getBoolean("ok")
@@ -218,6 +219,7 @@ internal object EngineProtocol {
     const val BEGIN_INTRODUCTION = 17
     const val TRANSPORT_IO_READY = 18
     const val REVISION_POLICY = 19
+    const val LOADING_DIAGNOSTICS = 20
     const val STATUS = 100
     const val NATIVE_STATE = 101
     const val DIAGNOSTIC = 102

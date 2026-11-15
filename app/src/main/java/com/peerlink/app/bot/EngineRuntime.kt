@@ -138,6 +138,7 @@ internal object EngineRuntime {
     }
 
     fun databaseDiagnostics(): String = onRuntime { nativeDatabaseDiagnostics(base) }
+    fun loadingDiagnostics(): String = onRuntime { nativeLoadingDiagnostics(base) }
     fun turnRequest(): ByteArray? = onRuntime { if (client == 0L) null else nativeTurnRequest(base) }
 
     fun turnAddress(): ByteArray? = onRuntime { if (client == 0L) null else nativeTurnAddress(base) }
@@ -239,6 +240,7 @@ internal object EngineRuntime {
     private external fun nativeConfigureTurn(base: Long, input: ByteArray): Boolean
     private external fun nativeConfigureRevisionCheck(base: Long, enabled: Boolean): Boolean
     private external fun nativeDatabaseDiagnostics(base: Long): String
+    private external fun nativeLoadingDiagnostics(base: Long): String
     private external fun nativeTurnRequest(base: Long): ByteArray?
     private external fun nativeTurnAddress(base: Long): ByteArray?
     private external fun nativePeerTurnAddress(base: Long, input: ByteArray): Boolean

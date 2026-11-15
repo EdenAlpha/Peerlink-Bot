@@ -86,6 +86,7 @@ class BotEngineService : Service() {
                     }
                 }
                 EngineProtocol.SNAPSHOT -> result.putLongArray("state", snapshot().values)
+                EngineProtocol.LOADING_DIAGNOSTICS -> result.putString("details", EngineRuntime.loadingDiagnostics())
                 EngineProtocol.START_TEST -> {
                     controllerAllowed = args.getBoolean("controllerAllowed")
                     testing = controllerAllowed
@@ -153,7 +154,10 @@ class BotEngineService : Service() {
             val state = snapshot(passive = true)
             connectionTrace.sample(state, SystemClock.elapsedRealtime()).forEach {
                 diagnostic(it.text, it.firstFailure)
-                if (it.firstFailure) diagnostic(EngineRuntime.databaseDiagnostics())
+                if (it.firstFailure) {
+                    diagnostic(EngineRuntime.databaseDiagnostics())
+                    diagnostic(EngineRuntime.loadingDiagnostics())
+                }
             }
         } catch (error: Exception) {
             diagnostic("MONITOR_UNAVAILABLE error=${error.javaClass.simpleName}; native cause not observed")
@@ -164,6 +168,7 @@ class BotEngineService : Service() {
         val now = SystemClock.elapsedRealtime()
         if (now < nextNativeSample) return
         nextNativeSample = now + 5000
+        diagnostic(EngineRuntime.loadingDiagnostics())
         runCatching { observer?.send(Message.obtain(null, EngineProtocol.NATIVE_STATE).apply {
             data = Bundle().apply { putLongArray("state", state.values) }
         }) }
