@@ -56,7 +56,7 @@ internal object GameAssets {
         check("dt200_mobile_all.cpk" in names) { "Installed game's database pack is missing" }
         val assetDir = File(root, "assets")
         for ((index, name) in names.withIndex()) {
-            status("Checking bot files ${index + 1}/${names.size}")
+            status("Checking installed game packs ${index + 1}/${names.size}")
             integrity.ensure(File(assetDir, name), "assets/$name") { assets.open(name) }
         }
         status("Checking bot match resources")

@@ -196,7 +196,7 @@ object EngineBridge {
      * it is not up yet, gets it up -- in the log window, where the story can
      * be read afterwards.
      */
-    fun ensureEngineForSession(context: Context): Boolean {
+    fun ensureEngineForSession(context: Context, allowResourceDownload: Boolean = false): Boolean {
         val staged = File(stageDir(context), "libUE4.so")
         val stagedBytes = if (staged.isFile) staged.length() else 0L
         val loaded = EngineHost.isReady
@@ -214,9 +214,15 @@ object EngineBridge {
             log("the bot's id is not known yet -- the engine waits")
             return false
         }
-        // Download original match packs outside the five-minute native startup
-        // request. The room has not been created and no match is waiting yet.
-        GameResourcePacks.prepare(context)
+        // Reject an unsupported executable before offering or copying large
+        // resource sets for a different engine build.
+        val stagedHash = staged.inputStream().use(GameFileIntegrity::fingerprint).sha256
+        check(stagedHash == EngineRuntime.ENGINE_SHA256) {
+            "This bot test supports the verified eFootball 11.1.1 engine; no match-resource download was started"
+        }
+        // Reuse verified local packs before the bounded native startup. Only
+        // the explicit missing-files action allows downloading the remainder.
+        GameResourcePacks.prepare(context, allowResourceDownload)
         val up = prepareWithRetries(context, uid)
         log(if (up) "the engine is up for this session" else "the engine did NOT come up this session")
         return up

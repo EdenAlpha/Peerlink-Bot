@@ -29,7 +29,7 @@ import com.peerlink.app.ui.MainActivity
  */
 object BotRoomService : BotRoomBackend {
 
-    override suspend fun createRoom(ctx: Context): String {
+    override suspend fun createRoom(ctx: Context, allowResourceDownload: Boolean): String {
         val loaded = BotIdentity.load(ctx)
         val identity = if (loaded != null) loaded else {
             // First room on this phone: mint the bot's account (the mint.py
@@ -83,10 +83,14 @@ object BotRoomService : BotRoomBackend {
         BotMode.ensureStarted(ctx, identityInUse.userId)
         PeerBotService.start(ctx, "")
         PeerBotService.status("Preparing the bot simulation")
-        if (!EngineBridge.ensureEngineForSession(ctx)) {
+        try {
+            check(EngineBridge.ensureEngineForSession(ctx, allowResourceDownload)) {
+                EngineHost.lastError.ifBlank { "The bot simulation could not start" }
+            }
+        } catch (error: Exception) {
             PeerBotService.stop(ctx)
             BotMode.stop()
-            throw KgsGate.GateException(EngineHost.lastError.ifBlank { "The bot simulation could not start" })
+            throw error
         }
 
         // The capture's login-time quality report (blocks 35 + 38-40): fetch

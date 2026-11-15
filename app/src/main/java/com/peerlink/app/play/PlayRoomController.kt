@@ -23,7 +23,7 @@ import kotlinx.coroutines.launch
 /** The bot's room service: creates the room and returns its number. */
 interface BotRoomBackend {
     /** Create a room as the bot; returns the room number to show the user. */
-    suspend fun createRoom(ctx: Context): String
+    suspend fun createRoom(ctx: Context, allowResourceDownload: Boolean = false): String
 }
 
 /**
@@ -45,6 +45,8 @@ sealed interface RoomState {
 
     /** Room creation failed (gate down, not logged in, …). */
     data class Failed(val reason: String) : RoomState
+
+    data class FilesNeeded(val missingFiles: Int, val missingBytes: Long, val totalFiles: Int) : RoomState
 }
 
 /**
@@ -77,7 +79,8 @@ object PlayRoomController {
      * Ask the bot to create a room: login at the gate, CMD_CREATEJOIN_ROOM,
      * surface the returned number. Never invents one on failure.
      */
-    fun createRoom() {
+    fun createRoom(allowResourceDownload: Boolean = false) {
+        if (_state.value is RoomState.Creating) return
         val be = backend
         val ctx = appContext
         if (be == null || ctx == null) {
@@ -90,7 +93,9 @@ object PlayRoomController {
         _state.value = RoomState.Creating("The bot is opening a room at Konami…")
         io.launch {
             try {
-                onRoomCreated(be.createRoom(ctx))
+                onRoomCreated(be.createRoom(ctx, allowResourceDownload))
+            } catch (missing: com.peerlink.app.bot.GameResourcePacks.MissingResources) {
+                _state.value = RoomState.FilesNeeded(missing.missingFiles, missing.missingBytes, missing.totalFiles)
             } catch (t: Throwable) {
                 onRoomFailed(t.message ?: "Room creation failed.")
             }
@@ -110,6 +115,10 @@ object PlayRoomController {
     /** Called by the wiring when room creation failed. */
     fun onRoomFailed(reason: String) {
         _state.value = RoomState.Failed(reason)
+    }
+
+    fun preparationNote(note: String) {
+        if (_state.value is RoomState.Creating) _state.value = RoomState.Creating(note)
     }
 
     /** Drop the held room and return to idle. */

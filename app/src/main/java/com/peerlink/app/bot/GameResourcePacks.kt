@@ -19,6 +19,9 @@ internal object GameResourcePacks {
     data class Pack(val name: String, val bytes: Long, val sha256: String) {
         val fingerprint get() = GameFileIntegrity.Fingerprint(bytes, sha256)
     }
+    class MissingResources(val missingFiles: Int, val missingBytes: Long, val totalFiles: Int) :
+        IllegalStateException("${totalFiles - missingFiles}/$totalFiles bot match files available; " +
+            "$missingFiles still needed (${(missingBytes + 999_999) / 1_000_000} MB). No resource download started.")
 
     fun parse(text: String): List<Pack> {
         val packs = text.lineSequence().filter { it.isNotBlank() && !it.startsWith("#") }.map { line ->
@@ -41,11 +44,60 @@ internal object GameResourcePacks {
     private fun directory(context: Context) = File(context.filesDir, "bot-game-11.1.1/project/PesMobile/Content/Paks")
 
     /** Run before the bounded engine startup IPC and before opening a room. */
-    fun prepare(context: Context) {
+    fun prepare(context: Context, allowDownload: Boolean = false) {
         val packs = manifest(context)
-        ensure(directory(context), packs, { AppState.appendLog(it) }, { done, total ->
-            PeerBotService.status("Preparing bot match files ${done * 100 / total}% (${total / 1_000_000} MB first download)")
-        }) { pack -> download(pack) }
+        val report: (String) -> Unit = { AppState.appendLog(it) }
+        val local = GameResourceLocalCopies(context, packs.map { it.name }.toSet(), report)
+        prepareSet(directory(context), packs, allowDownload, report, { done, total ->
+            PeerBotService.status("Preparing bot match files ${done * 100 / total}%")
+        }, local::open, ::download)
+    }
+
+    internal fun prepareSet(directory: File, packs: List<Pack>, allowDownload: Boolean,
+                            report: (String) -> Unit, progress: (Long, Long) -> Unit,
+                            local: (Pack) -> Sequence<InputStream>, remote: (Pack) -> InputStream) {
+        val total = packs.sumOf { it.bytes }
+        var completed = 0L
+        val missing = mutableListOf<Pack>()
+        val integrity = GameFileIntegrity(report)
+        for ((index, pack) in packs.withIndex()) {
+            val target = File(directory, pack.name)
+            var found = target.isFile && target.inputStream().use(GameFileIntegrity::fingerprint) == pack.fingerprint
+            if (!found) {
+                for (input in local(pack)) {
+                    try {
+                        input.use { integrity.replace(bounded(it, pack.bytes), target, "local-match/${pack.name}", pack.fingerprint) }
+                        report("[BOT-FILES] RESOURCE_LOCAL_COPY file=${pack.name} bytes=${pack.bytes} SHA256=${pack.sha256}")
+                        found = true
+                        break
+                    } catch (error: java.io.IOException) {
+                        report("[BOT-FILES] LOCAL_SOURCE_REJECTED file=${pack.name} error=${error.javaClass.simpleName}")
+                    } catch (error: IllegalStateException) {
+                        report("[BOT-FILES] LOCAL_SOURCE_REJECTED file=${pack.name} reason=size_or_hash_mismatch")
+                    }
+                }
+            }
+            if (found) completed += pack.bytes else missing.add(pack)
+            report("[BOT-FILES] RESOURCE_LOCAL_CHECK checked=${index + 1}/${packs.size} available=${index + 1 - missing.size} file=${pack.name} result=${if (found) "PASS" else "MISSING_OR_DIFFERENT"}")
+            progress(completed, total)
+        }
+        val remaining = missing.sumOf { it.bytes }
+        report("[BOT-FILES] RESOURCE_DISCOVERY available=${packs.size - missing.size}/${packs.size} missing=${missing.size} missingBytes=$remaining networkAllowed=$allowDownload freshness=PINNED_TESTED_SET_NOT_LATEST_CATALOG")
+        if (missing.isNotEmpty()) {
+            if (!allowDownload) throw MissingResources(missing.size, remaining, packs.size)
+            ensure(directory, missing, report, { done, _ -> progress(completed + done, total) }, remote)
+        }
+        report("[BOT-FILES] RESOURCE_SET result=PASS files=${packs.size} bytes=$total source=verified_local_copies_or_selected_download")
+    }
+
+    private fun bounded(input: InputStream, limit: Long) = object : FilterInputStream(input) {
+        private var count = 0L
+        override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
+            check(!Thread.currentThread().isInterrupted) { "Match resource preparation cancelled" }
+            val read = super.read(buffer, offset, length)
+            if (read > 0) { count += read; check(count <= limit) { "Resource exceeds verified size" } }
+            return read
+        }
     }
 
     internal fun ensure(directory: File, packs: List<Pack>, report: (String) -> Unit,

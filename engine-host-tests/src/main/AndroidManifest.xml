@@ -1,3 +1,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <application>
+        <provider android:name="com.peerlink.app.bot.GameResourceImportProvider"
+            android:authorities="${applicationId}.bot-resource-import"
+            android:exported="false" android:grantUriPermissions="true" />
+    </application>
 </manifest>

@@ -75,6 +75,7 @@ class PeerBotService : Service() {
         /** Live status line (notification + log). Called by the match driver. */
         fun status(text: String) {
             statusText = text
+            com.peerlink.app.play.PlayRoomController.preparationNote(text)
             AppState.appendLog("[BOT-SVC   ] $text")
             active?.refresh()
         }

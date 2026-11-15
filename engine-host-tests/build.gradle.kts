@@ -18,6 +18,7 @@ android {
         include("com/peerlink/app/bot/EngineAndroidHost.java")
         include("com/peerlink/app/bot/SoftwareGamepadEvents.java")
         include("com/peerlink/app/bot/BotRenderSurface.java")
+        include("com/peerlink/app/bot/GameResourceImportProvider.java")
     }
 }
 

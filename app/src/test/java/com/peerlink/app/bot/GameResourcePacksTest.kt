@@ -47,4 +47,55 @@ class GameResourcePacksTest {
         for (wrong in listOf(valid.replace("pc1000", "../pc1000"), "$valid\n$valid", valid.lineSequence().first()))
             assertThrows(IllegalArgumentException::class.java) { GameResourcePacks.parse(wrong) }
     }
+
+    @Test fun matchingCacheAndLocalCopiesNeedNoNetworkOrHelperForCachedFiles() {
+        val root = kotlin.io.path.createTempDirectory("resource-local").toFile()
+        try {
+            File(root, packs[0].name).writeBytes(contents)
+            val localReads = mutableListOf<String>()
+            GameResourcePacks.prepareSet(root, packs, false, {}, { _, _ -> }, { pack ->
+                localReads.add(pack.name)
+                sequenceOf(contents.inputStream())
+            }, { error("Local copies must not trigger a download") })
+            assertEquals(packs.drop(1).map { it.name }, localReads)
+            for (pack in packs) assertArrayEquals(contents, File(root, pack.name).readBytes())
+        } finally { root.deleteRecursively() }
+    }
+
+    @Test fun missingFilesReportExactRemainingDownloadWithoutStartingIt() {
+        val root = kotlin.io.path.createTempDirectory("resource-no-download").toFile()
+        try {
+            File(root, packs[0].name).writeBytes(contents)
+            val error = assertThrows(GameResourcePacks.MissingResources::class.java) {
+                GameResourcePacks.prepareSet(root, packs, false, {}, { _, _ -> }, { emptySequence() }, {
+                    error("A download must require the separate user action")
+                })
+            }
+            assertEquals(2, error.missingFiles)
+            assertEquals(2 * fingerprint.bytes, error.missingBytes)
+            assertEquals(3, error.totalFiles)
+            assertEquals(listOf(packs[0].name), root.listFiles()!!.map { it.name })
+        } finally { root.deleteRecursively() }
+    }
+
+    @Test fun changedLocalDataIsRejectedAndAnotherMatchingLocalCopyCanBeUsed() {
+        val root = kotlin.io.path.createTempDirectory("resource-local-hash").toFile()
+        try {
+            GameResourcePacks.prepareSet(root, packs, false, {}, { _, _ -> }, {
+                sequenceOf(ByteArray(contents.size).inputStream(), contents.inputStream())
+            }, { error("Matching second local source should be used") })
+            for (pack in packs) assertArrayEquals(contents, File(root, pack.name).readBytes())
+        } finally { root.deleteRecursively() }
+    }
+
+    @Test fun selectedDownloadFetchesOnlyFilesNotFoundLocally() {
+        val root = kotlin.io.path.createTempDirectory("resource-download-selected").toFile()
+        try {
+            val network = mutableListOf<String>()
+            GameResourcePacks.prepareSet(root, packs, true, {}, { _, _ -> }, { pack ->
+                if (pack == packs[0]) sequenceOf(contents.inputStream()) else emptySequence()
+            }, { pack -> network.add(pack.name); contents.inputStream() })
+            assertEquals(packs.drop(1).map { it.name }, network)
+        } finally { root.deleteRecursively() }
+    }
 }
