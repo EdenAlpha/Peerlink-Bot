@@ -1,0 +1,29 @@
+{
+  "commit": "4389161a24c8cc0452a452e72f92557b81d1abf4",
+  "ci_run": 43672803569,
+  "artifact_id": 14145371993,
+  "artifact_archive_sha256": "f793b3bbeefdfbb998e81995a93b726df26b810deb1ba887464682dc2ea7b7d6",
+  "installed_apk_sha256": "adf555320753775c247379732134db998f8774c1d5e0863d730d0bd99c94ae0a",
+  "release_tag": "phone-engine-test-4389161",
+  "phone_lab_run": 43665954307,
+  "android_api": 35,
+  "architecture": "arm64-v8a",
+  "engine_sha256": "2cea0c85344d7d7f295aea1c2353621f02db78dbccd888a0a21a0508ac330659",
+  "diagnostic_hooks": false,
+  "engine_binary_patches": false,
+  "configured_pair": {
+    "native_strategy_kind": 2,
+    "base_session_both": 4,
+    "channels_14_15_both": [
+      4,
+      4
+    ],
+    "hold_seconds": 3,
+    "local_connection_record_bytes_both": 0,
+    "turn_relay_allocated": false
+  },
+  "legacy_pair": true,
+  "startup_and_ferry_tests": true,
+  "unanswered_peer_negative_test": true,
+  "physical_phone_kickoff_verified": false
+}

@@ -60,23 +60,36 @@ use and phone-game kickoff require separate evidence.
 
 ## Verification
 
-The current connection-test APK is `f1fd6f0`, published as
-[`phone-engine-test-f1fd6f0`](https://github.com/EdenAlpha/Peerlink-Bot/releases/tag/phone-engine-test-f1fd6f0).
-The latest phone export confirms original SDK verdict1 and base-session4,
-followed by a wait for data channels that prevents the server connection
-report and game-ID setup. The driver now proceeds on confirmed peer transport;
-gameplay still requires actual data channels, match objects and controller
-readiness. The shared phase passed a paired native test whose counterpart
-holds data-model construction until connection confirmation. Evidence and
-scope are in
-[`tests/evidence/phone-connection-report-20261115`](tests/evidence/phone-connection-report-20261115/README.md).
+The current connection-test APK is `4389161`, published as
+[`phone-engine-test-4389161`](https://github.com/EdenAlpha/Peerlink-Bot/releases/tag/phone-engine-test-4389161).
+It supplies the missing original TURN configuration and binary peer connection
+records, and waits for the engine's asynchronous network-I/O objects before
+opening its configured native P2P transport.
 
-After native match setup, five-second diagnostic samples retain the original
-frame counter at native snapshot index20. No heartbeat or readiness flags are
-written. Live server acceptance and physical-phone kickoff remain unverified.
+The exact packaged APK passed a fresh, unhooked two-engine test on ARM64
+Android 15: both configured transports connected, both original channels 14/15
+reached state 4, and both survived the hold. The production-ferry/report-order
+pair, startup/controller/ferry checks and unanswered-peer negative check also
+passed. Android CI, JVM tests and Android 14/15 host tests passed. Evidence and
+precise limits are in
+[`tests/evidence/phone-configured-transport-20261115`](tests/evidence/phone-configured-transport-20261115/README.md).
+
+This was owned local P2P with original server-configuration callbacks. It did
+not allocate TURN or establish fresh Konami authentication, a physical-phone
+kickoff, or visible bot Pass response. Gameplay still requires actual data
+channels, match objects and controller readiness. Five-second diagnostic
+samples retain the original frame counter; no heartbeat/readiness flags are
+written.
 
 Current APK SHA-256:
-`c47c92cfcfbc27f29f2459ed3eaf65bd156ff89e04ae4977bb730ca25acdc00d`.
+`adf555320753775c247379732134db998f8774c1d5e0863d730d0bd99c94ae0a`.
+
+The previous connection-report APK was `f1fd6f0`, published as
+[`phone-engine-test-f1fd6f0`](https://github.com/EdenAlpha/Peerlink-Bot/releases/tag/phone-engine-test-f1fd6f0).
+It allowed the server report and GameID setup to proceed after native transport
+confirmation. The latest physical export confirms that progression, then shows
+the data channels remaining closed. Its earlier report-order evidence remains
+in [`tests/evidence/phone-connection-report-20261115`](tests/evidence/phone-connection-report-20261115/README.md).
 
 The previous routing-test APK was `b02d858`, published as
 [`phone-engine-test-b02d858`](https://github.com/EdenAlpha/Peerlink-Bot/releases/tag/phone-engine-test-b02d858).

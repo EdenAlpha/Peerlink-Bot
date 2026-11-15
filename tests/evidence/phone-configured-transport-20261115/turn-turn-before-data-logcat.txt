@@ -1,0 +1,28 @@
+11-15 03:38:13.770 10657 10696 I PeerlinkEngineHost: startup: engine=0 objects=0 kernel=0 running=1 activity=11 window=1 database=0 work=0 sessions=0
+11-15 03:38:13.784 10671 10698 I PeerlinkEngineHost: startup: engine=0 objects=0 kernel=0 running=1 activity=11 window=1 database=0 work=0 sessions=0
+11-15 03:38:16.276 10657 10697 I PeerlinkEngineHost: database startup result=44
+11-15 03:38:16.281 10657 10697 I PeerlinkEngineHost: original TURN configuration accepted=1
+11-15 03:38:16.294 10589 10644 I PeerlinkTurnTest: TURN_B_NETWORK_IO_READY state=0
+11-15 03:38:16.323 10671 10699 I PeerlinkEngineHost: database startup result=44
+11-15 03:38:16.328 10671 10699 I PeerlinkEngineHost: original TURN configuration accepted=1
+11-15 03:38:16.341 10590 10658 I PeerlinkTurnTest: TURN_A_NETWORK_IO_READY state=0
+11-15 03:38:26.924 10589 10644 I PeerlinkTurnTest: TURN_B_NETWORK_IO_READY state=1
+11-15 03:38:26.928 10657 10697 I PeerlinkEngineHost: original provider session accepted=1
+11-15 03:38:26.979 10590 10658 I PeerlinkTurnTest: TURN_A_NETWORK_IO_READY state=1
+11-15 03:38:26.982 10671 10699 I PeerlinkEngineHost: original provider session accepted=1
+11-15 03:38:27.302 10589 10644 I PeerlinkTurnTest: TURN_B state=[1, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 749581, 0, 672, 2, 0]
+11-15 03:38:27.346 10590 10658 I PeerlinkTurnTest: TURN_A state=[1, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 749423, 0, 672, 2, 0]
+11-15 03:38:27.607 10589 10644 I PeerlinkTurnTest: TURN_B state=[1, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 749581, 0, 696, 2, 0]
+11-15 03:38:27.945 10590 10658 I PeerlinkTurnTest: TURN_A state=[1, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 749423, 0, 696, 2, 0]
+11-15 03:38:28.011 10589 10644 I PeerlinkTurnTest: TURN_B state=[1, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 749581, 0, 713, 2, 0]
+11-15 03:38:28.164 10590 10658 I PeerlinkTurnTest: TURN_A state=[1, 1, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 749423, 0, 730, 2, 0]
+11-15 03:38:28.166 10671 10699 I PeerlinkEngineHost: early channel input result=23
+11-15 03:38:28.221 10589 10644 I PeerlinkTurnTest: TURN_B state=[1, 1, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 749581, 0, 725, 2, 0]
+11-15 03:38:28.224 10657 10697 I PeerlinkEngineHost: early channel input result=23
+11-15 03:38:28.376 10590 10658 I PeerlinkTurnTest: TURN_A state=[1, 1, 4, 3, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 749423, 1, 735, 2, 0]
+11-15 03:38:28.433 10589 10644 I PeerlinkTurnTest: TURN_B state=[1, 1, 4, 4, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 749581, 1, 732, 2, 0]
+11-15 03:38:28.434 10589 10644 I PeerlinkTurnTest: ORIGINAL_CONFIGURED_TURN_B_METADATA localBytes=0 peerAccepted=false
+11-15 03:38:28.576 10589 10644 I PeerlinkTurnTest: ORIGINAL_CONFIGURED_TURN_B_CHANNELS_CONNECTED
+11-15 03:38:28.584 10590 10658 I PeerlinkTurnTest: TURN_A state=[1, 1, 4, 4, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 749423, 1, 740, 2, 0]
+11-15 03:38:28.585 10590 10658 I PeerlinkTurnTest: ORIGINAL_CONFIGURED_TURN_A_METADATA localBytes=0 peerAccepted=false
+11-15 03:38:28.729 10590 10658 I PeerlinkTurnTest: ORIGINAL_CONFIGURED_TURN_A_CHANNELS_CONNECTED

@@ -1,0 +1,21 @@
+11-15 03:38:35.137 11108 11143 I PeerlinkEngineHost: startup: engine=0 objects=0 kernel=0 running=1 activity=11 window=1 database=0 work=0 sessions=0
+11-15 03:38:35.139 11118 11145 I PeerlinkEngineHost: startup: engine=0 objects=0 kernel=0 running=1 activity=11 window=1 database=0 work=0 sessions=0
+11-15 03:38:37.669 11118 11146 I PeerlinkEngineHost: database startup result=44
+11-15 03:38:37.671 11034 11109 I PeerlinkPairTest: PAIR_B prepared; peerNat=270532787 beforePeerDelayMs=0
+11-15 03:38:37.680 11118 11146 I PeerlinkEngineHost: original provider session accepted=1
+11-15 03:38:37.732 11108 11144 I PeerlinkEngineHost: database startup result=44
+11-15 03:38:37.736 11035 11097 I PeerlinkPairTest: PAIR_A prepared; peerNat=271581328 beforePeerDelayMs=0
+11-15 03:38:37.756 11108 11144 I PeerlinkEngineHost: original provider session accepted=1
+11-15 03:38:49.672 11108 11144 I PeerlinkEngineHost: early channel input result=23
+11-15 03:38:49.957 11035 11097 I PeerlinkPairTest: TRANSPORT_REPORTED_BEFORE_PEER_MODEL state=[1, 1, 4, 3, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 751356, 1, 739, 1, 0]
+11-15 03:38:49.958 11034 11109 I PeerlinkPairTest: PEER_MODEL_RELEASED_AFTER_TRANSPORT_REPORT
+11-15 03:38:50.091 11035 11097 I PeerlinkPairTest: PAIR_A state=1,1,4,3,3,0,0,0,true
+11-15 03:38:50.402 11034 11109 I PeerlinkPairTest: PAIR_B state=1,1,4,0,0,0,0,0,false
+11-15 03:38:50.402 11034 11109 I PeerlinkPairTest: ORIGINAL_ANDROID_PAIR_B_BASE_SESSION_CONNECTED
+11-15 03:38:50.407 11118 11146 I PeerlinkEngineHost: early channel input result=23
+11-15 03:38:50.796 11035 11097 I PeerlinkPairTest: PAIR_A state=1,1,4,4,4,2,1,0,true
+11-15 03:38:50.797 11035 11097 I PeerlinkPairTest: ORIGINAL_ANDROID_PAIR_A_CHANNELS_CONNECTED
+11-15 03:38:50.797 11035 11097 I PeerlinkPairTest: PRODUCTION_FERRY_A_ORIGINAL_CHANNELS_CONNECTED
+11-15 03:38:50.829 11034 11109 I PeerlinkPairTest: PAIR_B state=1,1,4,4,4,0,0,0,true
+11-15 03:38:50.829 11034 11109 I PeerlinkPairTest: ORIGINAL_ANDROID_PAIR_B_CHANNELS_CONNECTED
+11-15 03:38:50.829 11034 11109 I PeerlinkPairTest: PRODUCTION_FERRY_B_ORIGINAL_CHANNELS_CONNECTED
