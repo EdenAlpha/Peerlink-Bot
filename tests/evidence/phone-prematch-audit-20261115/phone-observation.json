@@ -1,0 +1,11 @@
+{
+  "native_metadata_synchronization_completed": true,
+  "runtime_database_check_enabled": false,
+  "first_failure": "> [12:49:06.812] [BOT-DIAG] FIRST_NATIVE_FAILURE observedAtMs=3665015 previousSampleGapMs=161 observedIn=bot_engine disconnectInitiator=unresolved reason=match-data transport failed or its handler was lost; initiating side unknown; session=5 ch14=6 ch15=6 modelPhase=5 modelComplete=0 modelError=1 reasonCode=1 syncResult=1 checkDatabase=0 modelPresent=1 networkRole=1 modelUsers=2 handler=0 transportKind=2 turnState=0 frame=13667 pssKiB=885118 previous={session=4 ch14=4 ch15=4 modelPhase=5 modelComplete=1 modelError=0 reasonCode=0 syncResult=1 checkDatabase=0 modelPresent=1 networkRole=1 modelUsers=2 handler=1 transportKind=2 turnState=0 frame=13660 pssKiB=885118} hostStopRequestedAtMs=0 receivedAtMs=3665028",
+  "first_failure_flow": "> [12:49:06.815] [BOT-FLOW] trigger=first_native_failure armed=true engineAttached=true observedAtMs=3665030 host={game_rx=3428/218702B/ageMs:9 engine_tx=3427/218654B/ageMs:9 engine_rx=3342/194933B/ageMs:8 game_tx=3342/194933B/ageMs:7} vpn={game_rx=239/11472B/ageMs:159 engine_tx=238/11424B/ageMs:159 engine_rx=238/11424B/ageMs:165 game_tx=238/11424B/ageMs:164} drops={game_to_engine_no_socket=2} txMeans=accepted_by_local_socket",
+  "database_fingerprints": "> [12:49:06.823] [BOT-DIAG] DATABASE_SIGNATURES localPlayer=2790489C0BA7B53827B8086E919AC0F7 localCoach=34ACDAFC86B9B91A699A81B5DD0E3FA0 peerPlayer=356D3DAA19B4054535C474538465E5BB peerCoach=2BC60EFBBAE0BB3BCB299C9E258CDB93 hostStopRequestedAtMs=0 receivedAtMs=3665039",
+  "file_audit_summary": "[BOT-FILES] SUMMARY result=PASS verified=108 repaired=108 cpk=47 resources=5 nativeResources=5 databaseTables=47 nativeDatabaseTables=44 downloadedUpdates=NOT_CHECKED",
+  "playable_match_observed": false,
+  "user_observation": "Foreground game waited at team setup because the bot did not proceed; later disconnected.",
+  "packet_counter_scope": "VPN capture has 483 packets; direct-host ferry traffic is additional and is not in this PCAPNG."
+}

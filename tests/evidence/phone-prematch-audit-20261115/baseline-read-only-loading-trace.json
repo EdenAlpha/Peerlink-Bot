@@ -1,0 +1,506 @@
+[
+  {
+    "matchPresent": true,
+    "matchPhase": 0,
+    "modelPhase": 5,
+    "flowPresent": true,
+    "mainTaskEnabled": 1,
+    "mainTaskState": 0,
+    "menu": {
+      "state": 0,
+      "requested": "nil",
+      "current": "nil"
+    },
+    "processTasks": [
+      {
+        "type": "prematch",
+        "enabled": 1,
+        "bodyState": 0,
+        "sequence": 9,
+        "handoff": 0,
+        "leftPresent": true,
+        "leftState": 0,
+        "leftEnabled": 0,
+        "rightPresent": true,
+        "rightState": 0,
+        "rightEnabled": 0
+      }
+    ],
+    "tasksVisited": 37,
+    "userSyncTaskState": 1,
+    "localRosterRole": 1,
+    "userRoles": [
+      {
+        "self": false,
+        "index": 0,
+        "side": 4,
+        "team": 0,
+        "networkRole": 18
+      },
+      {
+        "self": true,
+        "index": 1,
+        "side": 0,
+        "team": 1,
+        "networkRole": 1
+      }
+    ],
+    "state": 7,
+    "flags": "5",
+    "current": "Online/Match/MatchProcessPreMenu",
+    "previous": "",
+    "transition": [
+      0,
+      0,
+      0
+    ]
+  },
+  {
+    "matchPresent": true,
+    "matchPhase": 0,
+    "modelPhase": 5,
+    "flowPresent": true,
+    "mainTaskEnabled": 1,
+    "mainTaskState": 0,
+    "menu": {
+      "state": 0,
+      "requested": "nil",
+      "current": "nil"
+    },
+    "processTasks": [
+      {
+        "type": "prematch",
+        "enabled": 0,
+        "bodyState": 0,
+        "sequence": 0,
+        "handoff": 0,
+        "leftPresent": true,
+        "leftState": 0,
+        "leftEnabled": 0,
+        "rightPresent": true,
+        "rightState": 0,
+        "rightEnabled": 0
+      }
+    ],
+    "tasksVisited": 37,
+    "userSyncTaskState": 1,
+    "localRosterRole": 0,
+    "userRoles": [
+      {
+        "self": true,
+        "index": 0,
+        "side": 0,
+        "team": 0,
+        "networkRole": 1
+      },
+      {
+        "self": false,
+        "index": 1,
+        "side": 4,
+        "team": 1,
+        "networkRole": 18
+      }
+    ],
+    "state": 6,
+    "flags": "1",
+    "current": "Online/Match/MatchProcessPreMenu",
+    "previous": "",
+    "transition": [
+      0,
+      0,
+      0
+    ]
+  },
+  {
+    "matchPresent": true,
+    "matchPhase": 0,
+    "modelPhase": 5,
+    "flowPresent": true,
+    "mainTaskEnabled": 1,
+    "mainTaskState": 0,
+    "menu": {
+      "state": 0,
+      "requested": "nil",
+      "current": "nil"
+    },
+    "processTasks": [
+      {
+        "type": "prematch",
+        "enabled": 1,
+        "bodyState": 1,
+        "sequence": 11,
+        "handoff": 1,
+        "leftPresent": true,
+        "leftState": 1,
+        "leftEnabled": 1,
+        "rightPresent": true,
+        "rightState": 1,
+        "rightEnabled": 1
+      }
+    ],
+    "tasksVisited": 37,
+    "userSyncTaskState": 1,
+    "localRosterRole": 1,
+    "userRoles": [
+      {
+        "self": false,
+        "index": 0,
+        "side": 4,
+        "team": 0,
+        "networkRole": 18
+      },
+      {
+        "self": true,
+        "index": 1,
+        "side": 0,
+        "team": 1,
+        "networkRole": 1
+      }
+    ],
+    "state": 0,
+    "flags": "1",
+    "current": "",
+    "previous": "",
+    "transition": [
+      0,
+      0,
+      0
+    ]
+  },
+  {
+    "matchPresent": true,
+    "matchPhase": 0,
+    "modelPhase": 5,
+    "flowPresent": true,
+    "mainTaskEnabled": 1,
+    "mainTaskState": 0,
+    "menu": {
+      "state": 0,
+      "requested": "nil",
+      "current": "nil"
+    },
+    "processTasks": [
+      {
+        "type": "prematch",
+        "enabled": 1,
+        "bodyState": 1,
+        "sequence": 11,
+        "handoff": 1,
+        "leftPresent": true,
+        "leftState": 2,
+        "leftEnabled": 1,
+        "rightPresent": true,
+        "rightState": 2,
+        "rightEnabled": 1
+      }
+    ],
+    "tasksVisited": 37,
+    "userSyncTaskState": 2,
+    "localRosterRole": 0,
+    "userRoles": [
+      {
+        "self": true,
+        "index": 0,
+        "side": 0,
+        "team": 0,
+        "networkRole": 1
+      },
+      {
+        "self": false,
+        "index": 1,
+        "side": 4,
+        "team": 1,
+        "networkRole": 18
+      }
+    ],
+    "state": 0,
+    "flags": "1",
+    "current": "",
+    "previous": "",
+    "transition": [
+      0,
+      0,
+      0
+    ]
+  },
+  {
+    "matchPresent": true,
+    "matchPhase": 0,
+    "modelPhase": 5,
+    "flowPresent": true,
+    "mainTaskEnabled": 1,
+    "mainTaskState": 0,
+    "menu": {
+      "state": 0,
+      "requested": "nil",
+      "current": "nil"
+    },
+    "processTasks": [
+      {
+        "type": "prematch",
+        "enabled": 1,
+        "bodyState": 1,
+        "sequence": 11,
+        "handoff": 1,
+        "leftPresent": true,
+        "leftState": 2,
+        "leftEnabled": 1,
+        "rightPresent": true,
+        "rightState": 2,
+        "rightEnabled": 1
+      }
+    ],
+    "tasksVisited": 37,
+    "userSyncTaskState": 4,
+    "localRosterRole": 1,
+    "userRoles": [
+      {
+        "self": false,
+        "index": 0,
+        "side": 0,
+        "team": 0,
+        "networkRole": 1
+      },
+      {
+        "self": true,
+        "index": 1,
+        "side": 0,
+        "team": 1,
+        "networkRole": 1
+      }
+    ],
+    "state": 0,
+    "flags": "1",
+    "current": "",
+    "previous": "",
+    "transition": [
+      0,
+      0,
+      0
+    ]
+  },
+  {
+    "matchPresent": true,
+    "matchPhase": 0,
+    "modelPhase": 5,
+    "flowPresent": true,
+    "mainTaskEnabled": 1,
+    "mainTaskState": 0,
+    "menu": {
+      "state": 0,
+      "requested": "nil",
+      "current": "nil"
+    },
+    "processTasks": [
+      {
+        "type": "prematch",
+        "enabled": 1,
+        "bodyState": 1,
+        "sequence": 11,
+        "handoff": 1,
+        "leftPresent": true,
+        "leftState": 2,
+        "leftEnabled": 1,
+        "rightPresent": true,
+        "rightState": 3,
+        "rightEnabled": 1
+      }
+    ],
+    "tasksVisited": 37,
+    "userSyncTaskState": 4,
+    "localRosterRole": 0,
+    "userRoles": [
+      {
+        "self": true,
+        "index": 0,
+        "side": 0,
+        "team": 0,
+        "networkRole": 1
+      },
+      {
+        "self": false,
+        "index": 1,
+        "side": 0,
+        "team": 1,
+        "networkRole": 1
+      }
+    ],
+    "state": 0,
+    "flags": "1",
+    "current": "",
+    "previous": "",
+    "transition": [
+      0,
+      0,
+      0
+    ]
+  },
+  {
+    "matchPresent": true,
+    "matchPhase": 0,
+    "modelPhase": 5,
+    "flowPresent": true,
+    "mainTaskEnabled": 1,
+    "mainTaskState": 0,
+    "menu": {
+      "state": 0,
+      "requested": "nil",
+      "current": "nil"
+    },
+    "processTasks": [
+      {
+        "type": "prematch",
+        "enabled": 1,
+        "bodyState": 1,
+        "sequence": 11,
+        "handoff": 1,
+        "leftPresent": true,
+        "leftState": 2,
+        "leftEnabled": 1,
+        "rightPresent": true,
+        "rightState": 3,
+        "rightEnabled": 1
+      }
+    ],
+    "tasksVisited": 37,
+    "userSyncTaskState": 4,
+    "localRosterRole": 1,
+    "userRoles": [
+      {
+        "self": false,
+        "index": 0,
+        "side": 0,
+        "team": 0,
+        "networkRole": 1
+      },
+      {
+        "self": true,
+        "index": 1,
+        "side": 0,
+        "team": 1,
+        "networkRole": 1
+      }
+    ],
+    "state": 0,
+    "flags": "1",
+    "current": "",
+    "previous": "",
+    "transition": [
+      0,
+      0,
+      0
+    ]
+  },
+  {
+    "matchPresent": true,
+    "matchPhase": 0,
+    "modelPhase": 5,
+    "flowPresent": true,
+    "mainTaskEnabled": 1,
+    "mainTaskState": 0,
+    "menu": {
+      "state": 0,
+      "requested": "nil",
+      "current": "nil"
+    },
+    "processTasks": [
+      {
+        "type": "prematch",
+        "enabled": 1,
+        "bodyState": 1,
+        "sequence": 11,
+        "handoff": 1,
+        "leftPresent": true,
+        "leftState": 2,
+        "leftEnabled": 1,
+        "rightPresent": true,
+        "rightState": 3,
+        "rightEnabled": 1
+      }
+    ],
+    "tasksVisited": 37,
+    "userSyncTaskState": 5,
+    "localRosterRole": 1,
+    "userRoles": [
+      {
+        "self": false,
+        "index": 0,
+        "side": 0,
+        "team": 0,
+        "networkRole": 1
+      },
+      {
+        "self": true,
+        "index": 1,
+        "side": 0,
+        "team": 1,
+        "networkRole": 1
+      }
+    ],
+    "state": 0,
+    "flags": "1",
+    "current": "",
+    "previous": "",
+    "transition": [
+      0,
+      0,
+      0
+    ]
+  },
+  {
+    "matchPresent": true,
+    "matchPhase": 0,
+    "modelPhase": 5,
+    "flowPresent": true,
+    "mainTaskEnabled": 1,
+    "mainTaskState": 0,
+    "menu": {
+      "state": 0,
+      "requested": "nil",
+      "current": "nil"
+    },
+    "processTasks": [
+      {
+        "type": "prematch",
+        "enabled": 1,
+        "bodyState": 1,
+        "sequence": 11,
+        "handoff": 1,
+        "leftPresent": true,
+        "leftState": 2,
+        "leftEnabled": 1,
+        "rightPresent": true,
+        "rightState": 3,
+        "rightEnabled": 1
+      }
+    ],
+    "tasksVisited": 37,
+    "userSyncTaskState": 5,
+    "localRosterRole": 0,
+    "userRoles": [
+      {
+        "self": true,
+        "index": 0,
+        "side": 0,
+        "team": 0,
+        "networkRole": 1
+      },
+      {
+        "self": false,
+        "index": 1,
+        "side": 0,
+        "team": 1,
+        "networkRole": 1
+      }
+    ],
+    "state": 0,
+    "flags": "1",
+    "current": "",
+    "previous": "",
+    "transition": [
+      0,
+      0,
+      0
+    ]
+  }
+]

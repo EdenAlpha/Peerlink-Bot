@@ -1,0 +1,26 @@
+{
+  "scope": "Guard ordering and read-only polling, not a full-match acceptance test",
+  "sides": {
+    "A": {
+      "samples": 30,
+      "user_data_completion_guard_passed": true,
+      "active_sdk_query_slot_unavailable": true,
+      "last_pre_match_task_state": 4,
+      "last_squad_transfer_state": 9,
+      "native_connection_still_connected_at_last_sample": true,
+      "playable_match_observed": false,
+      "fresh_server_context": false
+    },
+    "B": {
+      "samples": 30,
+      "user_data_completion_guard_passed": true,
+      "active_sdk_query_slot_unavailable": true,
+      "last_pre_match_task_state": 4,
+      "last_squad_transfer_state": 9,
+      "native_connection_still_connected_at_last_sample": true,
+      "playable_match_observed": false,
+      "fresh_server_context": false
+    }
+  },
+  "native_pre_match_failure_cause": "unresolved; terminal squad-transfer state 9 follows the receive stage; validation and native start-command paths require discrimination"
+}

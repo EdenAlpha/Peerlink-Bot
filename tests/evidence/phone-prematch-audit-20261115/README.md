@@ -22,7 +22,7 @@ which side initiated the disconnect or which preceding loading dependency failed
 | Deliver resume and window geometry | Framework callbacks exist. Separate lab experiments delivering the late original resume callback and content rectangle did not clear the observed loading stall. | Those experiments do not establish exact lifecycle equivalence. Neither speculative change is included as a fix. |
 | Build original database services and start match-data resources | All 44 original builders run; the same original match-data start function `0x68c3768` is used. | QEMU also explicitly called the original poll function. Its recorded immediate readiness result was zero; this was not itself proof of a completed load. Native dependency completion must be observed. |
 | Configure account, clock, server policy and authenticated transport | Existing UID/server context, original SDK clock and transport configuration. Server YES/NO revision policy is applied before model creation. Latest physical-phone metadata synchronization passed. | Matching inputs in a two-bot lab do not verify every field supplied by a current real game. |
-| Open original session and channels; report connection to the server | Original SDK verdict gates the connection report; opaque addresses remain unchanged. | The latest physical run passed this stage. |
+| Open original session and channels; report connection to the server | Original session/channel/model states gate the connection report; opaque addresses remain unchanged. The follow-up status-polling correction removes calls to the active SDK operation from snapshots and removes the redundant legacy verdict watcher. | The latest physical run passed this stage. The corrected read-only observation path needs its own packaged test. |
 | Supply consistent home/away participants | Production bot is the room creator/home. Tests previously made both instances home; `7ac8f1a` supplies one shared home UID and distinct self UIDs. | Verify both native side assignments in the packaged Android test. A both-home lab is not a valid full-match comparison. |
 | Complete initial metadata synchronization | Original model phase 5, complete flag, no error and connected channels gate the later setup. | This is initial metadata completion, not completion of full squad transfer. |
 | Report pre-play phase to the server | `7ac8f1a` adds the omitted `CMD_CHANGE_GAMEPHASE` / `DATASYNC` request before native match setup; requires `NOERR`. MessagePack body is compared against an independent captured fixture. | This is a confirmed omission, not a proven sole cause of the physical disconnect. Fresh real-game acceptance and its effect on loading remain unverified. |
@@ -54,3 +54,35 @@ policies, correct original home/away assignments, and a controlled peer stop
 with exported diagnostics. The user-data loading trace was a separate read-only
 instrumented experiment; it was not part of that unhooked matrix and used
 retained private context. Updated guard validation must be recorded separately.
+
+The first `8b68c57` guard-validation attempt passed file repair and the YES pair,
+then crashed during the NO pair before reaching match setup. The original engine
+backtrace ends at `0x6922030`, through `0x7e014e0`, called by the host's
+`nativeSnapshot` on `engine-runtime`. Inspection of `0x7e013ac` confirms that the
+supposed SDK verdict query invokes network operations and changes bookkeeping;
+it is not a passive getter. The follow-up removes that operation from every
+snapshot and from the compatibility status query. Native session/channel/model
+state remains the source of readiness; no positive verdict is manufactured.
+The redundant legacy status thread is removed, leaving the existing independent
+monitor and driver. This identifies the operation that crashed in the lab; it
+does not establish the initiating cause of the earlier physical-phone teardown.
+
+The final candidate is `28b0fc42261796147526ea7cc0a44308cc2e77ea`, from
+[CI 43717969655](https://github.com/EdenAlpha/Peerlink-Bot/actions/runs/43717969655).
+App compilation/unit tests and Android 14/15 framework host tests passed. The
+exact retained APK was installed in the ARM64 Android 15 lab and passed file
+repair, the user-data ordering guard, YES and NO policy pairs with correct
+home/away roles, and controlled peer-stop reporting. No native observer was
+running during those checks. `build.json` identifies the artifact and APK hashes.
+
+The guard test checks ordering, not match completion. Both engines observed
+native user-data state `4` before pre-match initialization. Their status samples
+kept the old active-query slot at unavailable (`-1`) and the native connection
+remained connected. The pre-match task subsequently reached state `4` with
+squad-transfer task state `9`, the original error path. The earlier squad receive
+wait was left, but the full match did not load. The current evidence does not
+distinguish team validation from the native start-command failure paths, and the
+fixture's server context was retained rather than freshly authorized.
+`final-loading-observation.json` and the per-side details preserve this failure.
+No preview, kickoff or visible Pass is claimed. A green guard matrix must not be
+reported as a successful full-game match.

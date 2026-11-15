@@ -1,0 +1,17 @@
+F/libc    (21712): Fatal signal 11 (SIGSEGV), code 1 (SEGV_MAPERR), fault addr 0x278 in tid 21740 (engine-runtime), pid 21712 (etest:botengine)
+F/DEBUG   (22029): Cmdline: com.peerlink.app.enginetest:botengine
+F/DEBUG   (22029): signal 11 (SIGSEGV), code 1 (SEGV_MAPERR), fault addr 0x0000000000000278
+F/DEBUG   (22029): backtrace:
+F/DEBUG   (22029):       #00 pc 0000000006922030  /data/data/com.peerlink.app.enginetest/files/engine/libUE4.so (BuildId: 9068c18632a8023ad3e9c6faf3fe92d9)
+F/DEBUG   (22029):       #01 pc 00000000069256c0  /data/data/com.peerlink.app.enginetest/files/engine/libUE4.so (BuildId: 9068c18632a8023ad3e9c6faf3fe92d9)
+F/DEBUG   (22029):       #02 pc 0000000006924cec  /data/data/com.peerlink.app.enginetest/files/engine/libUE4.so (BuildId: 9068c18632a8023ad3e9c6faf3fe92d9)
+F/DEBUG   (22029):       #03 pc 0000000006926188  /data/data/com.peerlink.app.enginetest/files/engine/libUE4.so (BuildId: 9068c18632a8023ad3e9c6faf3fe92d9)
+F/DEBUG   (22029):       #04 pc 000000000693d840  /data/data/com.peerlink.app.enginetest/files/engine/libUE4.so (BuildId: 9068c18632a8023ad3e9c6faf3fe92d9)
+F/DEBUG   (22029):       #05 pc 000000000693eb64  /data/data/com.peerlink.app.enginetest/files/engine/libUE4.so (BuildId: 9068c18632a8023ad3e9c6faf3fe92d9)
+F/DEBUG   (22029):       #06 pc 000000000693e044  /data/data/com.peerlink.app.enginetest/files/engine/libUE4.so (BuildId: 9068c18632a8023ad3e9c6faf3fe92d9)
+F/DEBUG   (22029):       #07 pc 0000000007de33dc  /data/data/com.peerlink.app.enginetest/files/engine/libUE4.so (BuildId: 9068c18632a8023ad3e9c6faf3fe92d9)
+F/DEBUG   (22029):       #08 pc 0000000007dec1a0  /data/data/com.peerlink.app.enginetest/files/engine/libUE4.so (BuildId: 9068c18632a8023ad3e9c6faf3fe92d9)
+F/DEBUG   (22029):       #09 pc 0000000007deb02c  /data/data/com.peerlink.app.enginetest/files/engine/libUE4.so (BuildId: 9068c18632a8023ad3e9c6faf3fe92d9)
+F/DEBUG   (22029):       #10 pc 0000000007df118c  /data/data/com.peerlink.app.enginetest/files/engine/libUE4.so (BuildId: 9068c18632a8023ad3e9c6faf3fe92d9)
+F/DEBUG   (22029):       #11 pc 0000000007e014e0  /data/data/com.peerlink.app.enginetest/files/engine/libUE4.so (BuildId: 9068c18632a8023ad3e9c6faf3fe92d9)
+F/DEBUG   (22029):       #12 pc 0000000000072428  /data/app/~~4KD6g5NwBlusEHaIMHuG2Q==/com.peerlink.app.enginetest-xuFWrQxOznCvycc3X-qD_A==/lib/arm64/libpeerlinkbackend.so (Java_com_peerlink_app_bot_EngineRuntime_nativeSnapshot+276) (BuildId: 42c31573ada153f4345f785f2233b9042710d4bc)

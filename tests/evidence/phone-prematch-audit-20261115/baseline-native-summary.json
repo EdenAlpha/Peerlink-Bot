@@ -1,0 +1,33 @@
+[
+  {
+    "case": "file-corruption-audit",
+    "passed": true
+  },
+  {
+    "case": "server-yes",
+    "peerNatA": 271581328,
+    "peerNatB": 270532787,
+    "beforePeerDelayMs": 0,
+    "passed": true,
+    "capability_refusal": false,
+    "both_channels_connected": true
+  },
+  {
+    "case": "server-no",
+    "peerNatA": 271581328,
+    "peerNatB": 270532787,
+    "beforePeerDelayMs": 0,
+    "passed": true,
+    "capability_refusal": false,
+    "both_channels_connected": true
+  },
+  {
+    "case": "peer-stop",
+    "peerNatA": 271581328,
+    "peerNatB": 270532787,
+    "beforePeerDelayMs": 0,
+    "passed": true,
+    "capability_refusal": false,
+    "both_channels_connected": true
+  }
+]
