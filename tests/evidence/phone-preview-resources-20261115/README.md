@@ -107,3 +107,27 @@ account/session data. The released APK digest matches the installed test APK:
 `06380410641bd082e508779e7ccba679554325ae2c70eed77eb2b5853e5a47b4`.
 The first resource preparation downloads approximately 2.2 GB and reuses verified
 cached files. The physical Infinix/full-game connection remains untested.
+
+
+## Released APK: automatic sequence and expected peer-stop diagnostic
+
+The same released APK was then tested with its normal automatic A/Pass sequence
+on both engines, using another fresh owned server match. Both Android test
+methods passed (447.967 s HOME, 416.796 s AWAY). HOME's exported service records
+10 accepted key-down and 10 accepted key-up submissions to the private bot
+engine. The original match stayed at outer 17/core 54 with 22 players and a live
+ball. HOME and AWAY produced 68 and 66 distinct sampled ball positions and
+ended at identical `(-5837, 108, -7959)` mm coordinates. No external native
+observer or user-screen input was used. The fixture supplies the VPN's outer
+IPv4/UDP carrier around unchanged original payloads; a physical full-game VPN
+session remains a separate test.
+
+After its five-minute observation, AWAY deliberately stopped its process.
+HOME then observed and exported the resulting real native transport failure,
+including database/loading diagnostics. That expected test-induced failure
+occurred after the observation; it is not an unexplained loading disconnect.
+The native log still correctly leaves the disconnect initiator unresolved.
+`android15-automatic-input-observation.json` retains sanitized input events,
+match states, timing, build provenance and this distinction. Accepted native
+submission plus evolving simulation does not independently classify every kick
+as Pass. The Infinix/full eFootball-to-bot test remains unverified.

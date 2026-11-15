@@ -1,0 +1,301 @@
+{
+  "buildCommit": "6c7d0a97bb0a0ad8f397afc5601aac78e36239b2",
+  "ciRun": 43753290885,
+  "apkSha256": "06380410641bd082e508779e7ccba679554325ae2c70eed77eb2b5853e5a47b4",
+  "environment": "ARM64 Android 15, two owned app instances, original native engines/resources, production PeerSlot with fixture IPv4/UDP carrier, no external native observer",
+  "roles": {
+    "A": {
+      "samples": 300,
+      "playableSamples": 108,
+      "firstPlayable": [
+        1,
+        -1,
+        4,
+        4,
+        4,
+        5,
+        1,
+        0,
+        17,
+        54,
+        22,
+        1,
+        0,
+        108,
+        0,
+        0,
+        1,
+        -1,
+        1725058,
+        1,
+        10764,
+        2,
+        0,
+        0,
+        1,
+        0,
+        1,
+        0,
+        2
+      ],
+      "last": [
+        1,
+        -1,
+        4,
+        4,
+        4,
+        5,
+        1,
+        0,
+        17,
+        54,
+        22,
+        1,
+        -5837,
+        108,
+        -7959,
+        0,
+        1,
+        -1,
+        1755486,
+        1,
+        13673,
+        2,
+        0,
+        0,
+        1,
+        0,
+        1,
+        0,
+        2
+      ],
+      "harnessPassed": true,
+      "differentBallPositions": 68,
+      "firstPlayableTime": "11-15 19:55:56.642",
+      "firstMotionTime": "11-15 19:56:03.681"
+    },
+    "B": {
+      "samples": 300,
+      "playableSamples": 111,
+      "firstPlayable": [
+        1,
+        -1,
+        4,
+        4,
+        4,
+        5,
+        1,
+        0,
+        17,
+        54,
+        22,
+        1,
+        0,
+        108,
+        0,
+        0,
+        1,
+        -1,
+        1633801,
+        1,
+        10484,
+        2,
+        0,
+        0,
+        1,
+        0,
+        1,
+        1,
+        2
+      ],
+      "last": [
+        1,
+        -1,
+        4,
+        4,
+        4,
+        5,
+        1,
+        0,
+        17,
+        54,
+        22,
+        1,
+        -5837,
+        108,
+        -7959,
+        0,
+        1,
+        -1,
+        1677704,
+        1,
+        13477,
+        2,
+        0,
+        0,
+        1,
+        0,
+        1,
+        1,
+        2
+      ],
+      "harnessPassed": true,
+      "differentBallPositions": 66,
+      "firstPlayableTime": "11-15 19:55:53.753",
+      "firstMotionTime": "11-15 19:56:03.863"
+    }
+  },
+  "homeAutomaticInput": {
+    "pressesSubmitted": 10,
+    "releasesSubmitted": 10,
+    "events": [
+      {
+        "time": "19:55:56.140",
+        "key": 96,
+        "action": "down",
+        "submitted": true,
+        "receivedAtMs": 4080364
+      },
+      {
+        "time": "19:55:56.288",
+        "key": 96,
+        "action": "up",
+        "submitted": true,
+        "receivedAtMs": 4080511
+      },
+      {
+        "time": "19:56:02.174",
+        "key": 96,
+        "action": "down",
+        "submitted": true,
+        "receivedAtMs": 4086398
+      },
+      {
+        "time": "19:56:02.314",
+        "key": 96,
+        "action": "up",
+        "submitted": true,
+        "receivedAtMs": 4086538
+      },
+      {
+        "time": "19:56:08.226",
+        "key": 96,
+        "action": "down",
+        "submitted": true,
+        "receivedAtMs": 4092449
+      },
+      {
+        "time": "19:56:08.367",
+        "key": 96,
+        "action": "up",
+        "submitted": true,
+        "receivedAtMs": 4092590
+      },
+      {
+        "time": "19:56:14.236",
+        "key": 96,
+        "action": "down",
+        "submitted": true,
+        "receivedAtMs": 4098460
+      },
+      {
+        "time": "19:56:14.374",
+        "key": 96,
+        "action": "up",
+        "submitted": true,
+        "receivedAtMs": 4098597
+      },
+      {
+        "time": "19:56:20.330",
+        "key": 96,
+        "action": "down",
+        "submitted": true,
+        "receivedAtMs": 4104553
+      },
+      {
+        "time": "19:56:20.475",
+        "key": 96,
+        "action": "up",
+        "submitted": true,
+        "receivedAtMs": 4104698
+      },
+      {
+        "time": "19:56:26.368",
+        "key": 96,
+        "action": "down",
+        "submitted": true,
+        "receivedAtMs": 4110592
+      },
+      {
+        "time": "19:56:26.509",
+        "key": 96,
+        "action": "up",
+        "submitted": true,
+        "receivedAtMs": 4110732
+      },
+      {
+        "time": "19:56:32.432",
+        "key": 96,
+        "action": "down",
+        "submitted": true,
+        "receivedAtMs": 4116656
+      },
+      {
+        "time": "19:56:32.573",
+        "key": 96,
+        "action": "up",
+        "submitted": true,
+        "receivedAtMs": 4116796
+      },
+      {
+        "time": "19:56:38.482",
+        "key": 96,
+        "action": "down",
+        "submitted": true,
+        "receivedAtMs": 4122706
+      },
+      {
+        "time": "19:56:38.623",
+        "key": 96,
+        "action": "up",
+        "submitted": true,
+        "receivedAtMs": 4122847
+      },
+      {
+        "time": "19:56:44.494",
+        "key": 96,
+        "action": "down",
+        "submitted": true,
+        "receivedAtMs": 4128717
+      },
+      {
+        "time": "19:56:44.635",
+        "key": 96,
+        "action": "up",
+        "submitted": true,
+        "receivedAtMs": 4128858
+      },
+      {
+        "time": "19:56:50.538",
+        "key": 96,
+        "action": "down",
+        "submitted": true,
+        "receivedAtMs": 4134762
+      },
+      {
+        "time": "19:56:50.679",
+        "key": 96,
+        "action": "up",
+        "submitted": true,
+        "receivedAtMs": 4134903
+      }
+    ]
+  },
+  "specificPassActionClassificationConfirmed": false,
+  "physicalInfinixFullGameTested": false,
+  "expectedFailureAfterTestPeerStop": {
+    "observed": true,
+    "fixtureAction": "AWAY completes its five-minute hold, then explicitly stops its engine. HOME observes the real resulting native transport failure and verifies export diagnostics.",
+    "interpretation": "Expected test-induced disconnect after the gameplay observation, not an unexplained match-loading failure. Native diagnostics alone still report initiator unresolved."
+  }
+}
