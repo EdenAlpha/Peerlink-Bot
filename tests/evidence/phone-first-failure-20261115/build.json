@@ -1,0 +1,13 @@
+{
+  "commit": "3ba7a828873da0a4fcbb2a466f4a2edd89494734",
+  "ci_run": 43686079091,
+  "artifact_id": 14149984281,
+  "artifact_sha256": "7adac25e6882f5eb2ca7350148064a22ce9e6761f003b105a38be964d425efff",
+  "apk_sha256": "071cf35238a9962918d9bbab604eda5b037415215a830102be84d5ddde58bbbd",
+  "test_apk_sha256": "e643b5dce8f8933e28bacca924f0b27bbf010d4981373e18249968c98597eb49",
+  "arm64_android_15_run": 43681945022,
+  "unhooked": true,
+  "normal_native_pair": true,
+  "intentional_peer_stop_observed_in_export": true,
+  "phone_game_kickoff_verified": false
+}

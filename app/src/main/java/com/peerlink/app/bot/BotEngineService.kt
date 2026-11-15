@@ -34,6 +34,7 @@ class BotEngineService : Service() {
     override fun onCreate() {
         super.onCreate()
         EngineRuntime.report = ::report
+        EngineRuntime.audit = { line -> diagnostic(line) }
     }
     override fun onBind(intent: Intent?): IBinder = messenger.binder
     private fun handle(message: Message) {

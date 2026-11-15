@@ -37,6 +37,11 @@ object EngineHost {
             } else if (message.what == EngineProtocol.NATIVE_STATE) {
                 data.getLongArray("state")?.let { AppState.appendLog("[BOT-NATIVE] state=${it.contentToString()} (frame counter at index 20)") }
             } else if (message.what == EngineProtocol.DIAGNOSTIC) {
+                val line = data.getString("line").orEmpty()
+                if (line.startsWith("[BOT-FILES]")) {
+                    AppState.appendLog(line)
+                    return
+                }
                 val firstFailure = data.getBoolean("firstFailure")
                 val observedAt = data.getLong("observedAtMs")
                 AppState.appendLog("[BOT-DIAG] ${data.getString("line")} " +

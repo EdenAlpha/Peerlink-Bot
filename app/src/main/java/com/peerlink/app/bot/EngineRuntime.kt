@@ -22,6 +22,7 @@ internal object EngineRuntime {
     @Volatile private var ownerUid = 0L
     private var gameHost: GameAndroidRuntime? = null
     var report: (String) -> Unit = {}
+    var audit: (String) -> Unit = {}
     @Volatile private var runtimeThread: Thread? = null
     private val runtime = ScheduledThreadPoolExecutor(1) { action ->
         Thread(action, "engine-runtime").apply {
@@ -57,6 +58,8 @@ internal object EngineRuntime {
             }
         }
         val actual = digest.digest().joinToString("") { "%02x".format(it) }
+        audit("[BOT-FILES] ENGINE_BUILD result=${if (actual == ENGINE_SHA256) "PASS" else "FAIL"} " +
+            "actualSHA256=$actual supportedSHA256=$ENGINE_SHA256")
         if (actual != ENGINE_SHA256) {
             report("Unsupported eFootball build — this bot test requires the verified 11.1.1 engine")
             return false
@@ -78,7 +81,7 @@ internal object EngineRuntime {
             val engine = File(app.filesDir, "engine/libUE4.so")
             check(android.os.Build.VERSION.SDK_INT >= 31) { "Bot engine requires Android 12 or later" }
             if (!engine.isFile || !onRuntime { load(engine) }) return false
-            val files = GameAssets.prepare(app, report)
+            val files = GameAssets.prepare(app, report, audit)
             report("Starting bot simulation")
             check(nativeConfigureFiles(base, File(files.root, "assets").absolutePath)) { "Bot asset directory is unavailable" }
             // NativeActivity creates its own NativeCode. Its surface belongs

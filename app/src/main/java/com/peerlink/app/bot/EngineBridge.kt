@@ -147,11 +147,7 @@ object EngineBridge {
     @Synchronized fun stageEngine(context: Context): Boolean {
         val stage = java.io.File(stageDir(context))
         val staged = java.io.File(stage, "libUE4.so")
-        if (staged.isFile && staged.length() >= MIN_ENGINE_BYTES &&
-            File(stage, "libgadsme.so").isFile) {
-            log("the engine is already staged: ${staged.absolutePath} (${staged.length()} bytes)")
-            return true
-        }
+        AppState.appendLog("[BOT-FILES] ENGINE_CHECK source=installed_game comparison=SHA256 cached_size_is_not_proof")
 
         // ---- route 1: as this app -------------------------------------
         val gameLibDir = gameLibDir(context)
@@ -183,8 +179,10 @@ object EngineBridge {
         helperReport = r
         if (r.isNotBlank()) absorb(r)
         if (staged.isFile && staged.length() >= MIN_ENGINE_BYTES) {
-            log("engine staged for the app: ${stage.absolutePath} (route=helper)")
-            return true
+            // A helper copy is not proof of source identity. Verify through the
+            // installed APK or native directory before accepting it.
+            if ((gameLibDir != null && copyEngineFrom(File(gameLibDir), stage)) || copyEngineFromApk(context, stage)) return true
+            AppState.appendLog("[BOT-FILES] FAIL file=engine source=unreadable helper_copy_could_not_be_verified")
         }
         log("the helper ran but the engine is still not staged at ${staged.absolutePath}")
         return false
@@ -281,6 +279,8 @@ object EngineBridge {
             val ad = java.io.File(srcDir, "libgadsme.so")
             if (!ad.isFile) return false
             copyFile(ad, java.io.File(stage, "libgadsme.so"))
+            val playcore = File(srcDir, "libplaycore.so")
+            if (playcore.isFile) copyFile(playcore, File(stage, "libplaycore.so"))
             copyFile(src, java.io.File(stage, "libUE4.so"))
             true
         } catch (t: Throwable) {
@@ -305,9 +305,9 @@ object EngineBridge {
                     if (name in copied) continue
                     val entry = zip.getEntry("lib/arm64-v8a/$name") ?: continue
                     if (name == "libUE4.so" && entry.size < MIN_ENGINE_BYTES) continue
-                    zip.getInputStream(entry).use { input ->
-                        copyAtomically(input, File(stage, name))
-                    }
+                    GameFileIntegrity { AppState.appendLog(it) }.ensure(
+                        File(stage, name), "engine/$name sourceAPK=${File(archive).name}", readOnly = true
+                    ) { zip.getInputStream(entry) }
                     copied.add(name)
                 }
             }
@@ -318,23 +318,11 @@ object EngineBridge {
         false
     }
 
-    /** Copy one file, then make it readable and not writable. */
+    /** A cached library is accepted only after comparing it with the installed source. */
     private fun copyFile(src: java.io.File, dst: java.io.File) {
-        src.inputStream().use { copyAtomically(it, dst) }
-    }
-
-    private fun copyAtomically(input: java.io.InputStream, destination: File) {
-        val temporary = File.createTempFile(".engine-", ".tmp", destination.parentFile)
-        try {
-            java.io.FileOutputStream(temporary).use { output ->
-                input.copyTo(output, 1024 * 1024)
-                output.fd.sync()
-            }
-            if (!temporary.setReadOnly()) error("Cannot protect staged library")
-            if (!temporary.renameTo(destination)) error("Cannot commit staged library")
-        } finally {
-            temporary.delete()
-        }
+        GameFileIntegrity { AppState.appendLog(it) }.ensure(
+            dst, "engine/${dst.name} source=nativeLibraryDir", readOnly = true
+        ) { src.inputStream() }
     }
 
     private fun identify() {

@@ -36,6 +36,8 @@ class BotEngineTurnPairPhoneTest {
         try {
             assertTrue(EngineBridge.stageEngine(context))
             assertTrue(EngineHost.lastError, EngineHost.prepare(context, uid))
+            assertTrue("File verification did not reach the exported log",
+                AppState.getLogs().contains("[BOT-FILES] SUMMARY result=PASS"))
             assertTrue(EngineHost.turnRequest().size in 5..1028)
             assertTrue(EngineHost.configureTurn(input))
             val record = requireNotNull(EngineHost.buildPeerRecord(peer,

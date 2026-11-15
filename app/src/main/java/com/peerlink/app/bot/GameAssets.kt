@@ -11,92 +11,112 @@ internal object GameAssets {
         val database get() = File(root, "database")
     }
 
-    fun prepare(owner: Context, status: (String) -> Unit): Prepared {
+    fun prepare(owner: Context, status: (String) -> Unit, audit: (String) -> Unit = {}): Prepared {
+        try { return prepareChecked(owner, status, audit) }
+        catch (error: Exception) {
+            audit("[BOT-FILES] SUMMARY result=FAIL error=${error.javaClass.simpleName}: ${error.message}")
+            throw error
+        }
+    }
+
+    private fun prepareChecked(owner: Context, status: (String) -> Unit, audit: (String) -> Unit): Prepared {
         val game = owner.createPackageContext("jp.konami.pesam", Context.CONTEXT_IGNORE_SECURITY)
+        fun installation(): String {
+            val info = owner.packageManager.getPackageInfo("jp.konami.pesam", 0)
+            val app = owner.packageManager.getApplicationInfo("jp.konami.pesam", 0)
+            return "${info.versionName}:${info.longVersionCode}:${info.lastUpdateTime}:" +
+                (listOf(app.sourceDir) + app.splitSourceDirs.orEmpty()).joinToString("|")
+        }
+        val identity = installation()
+        audit("[BOT-FILES] SOURCE installation=$identity")
+        audit("[BOT-FILES] SCOPE installed_APK_libraries_and_assets; downloaded/private_game_updates=NOT_CHECKED; " +
+            "copy_integrity_does_not_prove_same_live_database_as_running_game")
+        val integrity = GameFileIntegrity(audit)
         val root = File(owner.filesDir, "bot-game-11.1.1")
         check(root.isDirectory || root.mkdirs()) { "Cannot create bot working files" }
         val prepared = Prepared(game, root)
-        val marker = File(root, "assets-v1.ready")
-        val packageInfo = owner.packageManager.getPackageInfo("jp.konami.pesam", 0)
-        val installation = "${packageInfo.lastUpdateTime}:${game.applicationInfo.sourceDir}"
-        if (marker.isFile && marker.readText() == installation) {
-            prepareNativePakLayout(prepared, installation)
-            return prepared
-        }
         val assets = game.assets
         val names = assets.list("").orEmpty().filter {
             it.endsWith("_all.cpk") || it.endsWith("_and.cpk") || it.contains("_eng_") && it.endsWith(".cpk")
-        }
-        check("dt200_mobile_all.cpk" in names) { "Game data packs are missing; finish the game's download first" }
-        val assetDir = File(root, "assets").apply { mkdirs() }
+        }.sorted()
+        check("dt200_mobile_all.cpk" in names) { "Installed game's database pack is missing" }
+        val assetDir = File(root, "assets")
         for ((index, name) in names.withIndex()) {
-            status("Preparing bot files ${index + 1}/${names.size}")
-            assets.open(name).use { input -> atomicFile(File(assetDir, name)) { input.copyTo(it, 128 * 1024) } }
+            status("Checking bot files ${index + 1}/${names.size}")
+            integrity.ensure(File(assetDir, name), "assets/$name") { assets.open(name) }
         }
-        status("Preparing bot match resources")
-        val projectRoot = File(root, "project").apply { mkdirs() }
+        status("Checking bot match resources")
+        val projectRoot = File(root, "project")
+        val resources = linkedMapOf<String, GameFileIntegrity.Fingerprint>()
+        val repairs = mutableSetOf<String>()
+        // One comparison pass, then a second pass only when a copy needs repair.
+        // Do not inflate the whole ZIP or repeatedly scan it for each resource.
         ZipInputStream(assets.open("pc0000_mobile_and.pak").buffered()).use { zip ->
-            var count = 0
             while (true) {
                 val entry = zip.nextEntry ?: break
-                check(entry.name.startsWith("PesMobile/Content/Paks/")) { "Unexpected game resource path" }
-                val destination = File(projectRoot, entry.name)
-                check(destination.canonicalPath.startsWith(projectRoot.canonicalPath + File.separator))
+                val destination = resourceDestination(projectRoot, entry.name)
                 if (!entry.isDirectory) {
-                    destination.parentFile?.mkdirs()
-                    atomicFile(destination) { zip.copyTo(it, 128 * 1024) }
-                    count++
+                    check(entry.name !in resources) { "Duplicate game resource ${entry.name}" }
+                    val (expected, matches) = integrity.inspect(zip, destination, "project/${entry.name}")
+                    resources[entry.name] = expected
+                    if (!matches) repairs.add(entry.name)
                 }
                 zip.closeEntry()
             }
-            check(count == 5) { "Unsupported game resource pack" }
         }
+        check(resources.size == 5) { "Unsupported game resource pack: ${resources.size} files, expected 5" }
+        if (repairs.isNotEmpty()) ZipInputStream(assets.open("pc0000_mobile_and.pak").buffered()).use { zip ->
+            while (true) {
+                val entry = zip.nextEntry ?: break
+                val destination = resourceDestination(projectRoot, entry.name)
+                if (entry.name in repairs) {
+                    integrity.replace(zip, destination, "project/${entry.name}", resources.getValue(entry.name))
+                    repairs.remove(entry.name)
+                }
+                zip.closeEntry()
+            }
+        }
+        check(repairs.isEmpty()) { "Source resource pack changed during verification" }
         prepared.database.mkdirs()
         GameArchive(File(assetDir, "dt200_mobile_all.cpk")).use { archive ->
-            for (name in archive.names()) {
-                if (!name.startsWith("common/etc/pesdb/") || !name.endsWith(".bin")) continue
+            val tables = archive.names().filter { it.startsWith("common/etc/pesdb/") && it.endsWith(".bin") }
+            val found = tables.map { it.substringAfterLast('/') }.toSet()
+            check(found == GameDatabaseSchema.strides.keys && tables.size == found.size) {
+                "Database tables differ: missing=${GameDatabaseSchema.strides.keys - found} unexpected=${found - GameDatabaseSchema.strides.keys}"
+            }
+            for (name in tables.sorted()) {
                 val decoded = GameArchive.decodeDatabase(archive.read(name))
-                val destination = File(prepared.database, name.substringAfterLast('/').removeSuffix(".bin") + ".decoded")
-                atomicFile(destination) { it.write(decoded) }
+                val table = name.substringAfterLast('/')
+                val records = GameDatabaseSchema.validate(table, decoded.size)
+                val outputName = table.removeSuffix(".bin") + ".decoded"
+                audit("[BOT-FILES] DATABASE table=$table decodedBytes=${decoded.size} " +
+                    "recordStride=${GameDatabaseSchema.strides.getValue(table)} records=$records container=VALID")
+                integrity.ensure(File(prepared.database, outputName), "database/$outputName") { decoded.inputStream() }
             }
         }
         val command = "-opengl -nosound -unattended -NoSplash -culture=en -featureleveles31 " +
             "-ResX=320 -ResY=180 -ProjectDir=${prepared.project.absolutePath}/\n"
         for (relative in listOf("internal/UE4CommandLine.txt", "internal/UE4Game/PesMobile/UE4CommandLine.txt",
             "external/UE4Game/PesMobile/UE4CommandLine.txt", "external/PesMobile/UE4CommandLine.txt")) {
-            val destination = File(root, relative)
-            destination.parentFile?.mkdirs()
-            atomicFile(destination) { it.write(command.toByteArray()) }
+            integrity.ensure(File(root, relative), relative) { command.byteInputStream() }
         }
-        prepareNativePakLayout(prepared, installation)
-        atomicFile(marker) { it.write(installation.toByteArray()) }
+        // These are the actual private paths resolved by FAndroidPlatformFile.
+        val nativeRoot = File(root, "internal/UE4Game/PesMobile")
+        for (name in resources.keys) {
+            val source = File(projectRoot, name)
+            integrity.ensure(File(nativeRoot, name), "native/$name") { source.inputStream() }
+        }
+        check(installation() == identity) { "Installed game changed during verification; retry with the game update finished" }
+        audit("[BOT-FILES] SUMMARY result=PASS verified=${integrity.verified} repaired=${integrity.repaired} " +
+            "cpk=${names.size} resources=${resources.size} nativeResources=${resources.size} databaseTables=44 " +
+            "downloadedUpdates=NOT_CHECKED")
         return prepared
     }
 
-    private fun prepareNativePakLayout(prepared: Prepared, installation: String) {
-        // FAndroidPlatformFile maps ../../../PesMobile/... into this private
-        // UE4Game tree. -ProjectDir alone does not expose the staged files there.
-        // Verified with the original library's failed global.utoc stat on ARM64.
-        val source = File(prepared.project, "Content/Paks")
-        val target = File(prepared.root, "internal/UE4Game/PesMobile/PesMobile/Content/Paks")
-        val marker = File(prepared.root, "native-paks-v2.ready")
-        val files = source.listFiles().orEmpty().filter { it.isFile }
-        check(files.size == 5) { "Bot match resource files are incomplete" }
-        if (marker.isFile && marker.readText() == installation && files.all {
-                File(target, it.name).length() == it.length()
-            }) return
-        check(target.isDirectory || target.mkdirs()) { "Cannot create native bot resource directory" }
-        for (file in files) file.inputStream().use { input ->
-            atomicFile(File(target, file.name)) { input.copyTo(it, 128 * 1024) }
-        }
-        atomicFile(marker) { it.write(installation.toByteArray()) }
-    }
-
-    private fun atomicFile(destination: File, write: (java.io.OutputStream) -> Unit) {
-        val temporary = File.createTempFile(".bot-", ".tmp", destination.parentFile)
-        try {
-            temporary.outputStream().use { output -> write(output); output.fd.sync() }
-            check(temporary.renameTo(destination)) { "Could not save bot files" }
-        } finally { temporary.delete() }
+    private fun resourceDestination(root: File, name: String): File {
+        check(name.startsWith("PesMobile/Content/Paks/")) { "Unexpected game resource path $name" }
+        val destination = File(root, name)
+        check(destination.canonicalPath.startsWith(root.canonicalPath + File.separator)) { "Unsafe game resource path" }
+        return destination
     }
 }

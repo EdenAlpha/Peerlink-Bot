@@ -65,7 +65,8 @@ but the original bot session and data channels fail before server match setup.
 The initiating side and underlying cause are not established by that export.
 Two headless engines working together does not verify the full game's peer.
 
-The next diagnostic build adds independent 100 ms native sampling from peer
+Diagnostic build [`3ba7a82`](https://github.com/EdenAlpha/Peerlink-Bot/releases/tag/phone-engine-test-3ba7a82)
+adds independent 100 ms native sampling from peer
 introduction onward. State changes and a 5 s heartbeat reach the normal match
 log. `FIRST_NATIVE_FAILURE` preserves the first observed error, preceding state,
 sampling gap, model reason, sync result, database-check setting and frame count.
@@ -82,6 +83,12 @@ Service loss requests Android's process exit reason when available. These
 records cannot read the full game's private internal error or prove the
 disconnect initiator when the original engine only reports a generic failure.
 They are diagnostics, not a claimed phone-game connection fix.
+
+App unit tests and Android 14/15 host checks passed in [CI 43686079091](https://github.com/EdenAlpha/Peerlink-Bot/actions/runs/43686079091).
+The exact retained APK passed an unhooked ARM64 Android 15 two-engine connection
+test and a deliberate peer-stop test: its independent monitor preserved the
+native failure in the main-process log while the driver was idle. See
+[`phone-first-failure-20261115`](tests/evidence/phone-first-failure-20261115/README.md).
 
 The preceding connection-test APK is `eaf7f2a`, published as
 [`phone-engine-test-eaf7f2a`](https://github.com/EdenAlpha/Peerlink-Bot/releases/tag/phone-engine-test-eaf7f2a).
@@ -228,3 +235,11 @@ the session log. The report's timestamp identifies when the exception occurred.
 
 Previous RGB-fix APK (`25ae176`) SHA-256:
 `f79ff4c087673e2755ac84c8e83e90abc8fbaa9641377fb81ab07a769c5a0386`.
+
+### Installed-game file audit
+
+Before startup, PeerLink now streams SHA-256 comparisons between the installed game's library/assets and its private copies. It no longer trusts cache markers or equal file sizes. Missing or mismatched copies are rebuilt from the installed source, checked before atomic replacement, and identified by name in `[BOT-FILES]` export entries. Correct copies are reused without rewriting. The audit covers the ARM64 libraries, selected CPKs, all five packaged match resources and their actual native paths, plus all 44 decoded database tables with the original pinned engine's record strides. The library still must match the supported 11.1.1 SHA-256.
+
+`SUMMARY result=PASS` means those copies/decodings passed, not that the bot has all data used by the running game. Downloaded/private game updates are explicitly `NOT_CHECKED`. A good copy can still be older than live data downloaded into the game's private storage. This audit does not assert the cause of the phone disconnect or claim kickoff works.
+
+`GameFileIntegrityPhoneTest` deliberately changes one byte in a cached database and one native resource, preserving their sizes; it checks both are detected and restored from the original sources. The standalone `GameArchiveRegression` compares all 44 decoded tables against independent lab output.
