@@ -27,6 +27,8 @@ class BotEngineTurnPairPhoneTest {
         val role = requireNotNull(args.getString("pairRole"))
         require(role == "A" || role == "B")
         val start = requireNotNull(args.getString("connectingStart")).toLong()
+        val beforePeerDelay = args.getString("beforePeerDelayMs", "0").toLong()
+        require(beforePeerDelay in 0..180_000)
         val root = File(context.filesDir, "early-channel-test")
         val squad = File(root, "squad.dto").readBytes()
         val input = File(root, "turn.dto").readBytes()
@@ -49,8 +51,12 @@ class BotEngineTurnPairPhoneTest {
             val revisionCheck = MatchServerSettings.revisionCheck(mapOf("result" to "NOERR",
                 "is_revision_check" to args.getString("revisionCheck", "YES")))
             assertTrue("Could not apply the server revision policy", EngineHost.configureRevisionCheck(revisionCheck))
-            assertTrue(EngineHost.turnRequest().size in 5..1028)
+            val nativeTurnRequest = EngineHost.turnRequest()
+            assertTrue(nativeTurnRequest.size in 5..1028)
+            File(root, "turn-request.dto").writeBytes(nativeTurnRequest)
             assertTrue(EngineHost.configureTurn(input))
+            Log.i("PeerlinkTurnTest", "ORIGINAL_TURN_${role}_CONFIGURED beforePeerDelayMs=$beforePeerDelay")
+            if (beforePeerDelay > 0) Thread.sleep(beforePeerDelay)
             val record = requireNotNull(EngineHost.buildPeerRecord(peer,
                 "127.0.0.1", if (role == "A") PeerSlot.ENGINE_PORT else 39202,
                 "127.0.0.2", if (role == "A") PeerSlot.ENGINE_REFLEXIVE_PORT else 39204,
