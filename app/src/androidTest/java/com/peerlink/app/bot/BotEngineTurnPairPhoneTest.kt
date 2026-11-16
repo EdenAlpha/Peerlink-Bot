@@ -48,6 +48,18 @@ class BotEngineTurnPairPhoneTest {
             assertTrue(EngineHost.lastError, EngineHost.prepare(context, uid))
             assertTrue("File verification did not reach the exported log",
                 AppState.getLogs().contains("[BOT-FILES] SUMMARY result=PASS"))
+            // The physical failure occurs before match setup. Checking only
+            // logcat or calling loadingDiagnostics from the test would miss
+            // the user's actual export path, so assert the service delivered it.
+            val diagnosticDeadline = System.nanoTime() + 5_000_000_000L
+            while (!AppState.getLogs().contains("NETWORK_STARTUP networkSdkPhase=") &&
+                System.nanoTime() < diagnosticDeadline) Thread.sleep(25)
+            val startupAudit = AppState.getLogs()
+            assertTrue("Network startup details were absent from the export before match setup",
+                startupAudit.contains("NETWORK_STARTUP networkSdkPhase="))
+            assertTrue("The original resolver observer was not installed",
+                startupAudit.contains("networkResolverObserver=1"))
+            Log.i("PeerlinkTurnTest", "NETWORK_STARTUP_${role}_EXPORTED_BEFORE_MATCH_SETUP")
             val revisionCheck = MatchServerSettings.revisionCheck(mapOf("result" to "NOERR",
                 "is_revision_check" to args.getString("revisionCheck", "YES")))
             assertTrue("Could not apply the server revision policy", EngineHost.configureRevisionCheck(revisionCheck))

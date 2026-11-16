@@ -22,6 +22,7 @@ class BotEngineService : Service() {
     private var pss = 0L
     private var nextMemorySample = 0L
     private var nextNativeSample = 0L
+    private var nextNetworkSample = 0L
     private var diagnosticTask: ScheduledFuture<*>? = null
     private val connectionTrace = NativeConnectionTrace()
     private val messenger = Messenger(object : Handler(Looper.getMainLooper()) {
@@ -48,6 +49,7 @@ class BotEngineService : Service() {
                     result.putInt("pid", Process.myPid())
                     result.putBoolean("retryable", EngineRuntime.startupRetryable)
                     if (!result.getBoolean("ok")) result.putString("reason", lastStatus.ifBlank { "Bot simulation could not start" })
+                    if (result.getBoolean("ok")) diagnostic(EngineRuntime.networkStartupDiagnostics())
                 }
                 EngineProtocol.PEER_RECORD -> {
                     val addresses = requireNotNull(args.getStringArray("addresses"))
@@ -155,7 +157,15 @@ class BotEngineService : Service() {
     private fun sampleDiagnostics() {
         try {
             val state = snapshot(passive = true)
-            connectionTrace.sample(state, SystemClock.elapsedRealtime()).forEach {
+            val now = SystemClock.elapsedRealtime()
+            // Network startup can fail before SETUP_MATCH enables the loading
+            // monitor. Export these passive diagnostics during introduction,
+            // including a resolver still pending or a failed native startup.
+            if (now >= nextNetworkSample) {
+                nextNetworkSample = now + 5000
+                diagnostic(EngineRuntime.networkStartupDiagnostics())
+            }
+            connectionTrace.sample(state, now).forEach {
                 diagnostic(it.text, it.firstFailure)
                 if (it.firstFailure) {
                     diagnostic(EngineRuntime.databaseDiagnostics())

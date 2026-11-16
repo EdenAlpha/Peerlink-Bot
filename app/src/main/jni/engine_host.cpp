@@ -375,6 +375,15 @@ JNIEXPORT jstring JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeDatabase
     return env->NewStringUTF(text.c_str());
 }
 
+JNIEXPORT jstring JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeNetworkStartupDiagnostics(
+        JNIEnv *env, jobject, jlong base) {
+    if (!valid(base)) return env->NewStringUTF("NETWORK_STARTUP unavailable=engine_not_loaded");
+    char networking[640];
+    peerlink_network_startup_diagnostics(g_client, networking, sizeof(networking));
+    const std::string text = std::string("NETWORK_STARTUP ") + networking;
+    return env->NewStringUTF(text.c_str());
+}
+
 JNIEXPORT jstring JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeLoadingDiagnostics(
         JNIEnv *env, jobject, jlong base) {
     if (!valid(base)) return env->NewStringUTF("MATCH_LOADING unavailable=engine_not_loaded");
