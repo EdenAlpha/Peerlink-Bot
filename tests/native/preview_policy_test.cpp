@@ -65,22 +65,23 @@ int main() {
     start.event_manager_present = false; assert(!should_complete_visual_start(start)); start.event_manager_present = true;
     start.settled = false; assert(!should_complete_visual_start(start));
 
-    IntroMenuView intro{true, true, true, 0, false, 12, true, true, 8, 0, true, true, true, false, true};
-    assert(should_reopen_intro(intro));
-    intro.rendered=false; assert(!should_reopen_intro(intro)); intro.rendered=true;
-    intro.synchronized=false; assert(!should_reopen_intro(intro)); intro.synchronized=true;
-    intro.intro_leaf=false; assert(!should_reopen_intro(intro)); intro.intro_leaf=true;
-    intro.flow_state=7; assert(!should_reopen_intro(intro)); intro.flow_state=0;
-    intro.leaf_completed=true; assert(!should_reopen_intro(intro)); intro.leaf_completed=false;
-    intro.match_phase=17; assert(!should_reopen_intro(intro)); intro.match_phase=12;
-    intro.original_ready=false; assert(!should_reopen_intro(intro)); intro.original_ready=true;
-    intro.hud_complete=false; assert(!should_reopen_intro(intro)); intro.hud_complete=true;
-    intro.visual_state=0; assert(!should_reopen_intro(intro)); intro.visual_state=8;
-    intro.menu_state=5; assert(!should_reopen_intro(intro)); intro.menu_state=0;
-    intro.requested_intro=false; assert(!should_reopen_intro(intro)); intro.requested_intro=true;
-    intro.current_nil=false; assert(!should_reopen_intro(intro)); intro.current_nil=true;
-    intro.manager_idle=false; assert(!should_reopen_intro(intro)); intro.manager_idle=true;
-    intro.retried=true; assert(!should_reopen_intro(intro)); intro.retried=false;
-    intro.settled=false; assert(!should_reopen_intro(intro));
+    RenderedStartView rendered{true,true,true,0,12,false,true,true,8,true,true,false,true};
+    assert(should_drive_rendered_start(rendered));
+    rendered.stranded_menu=false;
+    assert(!should_drive_rendered_start(rendered)); // Do not interrupt an active UI.
+    rendered.stop_requested=true;
+    assert(should_drive_rendered_start(rendered)); // Continue observing its real acknowledgement.
+    rendered.visual_state=0;
+    assert(should_drive_rendered_start(rendered));
+    rendered.visual_state=3;
+    assert(!should_drive_rendered_start(rendered)); // Presentation still loading.
+    rendered.visual_state=0;rendered.rendered=false;
+    assert(!should_drive_rendered_start(rendered)); // Keep the separate verified Null driver path.
+    rendered.rendered=true;rendered.synchronized=false;
+    assert(!should_drive_rendered_start(rendered));
+    rendered.synchronized=true;rendered.hud_complete=false;
+    assert(!should_drive_rendered_start(rendered));
+    rendered.hud_complete=true;rendered.match_gate_open=true;
+    assert(!should_drive_rendered_start(rendered)); // The game has already accepted start.
     puts("Preview lifecycle gates passed: normal loading waits; verified headless inputs can Continue through the exact optional menu wait");
 }

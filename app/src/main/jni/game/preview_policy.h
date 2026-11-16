@@ -53,31 +53,29 @@ inline bool should_complete_visual_start(const VisualStartView &v) {
         v.event_manager_present && v.settled;
 }
 
-struct IntroMenuView {
+struct RenderedStartView {
     bool rendered;
     bool synchronized;
     bool intro_leaf;
     unsigned flow_state;
-    bool leaf_completed;
     unsigned match_phase;
+    bool match_gate_open;
     bool original_ready;
     bool hud_complete;
     unsigned visual_state;
-    unsigned menu_state;
-    bool requested_intro;
-    bool current_nil;
-    bool manager_idle;
-    bool retried;
+    bool event_manager_present;
+    bool stranded_menu;
+    bool stop_requested;
     bool settled;
 };
 
-// Actor state 0 with current=nil does not reopen requested+0x298: case 0
-// only starts loading when current+0x2b0 names a menu (3ac97c8). The original
-// close/request pair re-enters case 3/4 and creates that requested client.
-inline bool should_reopen_intro(const IntroMenuView &v) {
+// A hosted rendered peer can finish its flow before its visual-start UI task
+// is created. Reproduce that original task (33c8620/33c872c): request visual
+// completion, await its real idle acknowledgement, then post its ready event.
+inline bool should_drive_rendered_start(const RenderedStartView &v) {
     return v.rendered && v.synchronized && v.intro_leaf && v.flow_state == 0 &&
-        !v.leaf_completed && v.match_phase == 12 && v.original_ready && v.hud_complete &&
-        v.visual_state == 8 && v.menu_state == 0 && v.requested_intro && v.current_nil &&
-        v.manager_idle && !v.retried && v.settled;
+        v.match_phase == 12 && !v.match_gate_open && v.original_ready && v.hud_complete &&
+        (v.visual_state == 0 || v.visual_state == 8) && v.event_manager_present &&
+        (v.stop_requested || v.stranded_menu) && v.settled;
 }
 }
