@@ -199,5 +199,46 @@
     },
     "proofZipSha256": "f24f8efee89850fb03b550076c13efd11b660cf7ddc37abfe28b70994134a215",
     "scope": "Android 15 ARM64 lab; no physical user phone was tested."
+  },
+  "headlessMeshWaitDebuggerProbe": {
+    "baseCommit": "5a75dfc7432bb8c34411341d2e715be2a7d99e08",
+    "debuggerAssisted": true,
+    "gameResourceDownloads": 0,
+    "extraPacksAbsent": 63,
+    "readinessFunction": "0x39d0688",
+    "skeletalMeshCompletionCallback": "0x39d4c94",
+    "patchedInstruction": "0x39d06f4",
+    "otherReadinessConditionsRetained": true,
+    "instructionEmulationCases": 4096,
+    "bothConnectedAndRealServerContext": true,
+    "home": {
+      "samples": 600,
+      "outerState": 17,
+      "coreState": 54,
+      "players": 22,
+      "ballOnPitch": true,
+      "passQueueAccepted": true,
+      "distinctBallPositions": 8
+    },
+    "away": {
+      "samples": 600,
+      "outerState": 17,
+      "coreState": 54,
+      "players": 22,
+      "ballOnPitch": true,
+      "distinctBallPositions": 8
+    },
+    "sameFinalBallPosition": [
+      -2210,
+      108,
+      10387
+    ],
+    "passProbeFirst30SamplesChangedBallPosition": false,
+    "firstHomeBallMovementSamplesAfterPass": 21,
+    "passCausedMovementEstablished": false,
+    "fatalSignalObserved": false,
+    "proofZipSha256": "cca8d5a0f48551b4c408f47a8e216b308647c12780f42c8d16ddf779f924c332",
+    "passObservationZipSha256": "bc0bbe84d533abc67abf46e0c89e921c432be2b1aab3f0e106187463f179453d",
+    "scope": "Android 15 ARM64 lab, debugger patched; the fixture summary incorrectly says no external observer. The user phone was not tested."
   }
 }

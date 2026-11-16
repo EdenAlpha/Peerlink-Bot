@@ -150,6 +150,8 @@ class BotEngineTurnPairPhoneTest {
                 var playableSamples = 0
                 val holdSeconds = args.getString("matchLoadingProbeSeconds", "30").toInt()
                 require(holdSeconds in 30..600)
+                val passDelaySeconds = args.getString("passProbeDelaySeconds", "0").toInt()
+                require(passDelaySeconds in 0..180)
                 repeat(holdSeconds) {
                     Thread.sleep(1000)
                     val loading = EngineHost.snapshot()
@@ -162,7 +164,7 @@ class BotEngineTurnPairPhoneTest {
                             details.contains("userDataSyncComplete=1"))
                         synchronizedBeforePrematch = true
                     }
-                    if (manualPassProbe && role == "A" && !passAccepted && loading.canTestPass && playableSamples >= 3) {
+                    if (manualPassProbe && role == "A" && !passAccepted && loading.canTestPass && playableSamples >= 3 + passDelaySeconds) {
                         assertTrue("The original engine did not enumerate its own bot controller", EngineHost.probeController())
                         Log.i("PeerlinkTurnTest", "PASS_PROBE_BEFORE_$role state=${loading.values.contentToString()}")
                         passAccepted = EngineHost.pass()

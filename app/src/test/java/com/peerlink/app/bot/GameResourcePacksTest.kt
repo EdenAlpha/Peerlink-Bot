@@ -101,11 +101,13 @@ class GameResourcePacksTest {
             File(source, packs[0].name).writeBytes(contents)
             File(native, packs[1].name).writeBytes(contents)
             File(native, packs[2].name).writeBytes(ByteArray(contents.size))
-            GameResourcePacks.verifyAndLinkSet(source, native, packs, {}, true)
+            assertEquals(1, GameResourcePacks.verifyAndLinkSet(source, native, packs, {}, true))
             assertArrayEquals(contents, File(native, packs[0].name).readBytes())
             assertArrayEquals(contents, File(native, packs[1].name).readBytes())
             assertFalse(File(native, packs[2].name).exists())
             assertFalse(File(source, packs[2].name).exists())
+            File(source, packs[2].name).writeBytes(contents)
+            assertEquals(0, GameResourcePacks.verifyAndLinkSet(source, native, packs, {}, true))
             assertThrows(IllegalStateException::class.java) {
                 GameResourcePacks.verifyAndLinkSet(source, native, packs, {}, false)
             }

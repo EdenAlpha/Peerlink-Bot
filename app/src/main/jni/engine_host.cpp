@@ -36,7 +36,7 @@ long peerlink_visual_start_drive(uintptr_t);
 long peerlink_preview_probe(uintptr_t);
 void peerlink_preview_stop();
 void peerlink_preview_diagnostics(char *, size_t);
-bool peerlink_install_null_client_rhi(uintptr_t);
+bool peerlink_install_null_client_rhi(uintptr_t, bool);
 bool peerlink_null_client_rhi_ready(uintptr_t);
 bool peerlink_null_client_rhi_failed(uintptr_t);
 }
@@ -743,8 +743,8 @@ JNIEXPORT jlong JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeLoad(
 }
 
 JNIEXPORT jboolean JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeEnableHeadless(
-        JNIEnv *, jobject, jlong base) {
-    return valid(base) && peerlink_install_null_client_rhi(g_base) ? JNI_TRUE : JNI_FALSE;
+        JNIEnv *, jobject, jlong base, jboolean missing_match_resources) {
+    return valid(base) && peerlink_install_null_client_rhi(g_base, missing_match_resources == JNI_TRUE) ? JNI_TRUE : JNI_FALSE;
 }
 
 JNIEXPORT jint JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeHeadlessState(

@@ -155,12 +155,12 @@ internal object GameResourcePacks {
 
     /** Validate any existing match files; only the graphics-free experiment may omit them. */
     fun verifyAndLink(context: Context, nativePaks: File, report: (String) -> Unit,
-                      allowMissing: Boolean = false) {
+                      allowMissing: Boolean = false): Int =
         verifyAndLinkSet(directory(context), nativePaks, manifest(context), report, allowMissing)
-    }
 
     internal fun verifyAndLinkSet(source: File, nativePaks: File, packs: List<Pack>,
-                                  report: (String) -> Unit, allowMissing: Boolean) {
+                                  report: (String) -> Unit, allowMissing: Boolean): Int {
+        var missing = 0
         for (pack in packs) {
             val input = File(source, pack.name)
             val valid = input.isFile && input.inputStream().use(GameFileIntegrity::fingerprint) == pack.fingerprint
@@ -171,6 +171,7 @@ internal object GameResourcePacks {
                     report("[BOT-FILES] RESOURCE_NATIVE_COPY file=${pack.name} result=PASS")
                 } else {
                     check(!target.exists() || target.delete()) { "Cannot remove damaged bot resource alias" }
+                    missing++
                     report("[BOT-FILES] RESOURCE_OPTIONAL file=${pack.name} result=NOT_AVAILABLE")
                 }
                 continue
@@ -179,6 +180,7 @@ internal object GameResourcePacks {
             link(input, target, pack.fingerprint, report)
             report("[BOT-FILES] RESOURCE_PASS file=${pack.name} bytes=${pack.bytes} SHA256=${pack.sha256}")
         }
+        return missing
     }
 
     fun link(source: File, destination: File, fingerprint: GameFileIntegrity.Fingerprint, report: (String) -> Unit) {

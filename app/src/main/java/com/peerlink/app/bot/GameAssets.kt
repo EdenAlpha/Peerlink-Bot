@@ -6,7 +6,7 @@ import java.util.zip.ZipInputStream
 
 /** App-private working files; the installed game and its saved data remain read-only. */
 internal object GameAssets {
-    data class Prepared(val game: Context, val root: File) {
+    data class Prepared(val game: Context, val root: File, val missingMatchResources: Int = 0) {
         val project get() = File(root, "project/PesMobile")
         val database get() = File(root, "database")
     }
@@ -138,12 +138,12 @@ internal object GameAssets {
             val fingerprint = source.inputStream().use(GameFileIntegrity::fingerprint)
             GameResourcePacks.link(source, File(nativePaks, name), fingerprint, audit)
         }
-        GameResourcePacks.verifyAndLink(owner, nativePaks, audit, allowMissingMatchResources)
+        val missingMatchResources = GameResourcePacks.verifyAndLink(owner, nativePaks, audit, allowMissingMatchResources)
         check(installation() == identity) { "Installed game changed during verification; retry with the game update finished" }
         audit("[BOT-FILES] SUMMARY result=PASS verified=${integrity.verified} repaired=${integrity.repaired} " +
             "cpk=${names.size} resources=${resources.size} nativeResources=${resources.size} databaseTables=$databaseTables nativeDatabaseTables=44 " +
             "downloadedUpdates=NOT_CHECKED")
-        return prepared
+        return prepared.copy(missingMatchResources = missingMatchResources)
     }
 
     private fun resourceDestination(root: File, name: String): File {

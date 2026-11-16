@@ -20,6 +20,7 @@ Init original_init = nullptr;
 std::atomic<bool> applied{false};
 std::atomic<bool> failed{false};
 std::atomic<bool> installed{false};
+bool skip_missing_mesh_wait = false;
 Address pointer(Address offset) { return *reinterpret_cast<Address *>(engine + offset); }
 bool protect(Address address, int flags) {
     long size = sysconf(_SC_PAGESIZE);
@@ -86,12 +87,15 @@ bool install_graphics_guards() {
         0xc0,0x03,0x5f,0xd6  // ret
     };
     static constexpr uint8_t visual_call[] = {0x95,0x5b,0x3e,0x94};
+    static constexpr uint8_t mesh_wait_original[] = {0x69,0x00,0x00,0x34};
+    static constexpr uint8_t mesh_wait_skip[] = {0x03,0x00,0x00,0x14};
     if (memcmp(reinterpret_cast<void *>(engine + 0x4965a40), factory_original, sizeof(factory_original)) ||
         memcmp(reinterpret_cast<void *>(engine + 0x5431af8), original, sizeof(original)) ||
         memcmp(reinterpret_cast<void *>(engine + 0x2fc27f4), hud_wait, sizeof(hud_wait)) ||
         memcmp(reinterpret_cast<void *>(engine + 0x4965a50), visual_cave_original, sizeof(visual_cave_original)) ||
         memcmp(reinterpret_cast<void *>(engine + 0x39cebfc), visual_call_original, sizeof(visual_call_original)) ||
-        memcmp(reinterpret_cast<void *>(engine + 0x39cf3dc), visual_resource_load, sizeof(visual_resource_load))) return false;
+        memcmp(reinterpret_cast<void *>(engine + 0x39cf3dc), visual_resource_load, sizeof(visual_resource_load)) ||
+        (skip_missing_mesh_wait && memcmp(reinterpret_cast<void *>(engine + 0x39d06f4), mesh_wait_original, sizeof(mesh_wait_original)))) return false;
     // The original factory has already returned. Its first four instructions
     // are now a trampoline: if the optional texture resource is missing, skip
     // only its graphics-dimension calls; otherwise execute the original load.
@@ -120,7 +124,14 @@ bool install_graphics_guards() {
         set_code(0x4965a40, factory_original, sizeof(factory_original));
         return false;
     }
-    if (set_code(0x39cebfc, visual_call, sizeof(visual_call))) return true;
+    if (set_code(0x39cebfc, visual_call, sizeof(visual_call))) {
+        // The original readiness function waits for an asynchronous SkeletalMesh
+        // callback. With NullDrv and no extra packs, that visual callback never
+        // arrives. Skip only this mesh wait; the function still checks its
+        // other dependencies and the game itself advances the player state.
+        if (!skip_missing_mesh_wait || set_code(0x39d06f4, mesh_wait_skip, sizeof(mesh_wait_skip))) return true;
+        set_code(0x39cebfc, visual_call_original, sizeof(visual_call_original));
+    }
     set_code(0x4965a50, visual_cave_original, sizeof(visual_cave_original));
     set_code(0x2fc27f4, hud_wait, sizeof(hud_wait));
     set_code(0x5431af8, original, sizeof(original));
@@ -167,27 +178,28 @@ void initialize_null_for_android(Address instance) {
         failed.store(true, std::memory_order_release);
     }
     __android_log_print(applied.load() ? ANDROID_LOG_INFO : ANDROID_LOG_ERROR,
-        "PeerlinkEngineHost", "NULL_CLIENT_PROFILE originalInit=1 featureLevel=1 shaderPlatform=24 applied=%d",
-        applied.load());
+        "PeerlinkEngineHost", "NULL_CLIENT_PROFILE originalInit=1 featureLevel=1 shaderPlatform=24 applied=%d meshWaitBypass=%d",
+        applied.load(), applied.load() && skip_missing_mesh_wait);
 }
 }
-extern "C" bool peerlink_install_null_client_rhi(uintptr_t base) {
+extern "C" bool peerlink_install_null_client_rhi(uintptr_t base, bool missing_match_resources) {
     if (!base) return false;
-    if (engine) return engine == base && installed.load(std::memory_order_acquire);
+    if (engine) return engine == base && skip_missing_mesh_wait == missing_match_resources && installed.load(std::memory_order_acquire);
     auto *factory = reinterpret_cast<const uint32_t *>(base + kFactoryCall);
     auto *slot = reinterpret_cast<const Address *>(base + kNullVtable + 16);
     if (*factory != kPlatformFactoryCall || *slot != base + kNullInit) return false;
     engine = base;
+    skip_missing_mesh_wait = missing_match_resources;
     original_init = reinterpret_cast<Init>(base + kNullInit);
     if (!set_slot(reinterpret_cast<Address>(&initialize_null_for_android))) {
-        engine = 0; original_init = nullptr; return false;
+        engine = 0; original_init = nullptr; skip_missing_mesh_wait = false; return false;
     }
     if (set_factory(kOriginalNullFactoryCall)) {
         installed.store(true, std::memory_order_release);
         return true;
     }
     set_slot(reinterpret_cast<Address>(original_init));
-    engine = 0; original_init = nullptr;
+    engine = 0; original_init = nullptr; skip_missing_mesh_wait = false;
     return false;
 }
 extern "C" bool peerlink_null_client_rhi_ready(uintptr_t base) {

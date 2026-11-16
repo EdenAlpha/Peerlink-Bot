@@ -81,10 +81,10 @@ internal object EngineRuntime {
             check(android.os.Build.VERSION.SDK_INT >= 31) { "Bot engine requires Android 12 or later" }
             if (!engine.isFile || !onRuntime { load(engine) }) return false
             val headless = BotRendering.headless(app)
-            if (headless) check(nativeEnableHeadless(base)) {
+            val files = GameAssets.prepare(app, report, audit, allowMissingMatchResources = headless)
+            if (headless) check(nativeEnableHeadless(base, files.missingMatchResources > 0)) {
                 "This phone could not start the graphics-free bot"
             }
-            val files = GameAssets.prepare(app, report, audit, allowMissingMatchResources = headless)
             report("Starting bot simulation")
             check(nativeConfigureFiles(base, File(files.root, "assets").absolutePath)) { "Bot asset directory is unavailable" }
             // NativeActivity creates its own NativeCode. Its surface belongs
@@ -249,7 +249,7 @@ internal object EngineRuntime {
     fun closeHost() { stopPreview(); gameHost?.close(); gameHost = null }
 
     private external fun nativeLoad(path: String): Long
-    private external fun nativeEnableHeadless(base: Long): Boolean
+    private external fun nativeEnableHeadless(base: Long, missingMatchResources: Boolean): Boolean
     private external fun nativeHeadlessState(base: Long): Int
     private external fun nativeBeginIntroduction(base: Long, peer: Long, connectingStart: Long): Boolean
     private external fun nativeTransportIoReady(base: Long): Int
