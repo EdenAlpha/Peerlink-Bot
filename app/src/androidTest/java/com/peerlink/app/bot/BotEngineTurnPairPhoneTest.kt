@@ -182,7 +182,7 @@ class BotEngineTurnPairPhoneTest {
                 // host's explicit controller configuration. Allow that
                 // asymmetry when comparing the real phone's state-check stop.
                 val controllerConfiguration = args.getString("controllerConfiguration", "true").toBooleanStrict()
-                assertTrue(EngineHost.startInputTest(controllerConfiguration,
+                assertEquals(controllerConfiguration, EngineHost.startInputTest(controllerConfiguration,
                     automatic = !manualPassProbe && role == "A"))
                 var synchronizedBeforePrematch = false
                 var passAccepted = false
