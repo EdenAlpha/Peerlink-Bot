@@ -50,6 +50,12 @@ class BotDiscoveryServerTest {
                     assertEquals(3479, changedAnswer.port)
                     assertArrayEquals(changed.copyOfRange(8, 20), changedAnswer.data.copyOfRange(8, 20))
                 }
+                // Receiving a datagram can win the race with the sender's
+                // post-send counter update. Wait for that observation, while
+                // preserving the real packet/source checks above.
+                val deadline = System.nanoTime() + 1_000_000_000L
+                while (!server.diagnostics().contains("localStunReplies=2") &&
+                    System.nanoTime() < deadline) Thread.sleep(1)
                 assertTrue(server.diagnostics().contains("localStunReplies=2"))
             }
         }
