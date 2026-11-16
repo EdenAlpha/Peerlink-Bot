@@ -24,6 +24,7 @@
 #include <unistd.h>
 #include "game/network_startup_diagnostics.h"
 #include "game/match_stop_diagnostics.h"
+#include "game/match_state_diagnostics.h"
 
 extern "C" {
 long peerlink_game_database_input(uintptr_t, const char *);
@@ -468,6 +469,7 @@ JNIEXPORT jstring JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeLoadingD
         } while (child && child != first && ++count < 150 && visited <= 800);
     };
     for (unsigned i = 0; i < 4; ++i) walk(walk, *reinterpret_cast<uintptr_t *>(lock.manager + 0x118 + i * 8), 0);
+    text += "\n"; text += peerlink_match_state_diagnostics();
     return env->NewStringUTF(text.c_str());
 }
 
@@ -617,7 +619,8 @@ JNIEXPORT jint JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeAdvanceMatc
                 entry<void (*)(uintptr_t, uint32_t)>(0x72ea4dc)(settings, 1);
         }
     }
-    return g_match_stage;
+    peerlink_match_state_sample_initial();
+    return peerlink_match_check_failed() ? -214 : g_match_stage;
 }
 
 JNIEXPORT jlongArray JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeSnapshot(

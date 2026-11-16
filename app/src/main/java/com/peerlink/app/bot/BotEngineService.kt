@@ -199,6 +199,7 @@ class BotEngineService : Service() {
                     -209 -> "The bot's match-preview menu did not finish loading"
                     -210 -> "The bot could not queue its match-preview step on the game thread"
                     -211 -> "The bot could not skip the match introduction"
+                    -214 -> "The bot and eFootball produced different match states"
                     else -> "Bot match setup failed"
                 }
                 "$reason (native stage $advance)"
@@ -226,6 +227,10 @@ class BotEngineService : Service() {
         } catch (error: Exception) {
             testing = false
             pollTask?.cancel(false)
+            // A checksum stop can occur inside the normal five-second sample
+            // interval. Export its exact comparison even if throttled state
+            // reporting would otherwise skip this final observation.
+            runCatching { diagnostic(EngineRuntime.loadingDiagnostics()) }
             runCatching { logNativeState(snapshot()) }
             EngineRuntime.neutral()
             val failure = runCatching { snapshot() }.getOrNull()

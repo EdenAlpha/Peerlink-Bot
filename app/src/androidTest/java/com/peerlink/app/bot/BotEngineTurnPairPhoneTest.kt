@@ -209,7 +209,12 @@ class BotEngineTurnPairPhoneTest {
                     val details = EngineHost.loadingDiagnostics()
                     if (loading.canTestPass && loading.ballSpeedMmPerSecond > 0) ballMotionObserved = true
                     if (details.contains("simulationWait=0 ") && details.contains("simulationTickGate=1")) simulationGateObserved = true
-                    Log.i("PeerlinkTurnTest", "MATCH_LOADING_DETAILS_$role $details")
+                    // Each scalar snapshot fits logcat's per-message limit.
+                    // A single combined native report would truncate the
+                    // initial/stop comparison that this test must retain.
+                    details.lineSequence().forEach {
+                        Log.i("PeerlinkTurnTest", "MATCH_LOADING_DETAILS_$role $it")
+                    }
                     val elapsed = android.os.SystemClock.elapsedRealtime() - loadingStartedAt
                     if (details.contains("leaf=Match/Settings/MatchPreview") && previewStartedAt == 0L)
                         previewStartedAt = android.os.SystemClock.elapsedRealtime()

@@ -1,4 +1,5 @@
 #include "match_stop_diagnostics.h"
+#include "match_state_diagnostics.h"
 #include <atomic>
 #include <cerrno>
 #include <cstdio>
@@ -70,19 +71,34 @@ void record(Event &event, const char *kind, uintptr_t controller, uintptr_t call
 #endif
 }
 
-__attribute__((noinline)) void observe_request(uintptr_t controller) {
+extern "C" __attribute__((used, noinline)) void peerlink_match_observe_request_impl(
+        uintptr_t controller, uintptr_t checker, uintptr_t context, uintptr_t caller) {
     const int before_errno = errno;
     const bool pending = byte(controller, 0x45) != 0;
-    const uintptr_t caller = reinterpret_cast<uintptr_t>(__builtin_return_address(0));
     errno = before_errno;
     original_request(controller);
     const int after_errno = errno;
     if (!pending && byte(controller, 0x45)) {
         requests.fetch_add(1, std::memory_order_relaxed);
         record(first_request, "local_request", controller, caller);
+        peerlink_match_check_request(controller, checker, context, caller);
     }
     errno = after_errno;
 }
+
+#if defined(__aarch64__)
+// At the verified 70539e0 call, x19 is the check object and x20 is its
+// comparison context. Capture them before any C++ prologue can reuse them.
+// The implementation preserves callee-saved registers and the original LR.
+__attribute__((naked)) void observe_request(uintptr_t) {
+    __asm__ volatile("mov x1, x19\nmov x2, x20\nmov x3, x30\nb peerlink_match_observe_request_impl");
+}
+#else
+__attribute__((noinline)) void observe_request(uintptr_t controller) {
+    peerlink_match_observe_request_impl(controller, 0, 0,
+        reinterpret_cast<uintptr_t>(__builtin_return_address(0)));
+}
+#endif
 
 __attribute__((noinline)) void observe_outgoing(uintptr_t controller, uintptr_t frame) {
     const int before_errno = errno;
@@ -147,6 +163,7 @@ void peerlink_observe_match_stop(uintptr_t base) {
         return;
     }
     image_base.store(base, std::memory_order_relaxed);
+    peerlink_match_state_begin(base);
     original_request = reinterpret_cast<Request>(base + kFunctions[0]);
     original_outgoing = reinterpret_cast<Outgoing>(base + kFunctions[1]);
     original_apply = reinterpret_cast<Apply>(base + kFunctions[2]);
