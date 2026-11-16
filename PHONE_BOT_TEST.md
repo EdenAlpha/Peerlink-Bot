@@ -73,8 +73,11 @@ The exact retained APK passed all three ARM64 routing tests and a two-engine
 match through the production native backend after a room-port change. Both
 engines reached kickoff, and a bot Pass moved the ball. The bot had none of
 the 63 extra packs. This lab uses an owned TLS TURN fixture and a datagram
-socket pair instead of the Android TUN device. Physical Infinix kickoff remains
-unconfirmed. See [evidence and build identity](tests/evidence/phone-room-reconnect-20261116/README.md).
+socket pair instead of the Android TUN device. The physical Infinix export
+`peerlink_match_1794845885673.zip` confirms this exact app source and successful
+routing probes, but the original SDK's network I/O stays unavailable: 12 packets
+arrive from the game and none from the bot. This release has not solved phone
+kickoff. See [evidence and build identity](tests/evidence/phone-room-reconnect-20261116/README.md).
 
 ### Earlier diagnostic builds
 
