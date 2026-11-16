@@ -1,0 +1,74 @@
+{
+  "source_commit": "5418dfa967cfecc6cc11d4c6ecba54e47ad65930",
+  "ci_run": 43945346968,
+  "artifact_id": 14264044372,
+  "apk_sha256": "5ed9ed33ef1e37302d6609e5f752242e05735720747eba335c872b5a860c4900",
+  "apk_bytes": 36163431,
+  "evidence_sha256": "d0d87d7c2adf60ee13f873ce54d81c89876a21d80bf04287efdcd24554edca6b",
+  "samples_per_role": 150,
+  "automatic_inputs": "home only; ten Pass attempts at six-second intervals",
+  "manual_controller_probe": false,
+  "native_model_failure_observed": false,
+  "wire_capture_packets": 30624,
+  "wire_capture_drops": 0,
+  "wire_capture_write_errors": 0,
+  "wire_payload_checks": {
+    "host": {
+      "game_rx": 7643,
+      "engine_tx": 7643,
+      "engine_rx": 7665,
+      "game_tx": 7663,
+      "all_forwarded_game_payloads_identical": true,
+      "all_forwarded_engine_payloads_identical": true,
+      "engine_frames_without_game_send_during_startup": 2
+    },
+    "vpn": {
+      "game_rx": 2,
+      "engine_tx": 2,
+      "engine_rx": 4,
+      "game_tx": 2,
+      "all_forwarded_game_payloads_identical": true,
+      "all_forwarded_engine_payloads_identical": true,
+      "engine_frames_without_game_send_during_startup": 2
+    }
+  },
+  "bot_extra_pack_downloads": 0,
+  "bot_extra_packs_absent": 63,
+  "roles": {
+    "A": {
+      "match_constructed_ms": 36172,
+      "ball_positions": 17,
+      "peak_ball_speed_mm_s": 11599,
+      "final_ball_mm": [
+        -4347,
+        108,
+        7336
+      ],
+      "final_simulation_wait": {
+        "simulationWait": "2",
+        "simulationWaitReason": "10",
+        "simulationFailureLatched": "0",
+        "simulationTickGate": "0"
+      },
+      "note": "Late wait state retained; ball movement during the input test does not establish a complete uninterrupted match."
+    },
+    "B": {
+      "match_constructed_ms": 57261,
+      "ball_positions": 17,
+      "peak_ball_speed_mm_s": 11599,
+      "final_ball_mm": [
+        -4347,
+        108,
+        7336
+      ],
+      "final_simulation_wait": {
+        "simulationWait": "1",
+        "simulationWaitReason": "1",
+        "simulationFailureLatched": "1",
+        "simulationTickGate": "0"
+      },
+      "note": "Late wait state retained; ball movement during the input test does not establish a complete uninterrupted match."
+    }
+  },
+  "scope": "Hosted headless bot and rendered reference peer through production ferry and native backend with socket-pair TUN and owned TLS TURN fixture. Stock foreground game, physical Android VPN and the initial phone disconnect are not reproduced."
+}

@@ -60,6 +60,26 @@ use and phone-game kickoff require separate evidence.
 
 ## Verification
 
+### Initial pitch-screen stall diagnostics (2026-11-16)
+
+Release [`phone-engine-test-5418dfa`](https://github.com/EdenAlpha/Peerlink-Bot/releases/tag/phone-engine-test-5418dfa)
+(5.0.18) captures direct and VPN bot UDP payloads at all four ferry boundaries
+in the normal export, and reports the original simulation service's waiting
+reason and tick gate. It does not change the working STUN or routing policy.
+
+The user's first 5.0.17 attempt loaded the pitch but never moved the ball,
+then failed its match-data connection. Its underlying trigger is unresolved.
+The second attempt has a confirmed Android low-memory kill. The third export
+ends while the bot is alive; the user had backgrounded eFootball to export.
+Those findings must not be merged into a single claimed cause.
+
+The exact diagnostic APK passed CI and a two-engine control/capture test with
+automatic home-only Pass, no extra controller probe, 150 samples per role and
+30,624 recorded boundary events. Forwarded payloads were unchanged, with no
+capture drops or write errors. The bot downloaded no extra packs. This is not
+verification of the initial stock-game stall's repair or a complete match.
+See [retained observations and APK proof](tests/evidence/phone-match-start-20261116/README.md).
+
 ### Current local bot discovery repair (2026-11-16)
 
 Release [`phone-engine-test-a80521e`](https://github.com/EdenAlpha/Peerlink-Bot/releases/tag/phone-engine-test-a80521e)
