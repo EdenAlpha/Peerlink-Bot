@@ -74,9 +74,24 @@ bool install_graphics_guards() {
     static constexpr uint8_t branch[] = {0xd2,0xcf,0xd4,0x17};
     static constexpr uint8_t hud_wait[] = {0x00,0x02,0x00,0x36};
     static constexpr uint8_t nop[] = {0x1f,0x20,0x03,0xd5};
+    static constexpr uint8_t visual_cave_original[] = {
+        0x60,0xd8,0x0a,0x95,0xf3,0x03,0x00,0xaa,0xd2,0x00,0x00,0x94,0xe0,0x03,0x13,0xaa
+    };
+    static constexpr uint8_t visual_call_original[] = {0xe9,0x01,0x00,0x94};
+    static constexpr uint8_t visual_resource_load[] = {0x08,0x80,0x4c,0xf9};
+    static constexpr uint8_t visual_cave[] = {
+        0x08,0x80,0x4c,0xf9, // ldr x8, [x0, #0x1900]
+        0x48,0x00,0x00,0xb4, // cbz x8, return to the original caller
+        0x52,0xa6,0xc1,0x17, // b to the original visual-resource function
+        0xc0,0x03,0x5f,0xd6  // ret
+    };
+    static constexpr uint8_t visual_call[] = {0x95,0x5b,0x3e,0x94};
     if (memcmp(reinterpret_cast<void *>(engine + 0x4965a40), factory_original, sizeof(factory_original)) ||
         memcmp(reinterpret_cast<void *>(engine + 0x5431af8), original, sizeof(original)) ||
-        memcmp(reinterpret_cast<void *>(engine + 0x2fc27f4), hud_wait, sizeof(hud_wait))) return false;
+        memcmp(reinterpret_cast<void *>(engine + 0x2fc27f4), hud_wait, sizeof(hud_wait)) ||
+        memcmp(reinterpret_cast<void *>(engine + 0x4965a50), visual_cave_original, sizeof(visual_cave_original)) ||
+        memcmp(reinterpret_cast<void *>(engine + 0x39cebfc), visual_call_original, sizeof(visual_call_original)) ||
+        memcmp(reinterpret_cast<void *>(engine + 0x39cf3dc), visual_resource_load, sizeof(visual_resource_load))) return false;
     // The original factory has already returned. Its first four instructions
     // are now a trampoline: if the optional texture resource is missing, skip
     // only its graphics-dimension calls; otherwise execute the original load.
@@ -89,7 +104,25 @@ bool install_graphics_guards() {
     // Its callee checks that each HUD widget finished loading; a headless bot
     // has no HUD to load. Continue through the original actor's own event and
     // task updates; never modify the match, players or network verdict here.
-    if (set_code(0x2fc27f4, nop, sizeof(nop))) return true;
+    if (!set_code(0x2fc27f4, nop, sizeof(nop))) {
+        set_code(0x5431af8, original, sizeof(original));
+        set_code(0x4965a40, factory_original, sizeof(factory_original));
+        return false;
+    }
+    // This call loads a visual resource and updates color material values. A
+    // no-pack run crashed because its resource at x0+0x1900 was absent. Skip
+    // only this call in that case; a present resource takes the original path.
+    // The original factory already returned and its entry is the trampoline
+    // above, so its following four instructions are available as this cave.
+    if (!set_code(0x4965a50, visual_cave, sizeof(visual_cave))) {
+        set_code(0x2fc27f4, hud_wait, sizeof(hud_wait));
+        set_code(0x5431af8, original, sizeof(original));
+        set_code(0x4965a40, factory_original, sizeof(factory_original));
+        return false;
+    }
+    if (set_code(0x39cebfc, visual_call, sizeof(visual_call))) return true;
+    set_code(0x4965a50, visual_cave_original, sizeof(visual_cave_original));
+    set_code(0x2fc27f4, hud_wait, sizeof(hud_wait));
     set_code(0x5431af8, original, sizeof(original));
     set_code(0x4965a40, factory_original, sizeof(factory_original));
     return false;

@@ -29,5 +29,17 @@ int main() {
     assert(decide(v) == Action::Wait);
     v.requested_preview = true; v.current_nil = false;
     assert(decide(v) == Action::Wait);
+
+    VisualStartView start{true, true, 12, false, true, true, true, true, true};
+    assert(should_complete_visual_start(start));
+    start.intro_finished = false; assert(!should_complete_visual_start(start)); start.intro_finished = true;
+    start.intro_leaf_completed = false; assert(!should_complete_visual_start(start)); start.intro_leaf_completed = true;
+    start.match_phase = 13; assert(!should_complete_visual_start(start)); start.match_phase = 12;
+    start.match_gate_open = true; assert(!should_complete_visual_start(start)); start.match_gate_open = false;
+    start.original_ready = false; assert(!should_complete_visual_start(start)); start.original_ready = true;
+    start.hud_complete = false; assert(!should_complete_visual_start(start)); start.hud_complete = true;
+    start.visual_idle = false; assert(!should_complete_visual_start(start)); start.visual_idle = true;
+    start.event_manager_present = false; assert(!should_complete_visual_start(start)); start.event_manager_present = true;
+    start.settled = false; assert(!should_complete_visual_start(start));
     puts("Preview lifecycle gates passed: loading waits, idle retry is bounded, ready Continue requires the original menu state");
 }

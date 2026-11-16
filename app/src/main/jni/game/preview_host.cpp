@@ -22,10 +22,12 @@ Tick original = nullptr;
 std::atomic<int> active{0}, mode{0}, sent{0}, retry_count{0}, restored{1};
 std::atomic<int> demo_sent{0};
 std::atomic<int> demo_finished{0};
+std::atomic<int> visual_start_sent{0};
 std::atomic<int> probe_done{0}, request_tid{0}, callback_tid{0};
 std::atomic<int> last_flow{-1}, last_menu{-1}, last_requested{-1}, last_current{-1};
 std::atomic<unsigned> last_busy{0};
 std::atomic<uint64_t> idle_since{0}, started{0};
+std::atomic<uint64_t> visual_ready_since{0};
 
 uint64_t now_ms() {
     timespec value{}; clock_gettime(CLOCK_MONOTONIC, &value);
@@ -40,7 +42,7 @@ bool exact16(uptr object, const char *text) {
         if (data[i] != static_cast<unsigned char>(text[i])) return false;
     return true;
 }
-bool flow_leaf(uptr base, const char *name, unsigned &flow_state) {
+bool flow_leaf(uptr base, const char *name, unsigned &flow_state, bool *completed = nullptr) {
     uptr flow = *reinterpret_cast<uptr *>(base + 0xa53b6e8);
     uptr task = flow ? *reinterpret_cast<uptr *>(flow + 0x190) : 0;
     if (!task) return false;
@@ -51,10 +53,32 @@ bool flow_leaf(uptr base, const char *name, unsigned &flow_state) {
     auto *words = reinterpret_cast<const uptr *>(leaf);
     size_t count = leaf[0] & 1 ? words[1] : leaf[0] >> 1;
     const char *text = leaf[0] & 1 ? reinterpret_cast<const char *>(words[2]) : reinterpret_cast<const char *>(leaf + 1);
-    return count == strlen(name) && text && !memcmp(text, name, count);
+    bool matches = count == strlen(name) && text && !memcmp(text, name, count);
+    if (matches && completed) *completed = leaf[0x50] != 0;
+    return matches;
 }
 bool preview_leaf(uptr base, unsigned &flow_state) {
     return flow_leaf(base, "Match/Settings/MatchPreview", flow_state);
+}
+bool visual_start_ready(uptr base, bool settled) {
+    unsigned flow = 0;
+    bool completed = false;
+    bool intro = flow_leaf(base, "Match/Enter/MatchEnterDemoOnline", flow, &completed);
+    uptr match = *reinterpret_cast<uptr *>(base + 0xa533ec0);
+    uptr hud = match ? *reinterpret_cast<uptr *>(match + 0x16478) : 0;
+    uptr visual = *reinterpret_cast<uptr *>(base + 0xa59e1b0);
+    uptr events = *reinterpret_cast<uptr *>(base + 0xa5fb038);
+    return peerlink_preview::should_complete_visual_start({
+        demo_finished.load(std::memory_order_acquire) != 0,
+        intro && completed,
+        match ? static_cast<unsigned>(*reinterpret_cast<unsigned char *>(match + 0x138)) : 0U,
+        match && *reinterpret_cast<unsigned char *>(match + 0x140),
+        match && *reinterpret_cast<unsigned char *>(match + 0x149),
+        hud && *reinterpret_cast<unsigned char *>(hud + 0x4a1b),
+        visual && *reinterpret_cast<unsigned *>(visual + 0x59c) == 0,
+        events != 0,
+        settled
+    });
 }
 bool writable(bool yes) {
     long size = sysconf(_SC_PAGESIZE);
@@ -97,6 +121,23 @@ void menu_tick(uptr actor, float delta) {
     if (!lock.manager) { active.store(0, std::memory_order_release); return; }
     callback_tid.store(gettid(), std::memory_order_relaxed);
     unsigned flow_state = 0;
+    if (mode.load() == 4) {
+        uint64_t since = visual_ready_since.load(std::memory_order_acquire);
+        if (!visual_start_sent.load(std::memory_order_acquire) && since &&
+            now_ms() - since >= 3000 && visual_start_ready(base_address, true)) {
+            uptr events = reinterpret_cast<uptr (*)(unsigned)>(base_address + 0x822933c)(0);
+            if (events) {
+                // Same UI event emitted by the original visual-start task at
+                // 0x33c880c. The original match handler checks its own ready
+                // value; no player, transport or match state is assigned here.
+                reinterpret_cast<void (*)(uptr, unsigned, uptr)>(base_address + 0x8229738)
+                    (events, 0x105001d, 0);
+                visual_start_sent.store(1, std::memory_order_release);
+                dprintf(2, "HEADLESS_VISUAL_START_EVENT original_event=1 gameThreadTid=%d\n", gettid());
+            }
+        }
+        active.store(0, std::memory_order_release); return;
+    }
     if (mode.load() == 3) {
         bool demo = flow_leaf(base_address, "Match/Enter/MatchEnterDemoOnline", flow_state);
         if (demo && flow_state == 7) {
@@ -196,6 +237,21 @@ extern "C" long peerlink_demo_drive(uintptr_t base) {
     }
     return arm(base, 3);
 }
+extern "C" long peerlink_visual_start_drive(uintptr_t base) {
+    if (!base) return -1;
+    if (visual_start_sent.load(std::memory_order_acquire)) return 1;
+    if (!visual_start_ready(base, true)) {
+        visual_ready_since.store(0, std::memory_order_release);
+        return 0;
+    }
+    uint64_t since = visual_ready_since.load(std::memory_order_acquire);
+    if (!since) {
+        visual_ready_since.store(now_ms(), std::memory_order_release);
+        return 0;
+    }
+    if (now_ms() - since < 3000) return 0;
+    return arm(base, 4);
+}
 extern "C" long peerlink_preview_probe(uintptr_t base) {
     if (probe_done.load(std::memory_order_acquire)) return 1;
     return base ? arm(base, 1) : -1;
@@ -207,7 +263,7 @@ extern "C" void peerlink_preview_stop() {
     if (active.load() == 1) { restore(); active.store(0); }
 }
 extern "C" void peerlink_preview_diagnostics(char *text, size_t size) {
-    snprintf(text, size, "previewMenuState=%d previewMenuFlow=%d previewRequested=%d previewCurrentNil=%d previewManagerBusy=%u previewMenuRetries=%d previewContinueQueued=%d introProceedQueued=%d introFinished=%d previewCallbackActive=%d previewCallbackRestored=%d previewProbeDone=%d previewRequestTid=%d previewCallbackTid=%d",
+    snprintf(text, size, "previewMenuState=%d previewMenuFlow=%d previewRequested=%d previewCurrentNil=%d previewManagerBusy=%u previewMenuRetries=%d previewContinueQueued=%d introProceedQueued=%d introFinished=%d visualStartEventQueued=%d previewCallbackActive=%d previewCallbackRestored=%d previewProbeDone=%d previewRequestTid=%d previewCallbackTid=%d",
         last_menu.load(), last_flow.load(), last_requested.load(), last_current.load(), last_busy.load(),
-        retry_count.load(), sent.load(), demo_sent.load(), demo_finished.load(), active.load(), restored.load(), probe_done.load(), request_tid.load(), callback_tid.load());
+        retry_count.load(), sent.load(), demo_sent.load(), demo_finished.load(), visual_start_sent.load(), active.load(), restored.load(), probe_done.load(), request_tid.load(), callback_tid.load());
 }

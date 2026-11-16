@@ -22,4 +22,25 @@ inline Action decide(const View &v) {
         !v.retried && v.idle_settled) return Action::RetryMenu;
     return Action::Wait;
 }
+
+struct VisualStartView {
+    bool intro_finished;
+    bool intro_leaf_completed;
+    unsigned match_phase;
+    bool match_gate_open;
+    bool original_ready;
+    bool hud_complete;
+    bool visual_idle;
+    bool event_manager_present;
+    bool settled;
+};
+
+// The original visual-start task posts this event when its animation ends.
+// A headless match may only replace that visual completion after the game's
+// own setup and HUD task are complete and the match is still waiting for it.
+inline bool should_complete_visual_start(const VisualStartView &v) {
+    return v.intro_finished && v.intro_leaf_completed && v.match_phase == 12 &&
+        !v.match_gate_open && v.original_ready && v.hud_complete && v.visual_idle &&
+        v.event_manager_present && v.settled;
+}
 }

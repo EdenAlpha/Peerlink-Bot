@@ -128,5 +128,48 @@
     },
     "proofZipSha256": "fd8c85acaff4eb3fd5786034d1bd05a6c6df0228d4f5872871cdc654c11a5f80",
     "scope": "Android 15 ARM64 lab; no physical user phone was tested."
+  },
+  "appCandidateIntroCallbackDuringSetup": {
+    "commit": "8f35b6a5b96f7bdc506662f772809541f0ff0c49",
+    "apkSha256": "969b90bc93a5ecce950b12117ea8ddf373fbe75a3cd4e2182903c5623a5563ad",
+    "ciRun": 43809852566,
+    "extraPacksAbsentBeforeAppPreparation": 63,
+    "gameResourceDownloadsStarted": 0,
+    "bothConnectedAndRealServerContext": true,
+    "home": {
+      "samples": 300,
+      "outerStateAtEnd": 12,
+      "players": 0,
+      "introCallbackFinished": true,
+      "matchUiTaskComplete": true,
+      "kickoff": false,
+      "passAccepted": false
+    },
+    "awayWithExtraFiles": {
+      "samples": 300,
+      "outerStateAtEnd": 17,
+      "players": 22,
+      "kickoff": true
+    },
+    "nextReadinessSignalObservedOnHome": false,
+    "nextReadinessSignalObservedOnAway": true,
+    "readinessSignalCauseEstablished": false,
+    "proofZipSha256": "15ba72848a09d50c3729115e71b042e40e2313b1fbab968cc7e54559670a5ff9",
+    "scope": "Android 15 ARM64 lab; no physical user phone was tested."
+  },
+  "visualEventDebuggerProbe": {
+    "baseCommit": "8f35b6a5b96f7bdc506662f772809541f0ff0c49",
+    "debuggerAssisted": true,
+    "originalVisualEvent": "0x105001d",
+    "gameThread": true,
+    "homeOuterStateMaximum": 14,
+    "homePlayers": 0,
+    "homeKickoff": false,
+    "homePassAccepted": false,
+    "crashEngineOffset": "0x39cf3e8",
+    "crashFaultAddress": "0x18",
+    "possibleDebuggerEffectNotRuledOut": true,
+    "proofZipSha256": "0014791feffaf0b0afb9f8791896528ecdc4cbc0fc35bcd07b0891f0cb5a3acf",
+    "scope": "Android 15 ARM64 lab; no physical user phone was tested. The proof summary source label does not account for the debugger-assisted event injection."
   }
 }

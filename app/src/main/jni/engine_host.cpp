@@ -32,6 +32,7 @@ long peerlink_live_match_context_input(uintptr_t, const char *);
 long peerlink_original_preview_proceed_v271(uintptr_t);
 long peerlink_preview_drive(uintptr_t);
 long peerlink_demo_drive(uintptr_t);
+long peerlink_visual_start_drive(uintptr_t);
 long peerlink_preview_probe(uintptr_t);
 void peerlink_preview_stop();
 void peerlink_preview_diagnostics(char *, size_t);
@@ -555,6 +556,10 @@ JNIEXPORT jint JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeAdvanceMatc
         if (rhi && *reinterpret_cast<uintptr_t *>(rhi) == g_base + 0x93b6e98) {
             long demo = peerlink_demo_drive(g_base);
             if (demo < 0) { peerlink_preview_stop(); return -211; }
+            if (g_user_sync_complete && peerlink_null_client_rhi_ready(g_base)) {
+                long visual = peerlink_visual_start_drive(g_base);
+                if (visual < 0) { peerlink_preview_stop(); return -212; }
+            }
         }
     }
     // Explicit controller configuration for the test, permitted only by the
