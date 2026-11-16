@@ -220,8 +220,8 @@ object EngineBridge {
         check(stagedHash == EngineRuntime.ENGINE_SHA256) {
             "This bot test supports the verified eFootball 11.1.1 engine; no match-resource download was started"
         }
-        // Reuse verified local packs before the bounded native startup. Only
-        // the explicit missing-files action allows downloading the remainder.
+        // Reuse verified files already on this phone before native startup.
+        // Match resources are never downloaded by this preparation path.
         GameResourcePacks.prepare(context, allowResourceDownload)
         val up = prepareWithRetries(context, uid)
         log(if (up) "the engine is up for this session" else "the engine did NOT come up this session")

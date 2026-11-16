@@ -78,6 +78,21 @@ class GameResourcePacksTest {
         } finally { root.deleteRecursively() }
     }
 
+    @Test fun localOnlyPreparationKeepsAvailableFilesAndReportsEveryMissingName() {
+        val root = kotlin.io.path.createTempDirectory("resource-local-only").toFile()
+        try {
+            val missing = assertThrows(GameResourcePacks.MissingResources::class.java) {
+                GameResourcePacks.prepareLocalSet(root, packs, {}, { _, _ -> }, { pack ->
+                    if (pack == packs[0]) sequenceOf(contents.inputStream()) else emptySequence()
+                })
+            }
+            assertEquals(packs.drop(1).map { it.name }, missing.missingNames)
+            assertArrayEquals(contents, File(root, packs[0].name).readBytes())
+            assertEquals(listOf(packs[0].name), root.listFiles()!!.map { it.name })
+            assertTrue(missing.message!!.contains("No resource download started"))
+        } finally { root.deleteRecursively() }
+    }
+
     @Test fun changedLocalDataIsRejectedAndAnotherMatchingLocalCopyCanBeUsed() {
         val root = kotlin.io.path.createTempDirectory("resource-local-hash").toFile()
         try {

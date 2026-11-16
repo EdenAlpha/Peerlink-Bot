@@ -1111,18 +1111,15 @@ private fun PlayPeerLinkPage(
             }
             is RoomState.Ready -> RoomCodeCard(s.number, ctx)
             is RoomState.FilesNeeded -> DarkCard {
-                val megabytes = (s.missingBytes + 999_999) / 1_000_000
                 Text("Bot files needed", color = PL.ink, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.height(6.dp))
-                Text("${s.totalFiles - s.missingFiles}/${s.totalFiles} files ready on this phone. ${s.missingFiles} more files are needed. No extra game-file download has started.",
+                Text("PeerLink couldn't find or read ${s.missingFiles} match files. The game's main files are checked separately.",
                     color = PL.inkSoft, fontSize = 12.5.sp, lineHeight = 19.sp)
                 Spacer(Modifier.height(6.dp))
-                Text("Prime Mode can help read eFootball's downloaded files. Enable it in settings, then check again. Copies must match the tested 11.1.1 set.",
+                Text("PeerLink will use files already on this phone. Some eFootball files may be private to the game.",
                     color = PL.muted, fontSize = 12.sp, lineHeight = 18.sp)
                 Spacer(Modifier.height(10.dp))
                 GhostBtn("Check phone files again", Icons.Rounded.Refresh) { PlayRoomController.createRoom() }
-                Spacer(Modifier.height(8.dp))
-                GhostBtn("Download missing files · $megabytes MB", Icons.Rounded.Download) { PlayRoomController.createRoom(allowResourceDownload = true) }
             }
             is RoomState.Failed -> DarkCard {
                 Text("Couldn't open a room", color = PL.red, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)

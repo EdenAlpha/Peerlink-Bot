@@ -6,8 +6,6 @@ import com.peerlink.app.service.PeerBotService
 import java.io.File
 import java.io.FilterInputStream
 import java.io.InputStream
-import java.net.HttpURLConnection
-import java.net.URL
 import java.nio.file.Files
 
 /** Original downloaded match packs used by the retained 11.1.1 host.
@@ -15,13 +13,13 @@ import java.nio.file.Files
  */
 internal object GameResourcePacks {
     private const val MANIFEST = "game-host/match-resources-11.1.1.tsv"
-    private const val RELEASE = "https://github.com/EdenAlpha/Peerlink-Bot/releases/download/engine-resources-11.1.1/"
     data class Pack(val name: String, val bytes: Long, val sha256: String) {
         val fingerprint get() = GameFileIntegrity.Fingerprint(bytes, sha256)
     }
-    class MissingResources(val missingFiles: Int, val missingBytes: Long, val totalFiles: Int) :
-        IllegalStateException("${totalFiles - missingFiles}/$totalFiles bot match files available; " +
-            "$missingFiles still needed (${(missingBytes + 999_999) / 1_000_000} MB). No resource download started.")
+    class MissingResources(val missingFiles: Int, val missingBytes: Long, val totalFiles: Int,
+                           val missingNames: List<String> = emptyList()) :
+        IllegalStateException("${totalFiles - missingFiles}/$totalFiles bot match files found; " +
+            "$missingFiles could not be read. No resource download started.")
 
     fun parse(text: String): List<Pack> {
         val packs = text.lineSequence().filter { it.isNotBlank() && !it.startsWith("#") }.map { line ->
@@ -44,13 +42,22 @@ internal object GameResourcePacks {
     private fun directory(context: Context) = File(context.filesDir, "bot-game-11.1.1/project/PesMobile/Content/Paks")
 
     /** Run before the bounded engine startup IPC and before opening a room. */
+    @Suppress("UNUSED_PARAMETER")
     fun prepare(context: Context, allowDownload: Boolean = false) {
         val packs = manifest(context)
         val report: (String) -> Unit = { AppState.appendLog(it) }
         val local = GameResourceLocalCopies(context, packs.map { it.name }.toSet(), report)
-        prepareSet(directory(context), packs, allowDownload, report, { done, total ->
+        prepareLocalSet(directory(context), packs, report, { done, total ->
             PeerBotService.status("Preparing bot match files ${done * 100 / total}%")
-        }, local::open, ::download)
+        }, local::open)
+    }
+
+    /** Never start a resource download, even when a previous caller requested one. */
+    internal fun prepareLocalSet(directory: File, packs: List<Pack>, report: (String) -> Unit,
+                                 progress: (Long, Long) -> Unit, local: (Pack) -> Sequence<InputStream>) {
+        prepareSet(directory, packs, false, report, progress, local) {
+            error("Bot resource downloads are disabled")
+        }
     }
 
     internal fun prepareSet(directory: File, packs: List<Pack>, allowDownload: Boolean,
@@ -84,10 +91,11 @@ internal object GameResourcePacks {
         val remaining = missing.sumOf { it.bytes }
         report("[BOT-FILES] RESOURCE_DISCOVERY available=${packs.size - missing.size}/${packs.size} missing=${missing.size} missingBytes=$remaining networkAllowed=$allowDownload freshness=PINNED_TESTED_SET_NOT_LATEST_CATALOG")
         if (missing.isNotEmpty()) {
-            if (!allowDownload) throw MissingResources(missing.size, remaining, packs.size)
+            if (!allowDownload) throw MissingResources(missing.size, remaining, packs.size, missing.map { it.name })
             ensure(directory, missing, report, { done, _ -> progress(completed + done, total) }, remote)
         }
-        report("[BOT-FILES] RESOURCE_SET result=PASS files=${packs.size} bytes=$total source=verified_local_copies_or_selected_download")
+        report("[BOT-FILES] RESOURCE_SET result=PASS files=${packs.size} bytes=$total " +
+            "source=${if (allowDownload) "verified_local_copies_or_selected_download" else "verified_local_copies"}")
     }
 
     private fun bounded(input: InputStream, limit: Long) = object : FilterInputStream(input) {
@@ -166,20 +174,5 @@ internal object GameResourcePacks {
                 source.inputStream().use { GameFileIntegrity(report).replace(it, destination, "native/${source.name}", fingerprint) }
             }
         } finally { temporary.delete() }
-    }
-
-    private fun download(pack: Pack): InputStream {
-        val connection = URL(RELEASE + pack.name).openConnection() as HttpURLConnection
-        connection.connectTimeout = 30_000
-        connection.readTimeout = 120_000
-        connection.instanceFollowRedirects = true
-        try {
-            check(connection.responseCode == 200) { "Match file download failed: HTTP ${connection.responseCode} (${pack.name})" }
-            val length = connection.contentLengthLong
-            check(length == -1L || length == pack.bytes) { "Match file download has the wrong size (${pack.name})" }
-            return object : FilterInputStream(connection.inputStream) {
-                override fun close() { try { super.close() } finally { connection.disconnect() } }
-            }
-        } catch (error: Exception) { connection.disconnect(); throw error }
     }
 }
