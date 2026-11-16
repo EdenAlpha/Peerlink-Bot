@@ -37,6 +37,32 @@
     "originalRhiObjectUnchanged": true,
     "codeBytesUnchanged": true,
     "result": "Engine process calls System.exit(0) during startup; EngineHost.prepare fails before opening native channels",
-    "kickoffVerified": false
+    "kickoffVerified": false,
+    "nativeExitRequestOffset": "0x4264234",
+    "shaderLoaderOffset": "0x5b104ac",
+    "shaderLoaderCallerOffset": "0x5b10cec",
+    "originalError": "The global shader cache file is missing; application built to load cooked content",
+    "shaderSelection": "Caller loads feature level through GOT 0x99e50e0, then selects the shader platform through GOT 0x99e50e8"
+  },
+  "nullClientStartupExperiment": {
+    "factoryCallOffset": "0x496aa4c",
+    "originalFactory": "0x4967a84",
+    "originalNullFactory": "0x4965a40",
+    "cachedNullCommandMode": 0,
+    "actualNullDriverFlag": 1,
+    "originalAndroidFeatureLevel": 1,
+    "originalAndroidShaderPlatform": 24,
+    "originalAndroidShaderTable": [
+      49,
+      24,
+      49,
+      49
+    ],
+    "runtimeNullVtableOffset": "0x93b6e98",
+    "startupAndMetadataConnected": true,
+    "result": "300 observations per engine; headless side remained at Intro/MenuIntroTitleLicense, rendered peer waited at Online/Match/MatchProcessPreMenu",
+    "playersObserved": 0,
+    "kickoffVerified": false,
+    "source": "Retained complete pair summary and logs; harness success alone was not counted as kickoff"
   }
 }

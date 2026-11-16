@@ -1,0 +1,11 @@
+{
+  "files": 63,
+  "comparedOriginalBytes": 174990422,
+  "zeroHoleSamples": 441,
+  "allocatedBytes": 175120384,
+  "logicalBytes": 2184159958,
+  "archiveBytes": 167265722,
+  "corruptRangeRejected": true,
+  "failedExtractionOutputAbsent": true,
+  "archiveSha256": "0bf3319aa67c4a264e55c2ce65a9a795822f4e65dec2e1d1cf2a861ea9c99d48"
+}

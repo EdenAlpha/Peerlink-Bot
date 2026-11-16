@@ -1,0 +1,80 @@
+{
+  "engineSha256": "2cea0c85344d7d7f295aea1c2353621f02db78dbccd888a0a21a0508ac330659",
+  "originalExtraResourceBytes": 2184159958,
+  "retainedOriginalBytes": 174990422,
+  "graphics": "Original OpenGL ES 3.1; not NullDrv",
+  "roles": {
+    "A": {
+      "resourceSet": "sparse native aliases",
+      "samples": 300,
+      "playableSamples": 92,
+      "distinctBallPositions": 44,
+      "firstBallPosition": [
+        0,
+        108,
+        0
+      ],
+      "lastBallPosition": [
+        16001,
+        108,
+        457
+      ]
+    },
+    "B": {
+      "resourceSet": "complete original resources",
+      "samples": 300,
+      "playableSamples": 99,
+      "distinctBallPositions": 47,
+      "firstBallPosition": [
+        0,
+        108,
+        0
+      ],
+      "lastBallPosition": [
+        16001,
+        108,
+        457
+      ]
+    }
+  },
+  "homeAutomaticPass": {
+    "acceptedPresses": 10,
+    "acceptedReleases": 10,
+    "destination": "private_bot_engine",
+    "manualPassProbeEnabled": false
+  },
+  "readAudit": {
+    "assetReadEvents": 2406,
+    "operations": {
+      "pread64": 2406
+    },
+    "paths": {
+      "nativeAlias": 2406
+    },
+    "missingReadCount": 0,
+    "unknownOffsetReadCount": 0
+  },
+  "installationProof": {
+    "originalJniEntryReached": true,
+    "noAssetDescriptorsBeforeReplacement": true,
+    "rhiNotStarted": true,
+    "stockRendererFactory": true,
+    "keptBytes": 174990422,
+    "logicalBytes": 2184159958
+  },
+  "freshServerContext": {
+    "bothAuthenticated": true,
+    "serverSelectedBothParticipants": true,
+    "transport": "P2P",
+    "matchingGameId": true,
+    "dataSyncAccepted": true
+  },
+  "kickoffVerified": true,
+  "scope": [
+    "One controlled match with the same two owned-account squads as the source profile",
+    "Full source copies were used by Java preparation, then sparse native aliases were installed before the original JNI startup; no captured engine read used full source copies",
+    "Installed CPKs, native library and base APK assets are additional to the 175 MB seed",
+    "Phone installer, arbitrary squads and later match events have not been validated; released APK still uses complete resource integrity checks"
+  ],
+  "privateEvidenceZipSha256": "0a8ca9b425e5361f5602ae007d1857e776ab7fc661b07bfa2441159d4b873365"
+}
