@@ -378,6 +378,7 @@ class MainActivity : AppCompatActivity(), NsdDiscovery.NsdCallback {
                                     .getOrDefault("")
                                 val passCap = runCatching { PassthroughRecorder.snapshotForExport() }.getOrNull()
                                 val rawCap = runCatching { PeerLinkVpnService.snapshotRawCapture() }.getOrNull()
+                                val botWire = runCatching { com.peerlink.app.bot.BotWireRecorder.snapshot(this@MainActivity) }.getOrNull()
                                 val shots = com.peerlink.app.service.ScoreCaptureDump.exportedFiles()
 
                                 // Bundle EVERYTHING into a single zip file.
@@ -398,6 +399,9 @@ class MainActivity : AppCompatActivity(), NsdDiscovery.NsdCallback {
                                 }
                                 if (rawCap?.file != null) {
                                     entries.add(ZipEntryData(name = "tunnel_capture.pcapng", file = rawCap.file))
+                                }
+                                if (botWire != null) {
+                                    entries.add(ZipEntryData(name = "bot_transport.csv", file = botWire))
                                 }
                                 for (shot in shots) {
                                     entries.add(ZipEntryData(name = "score_shots/${shot.name}", file = shot))
@@ -435,6 +439,9 @@ class MainActivity : AppCompatActivity(), NsdDiscovery.NsdCallback {
                                             }
                                             if (passCap != null) {
                                                 appendLine("- passthrough_capture.csv : full-byte internet-side (non-game) traffic with event markers")
+                                            }
+                                            if (botWire != null) {
+                                                appendLine("- bot_transport.csv : unchanged UDP payloads at game RX, engine TX, engine RX and game TX on direct and VPN routes; capture integrity in final comment")
                                             }
                                             if (rawCap?.file != null) {
                                                 appendLine("- tunnel_capture.pcapng : full-byte tunneled game traffic (PCAPNG, out+in; packets=${rawCap.stats.packets} bytes=${rawCap.stats.bytes} queueDrops=${rawCap.stats.queueDrops} oversized=${rawCap.stats.oversizedDrops} writeErrors=${rawCap.stats.writeErrors})")

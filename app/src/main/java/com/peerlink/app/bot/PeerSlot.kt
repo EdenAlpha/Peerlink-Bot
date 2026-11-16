@@ -114,6 +114,10 @@ object PeerSlot {
         if (count == 1L || count % 1000 == 0L)
             AppState.appendLog("[BOT-FLOW] DROP reason=$reason count=$count observedAtMs=${SystemClock.elapsedRealtime()}")
     }
+    private fun recordFlow(point: Point, reflexive: Boolean, payload: ByteArray) {
+        flowTrace.record(point, reflexive, payload.size)
+        BotWireRecorder.record(point, reflexive, payload)
+    }
 
     /** Reserve before the gate advertises a port; do not collide with the game's own UDP socket. */
     @Synchronized fun reserveEndpoint(): Int {
@@ -263,7 +267,7 @@ object PeerSlot {
                             "declaredBot=${BotMode.hostIp} listener=${s.localPort}")
                     continue
                 }
-                flowTrace.record(Point.GAME_RX, false, data.size)
+                recordFlow(Point.GAME_RX, false, data)
                 directGamePeer = pkt.socketAddress as? InetSocketAddress
                 if (engineAttached) { sendToEngine(data, false); noteGameFrame(data) }
                 else noteDrop("game_to_engine_not_attached")
@@ -306,7 +310,7 @@ object PeerSlot {
             gameIp = inner.srcIp
             gamePort = inner.srcPort
             gameTargetPort = inner.dstPort
-            flowTrace.record(Point.GAME_RX, true, inner.udpPayload.size)
+            recordFlow(Point.GAME_RX, true, inner.udpPayload)
 
             // The ENGINE plays the opponent. Every game frame goes to its
             // socket unchanged; nothing is answered from here. If the engine
@@ -419,7 +423,7 @@ object PeerSlot {
         if (a4 != null && s4 != null) {
             return runCatching {
                 s4.send(DatagramPacket(payload, payload.size, a4))
-                flowTrace.record(Point.ENGINE_TX, reflexive, payload.size)
+                recordFlow(Point.ENGINE_TX, reflexive, payload)
                 true
             }.onFailure { noteDrop("engine_send_${it.javaClass.simpleName}") }.getOrDefault(false)
         }
@@ -428,7 +432,7 @@ object PeerSlot {
         if (a6 != null && s6 != null) {
             return runCatching {
                 s6.send(DatagramPacket(payload, payload.size, a6))
-                flowTrace.record(Point.ENGINE_TX, reflexive, payload.size)
+                recordFlow(Point.ENGINE_TX, reflexive, payload)
                 true
             }.onFailure { noteDrop("engine_send_${it.javaClass.simpleName}") }.getOrDefault(false)
         }
@@ -481,7 +485,7 @@ object PeerSlot {
     }
 
     private fun forwardEngineFrame(payload: ByteArray, reflexive: Boolean) {
-        flowTrace.record(Point.ENGINE_RX, reflexive, payload.size)
+        recordFlow(Point.ENGINE_RX, reflexive, payload)
         if (!engineHeard) {
             engineHeard = true
             AppState.appendLog("[BOT-SLOT  ] the engine's own bytes are flowing " +
@@ -495,7 +499,7 @@ object PeerSlot {
             if (direct == null || sender == null) noteDrop("engine_to_game_no_host_route")
             else runCatching {
                 sender.send(DatagramPacket(payload, payload.size, direct))
-                flowTrace.record(Point.GAME_TX, false, payload.size)
+                recordFlow(Point.GAME_TX, false, payload)
             }.onFailure { noteDrop("game_host_send_${it.javaClass.simpleName}") }
             return
         }
@@ -515,7 +519,7 @@ object PeerSlot {
                     InetSocketAddress(LOOPBACK_PEER_IP, BACKEND_PORT)
                 )
             )
-            flowTrace.record(Point.GAME_TX, true, payload.size)
+            recordFlow(Point.GAME_TX, true, payload)
         }.onFailure { noteDrop("game_vpn_send_${it.javaClass.simpleName}") }
     }
 

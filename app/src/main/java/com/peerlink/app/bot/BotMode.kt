@@ -94,6 +94,7 @@ object BotMode {
     /** Begin a bot-mode session: fixed pair + host capture + marker + beats. */
     fun ensureStarted(ctx: Context, uid: Long) {
         sessionContext = ctx.applicationContext
+        BotWireRecorder.start(ctx.applicationContext)
         prepareEndpoint(ctx)
         active = true
         ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
@@ -114,6 +115,7 @@ object BotMode {
     fun restoreIfActive(ctx: Context) {
         val p = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         if (!p.getBoolean("active", false)) return
+        BotWireRecorder.start(ctx.applicationContext)
         ensurePair()
         active = true
         val uid = p.getLong("uid", 0L)
@@ -170,6 +172,7 @@ object BotMode {
      * service can only report a mapping for an address it can see.
      */
     fun stop() {
+        BotWireRecorder.stop()
         keepalive?.stop()
         keepalive = null
         active = false

@@ -398,6 +398,19 @@ JNIEXPORT jstring JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeLoadingD
     char networking[1536];
     peerlink_network_startup_diagnostics(g_client, networking, sizeof(networking));
     text += " "; text += networking;
+    // The pitch/core can exist while the original match service still waits.
+    // Query its own predicate (701289c -> 7012768), not an inferred loading
+    // timeout. This getter and the scalar reads never open the simulation gate.
+    uintptr_t simulation = *reinterpret_cast<uintptr_t *>(g_base + 0x9a6a020);
+    if (simulation && *reinterpret_cast<uintptr_t *>(simulation) == g_base + 0x98ae9e0) {
+        uintptr_t inner = *reinterpret_cast<uintptr_t *>(simulation + 8);
+        uint32_t wait_reason = 0;
+        uint32_t waiting = entry<uint32_t (*)(uintptr_t, uint32_t *)>(0x701289c)(simulation, &wait_reason);
+        text += " simulationWait=" + std::to_string(waiting) +
+            " simulationWaitReason=" + std::to_string(wait_reason) +
+            " simulationFailureLatched=" + std::to_string(inner ? *reinterpret_cast<unsigned char *>(inner + 0x12) : -1) +
+            " simulationTickGate=" + std::to_string(*reinterpret_cast<unsigned char *>(g_base + 0xa541870));
+    } else text += " simulationWait=unavailable";
     uintptr_t user_sync = attached_task(lock.manager, g_user_sync_task, g_base + 0x990d9c8);
     if (user_sync) text += " userDataSyncState=" + std::to_string(*reinterpret_cast<uint32_t *>(user_sync + 0x70));
     uintptr_t root = entry<uintptr_t (*)()>(0x7a87db8)();

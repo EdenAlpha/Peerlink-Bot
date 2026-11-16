@@ -34,6 +34,7 @@ class BotEngineTurnPairPhoneTest {
         val input = File(root, "turn.dto").readBytes()
         val mailbox = DatagramSocket(InetSocketAddress("127.0.0.1", if (role == "A") 39205 else 39206))
             .apply { soTimeout = 25 }
+        if (role == "A") BotWireRecorder.start(context)
         val ferry = if (role == "A") ProductionPairFerry(uid, peer) else null
         try {
             if (args.getString("verifyNoExtraFiles") == "true") {
@@ -173,7 +174,11 @@ class BotEngineTurnPairPhoneTest {
                 assertTrue("Production match setup rejected the private fixture",
                     EngineHost.setupMatch(peer, gameId, sid, squad))
                 val manualPassProbe = args.getString("manualPassProbe") == "true"
-                assertTrue(EngineHost.startInputTest(true, automatic = !manualPassProbe))
+                val verifyAutomaticPass = args.getString("verifyAutomaticPass") == "true"
+                require(!verifyAutomaticPass || !manualPassProbe)
+                // Exercise the production controller path without a test-only
+                // controller enumeration or any inputs from the away peer.
+                assertTrue(EngineHost.startInputTest(true, automatic = !manualPassProbe && role == "A"))
                 var synchronizedBeforePrematch = false
                 var passAccepted = false
                 var playableSamples = 0
@@ -189,12 +194,16 @@ class BotEngineTurnPairPhoneTest {
                 var continueObserved = false
                 var previewLeft = false
                 var kickoffObserved = false
+                var ballMotionObserved = false
+                var simulationGateObserved = false
                 repeat(holdSeconds) {
                     Thread.sleep(1000)
                     val loading = EngineHost.snapshot()
                     if (loading.matchConstructed && loading.ballOnPitch) playableSamples++
                     Log.i("PeerlinkTurnTest", "MATCH_LOADING_PROBE_$role state=${loading.values.contentToString()}")
                     val details = EngineHost.loadingDiagnostics()
+                    if (loading.canTestPass && loading.ballSpeedMmPerSecond > 0) ballMotionObserved = true
+                    if (details.contains("simulationWait=0 ") && details.contains("simulationTickGate=1")) simulationGateObserved = true
                     Log.i("PeerlinkTurnTest", "MATCH_LOADING_DETAILS_$role $details")
                     val elapsed = android.os.SystemClock.elapsedRealtime() - loadingStartedAt
                     if (details.contains("leaf=Match/Settings/MatchPreview") && previewStartedAt == 0L)
@@ -233,6 +242,20 @@ class BotEngineTurnPairPhoneTest {
                     assertTrue("The original engine did not construct a playable match", playableSamples > 0)
                     if (role == "A") assertTrue("No Pass reached the original private engine", passAccepted)
                 }
+                if (verifyAutomaticPass) {
+                    assertTrue("A loaded pitch never progressed to ball movement", ballMotionObserved)
+                    assertTrue("The original simulation never released its wait gate", simulationGateObserved)
+                    val inputSent = AppState.getLogs().contains("BOT_INPUT key=96 action=down nativeAccepted=true")
+                    assertEquals("Only the home bot may receive automatic test inputs", role == "A", inputSent)
+                    Log.i("PeerlinkTurnTest", "AUTOMATIC_PASS_VERIFIED_$role ballMotion=true originalSimulationGate=true inputsSent=$inputSent manualControllerProbe=false")
+                    if (role == "A") {
+                        val wire = requireNotNull(BotWireRecorder.snapshot(context)).readText()
+                        for (point in PacketFlowTrace.Point.entries) assertTrue("Missing ferry boundary $point", wire.contains(",${point.name},"))
+                        assertTrue("Capture lost payloads", wire.contains("queueOrCapDrops=0 writeErrors=0 capped=false"))
+                        assertTrue("Capture snapshot did not finish flushing", wire.contains("flushCompleted=true"))
+                        Log.i("PeerlinkTurnTest", "BOT_WIRE_CAPTURE_VERIFIED allBoundaries=true complete=true")
+                    }
+                }
                 Log.i("PeerlinkTurnTest", "ORIGINAL_USER_SYNC_${role}_COMPLETED_BEFORE_PREMATCH")
             }
             if (args.getString("diagnosticPeerStop") == "true" && role == "A") {
@@ -256,6 +279,7 @@ class BotEngineTurnPairPhoneTest {
             EngineHost.stop("configured_pair_test_finished")
             mailbox.close()
             ferry?.close()
+            if (role == "A") BotWireRecorder.stop()
         }
     }
 }
