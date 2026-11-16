@@ -1,0 +1,128 @@
+{
+  "source_commit": "886038499792d7a9c29035fb262a188901212f10",
+  "ci_run": 43961452310,
+  "artifact_id": 14274007370,
+  "apk_sha256": "391516c150e5edb338e15c65c67da1ac5140d03ad1c1900047f70eb8aed19edf",
+  "apk_bytes": 36167267,
+  "evidence_sha256": "ae2ff13c9b22dddfcd140e24eaa0b2f535f98491409de605006b2102ec57027b",
+  "roles": {
+    "A": {
+      "harness_passed": true,
+      "samples": 150,
+      "constructed_samples": 113,
+      "distinct_ball_positions": 22,
+      "peak_ball_speed_mm_s": 11959,
+      "final_ball_mm": [
+        10592,
+        108,
+        5842
+      ],
+      "automatic_pass_verified": true,
+      "native_controller_verified_samples": 140,
+      "maximum_command_frame": 1824,
+      "gate_open_samples": 65,
+      "command_frames_at_samples": {
+        "50": 0,
+        "75": 415,
+        "100": 1091,
+        "125": 1768,
+        "130": 1824,
+        "140": 1824,
+        "150": 1824
+      },
+      "first_failure_latch_sample": null,
+      "final_native_wait": {
+        "simulationWait": "2",
+        "simulationWaitReason": "10",
+        "simulationFailureLatched": "0",
+        "simulationTickGate": "0",
+        "commandFrame": "1824",
+        "commandMissingMask": "2",
+        "commandAheadMask": "0",
+        "commandStopPending": "0",
+        "commandStopped": "0",
+        "stopRequests": "0",
+        "stopOutgoing": "0",
+        "stopInput": "0"
+      }
+    },
+    "B": {
+      "harness_passed": true,
+      "samples": 150,
+      "constructed_samples": 92,
+      "distinct_ball_positions": 22,
+      "peak_ball_speed_mm_s": 12597,
+      "final_ball_mm": [
+        10592,
+        108,
+        5842
+      ],
+      "automatic_pass_verified": true,
+      "native_controller_verified_samples": 136,
+      "maximum_command_frame": 1821,
+      "gate_open_samples": 66,
+      "command_frames_at_samples": {
+        "50": 0,
+        "75": 416,
+        "100": 1094,
+        "125": 1773,
+        "130": 1821,
+        "140": 1821,
+        "150": 1821
+      },
+      "first_failure_latch_sample": 127,
+      "final_native_wait": {
+        "simulationWait": "1",
+        "simulationWaitReason": "1",
+        "simulationFailureLatched": "1",
+        "simulationTickGate": "0",
+        "commandFrame": "1821",
+        "commandMissingMask": "0",
+        "commandAheadMask": "0",
+        "commandStopPending": "0",
+        "commandStopped": "0",
+        "stopRequests": "0",
+        "stopOutgoing": "0",
+        "stopInput": "0"
+      }
+    }
+  },
+  "automatic_inputs": "home only; no manual controller probe",
+  "native_stop_events": 0,
+  "native_model_failure_observed": false,
+  "wire_capture_packets": 25880,
+  "wire_capture_drops": 0,
+  "wire_capture_write_errors": 0,
+  "wire_payload_checks": {
+    "host": {
+      "game_rx": 6461,
+      "engine_tx": 6456,
+      "engine_rx": 6475,
+      "game_tx": 6475,
+      "all_forwarded_game_payloads_identical": true,
+      "all_forwarded_engine_payloads_identical": true,
+      "game_rx_without_engine_tx_before_first_engine_tx": 5,
+      "engine_rx_without_game_tx": 0
+    },
+    "vpn": {
+      "game_rx": 7,
+      "engine_tx": 2,
+      "engine_rx": 2,
+      "game_tx": 2,
+      "all_forwarded_game_payloads_identical": true,
+      "all_forwarded_engine_payloads_identical": true,
+      "game_rx_without_engine_tx_before_first_engine_tx": 5,
+      "engine_rx_without_game_tx": 0
+    }
+  },
+  "bot_extra_pack_downloads": 0,
+  "bot_extra_packs_absent": 63,
+  "known_late_wait": "After sample127, away original simulation failure latch is1 and command frame stops at1821; home waits for input at1824. No command-stop event or model/channel failure is observed. This is not a complete uninterrupted match proof.",
+  "scope": "Hosted headless bot and rendered reference peer using production ferry/native backend, socket-pair TUN and owned TLS TURN. This verifies the diagnostic APK and match inputs in that lab; it does not reproduce or fix the stock physical-phone game disconnect.",
+  "release": {
+    "tag": "phone-engine-test-8860384",
+    "publish_run": 43963979127,
+    "asset_id": 756578103,
+    "digest_matches_installed_tested_apk": true
+  }
+}

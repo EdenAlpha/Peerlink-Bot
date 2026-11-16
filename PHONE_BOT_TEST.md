@@ -1,5 +1,13 @@
 # PeerLink phone bot test
 
+Latest diagnostic release: [5.0.19 / original match-stop paths](https://github.com/EdenAlpha/Peerlink-Bot/releases/tag/phone-engine-test-8860384).
+Its exact APK passed lab kickoff and automatic home-only Pass, with both native
+stop observers verified. A later simulation stall remains recorded; the stock
+phone game's initial stop is still unresolved. See
+[`tests/evidence/phone-match-stop-20261116/`](tests/evidence/phone-match-stop-20261116/)
+for the retained validation and limits. This build adds stop-path evidence;
+it is not a confirmed fix for the phone disconnect.
+
 This is an experimental integration branch, `feat/phone-match-test`. The test
 package is `com.peerlink.app.enginetest`, displayed as **PeerLink Test**. It can
 be installed beside the existing PeerLink app. Only one of their VPNs can run
