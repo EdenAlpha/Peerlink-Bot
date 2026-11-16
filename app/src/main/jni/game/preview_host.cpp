@@ -11,6 +11,7 @@
 #include <sys/mman.h>
 
 extern "C" long peerlink_original_preview_proceed_v271(uintptr_t);
+extern "C" long peerlink_original_preview_finish(uintptr_t);
 extern "C" long peerlink_original_demo_proceed(uintptr_t);
 extern "C" long peerlink_original_demo_finish(uintptr_t);
 extern "C" bool peerlink_null_client_rhi_ready(uintptr_t);
@@ -31,6 +32,7 @@ std::atomic<uint64_t> idle_since{0}, started{0};
 std::atomic<uint64_t> visual_ready_since{0};
 std::atomic<uint64_t> graphics_wait_since{0};
 std::atomic<int> inputs_synchronized{0}, last_headless_ready{0}, headless_continue{0}, proceed_result{0};
+std::atomic<int> preview_finished{0}, preview_finish_result{0};
 
 bool headless_preview_inputs_ready(uptr base) {
     if (!inputs_synchronized.load(std::memory_order_acquire) || !peerlink_null_client_rhi_ready(base)) return false;
@@ -135,6 +137,14 @@ void menu_tick(uptr actor, float delta) {
     if (!lock.manager) { active.store(0, std::memory_order_release); return; }
     callback_tid.store(gettid(), std::memory_order_relaxed);
     unsigned flow_state = 0;
+    if (mode.load() == 5) {
+        if (headless_continue.load() && headless_preview_inputs_ready(base_address)) {
+            const long result = peerlink_original_preview_finish(base_address);
+            preview_finish_result.store(static_cast<int>(result));
+            if (result == 2) preview_finished.store(1, std::memory_order_release);
+        }
+        active.store(0, std::memory_order_release); return;
+    }
     if (mode.load() == 4) {
         uint64_t since = visual_ready_since.load(std::memory_order_acquire);
         if (!visual_start_sent.load(std::memory_order_acquire) && since &&
@@ -217,6 +227,11 @@ void menu_tick(uptr actor, float delta) {
             const bool headless = action == peerlink_preview::Action::ContinueHeadless;
             headless_continue.store(headless ? 1 : 0, std::memory_order_release);
             sent.store(1, std::memory_order_release);
+            if (headless) {
+                const long finished = peerlink_original_preview_finish(base_address);
+                preview_finish_result.store(static_cast<int>(finished));
+                if (finished == 2) preview_finished.store(1, std::memory_order_release);
+            }
             dprintf(2, "PREVIEW_CONTINUE_QUEUED menuState=%u flowState=7 headless=%d gameThreadTid=%d\n", state, headless, gettid());
         }
     }
@@ -244,7 +259,10 @@ int arm(uptr base, int requested_mode, bool user_data_synchronized = false) {
 }
 extern "C" long peerlink_preview_drive(uintptr_t base, bool user_data_synchronized) {
     if (!base) return -1;
-    if (sent.load(std::memory_order_acquire)) return 1;
+    if (sent.load(std::memory_order_acquire)) {
+        if (!headless_continue.load(std::memory_order_acquire) || preview_finished.load(std::memory_order_acquire)) return 1;
+        return arm(base, 5, user_data_synchronized);
+    }
     unsigned flow = 0;
     if (!preview_leaf(base, flow)) return 0;
     if (!started.load()) started.store(now_ms());
@@ -290,8 +308,8 @@ extern "C" void peerlink_preview_stop() {
     if (active.load() == 1) { restore(); active.store(0); }
 }
 extern "C" void peerlink_preview_diagnostics(char *text, size_t size) {
-    snprintf(text, size, "previewMenuState=%d previewMenuFlow=%d previewRequested=%d previewCurrentNil=%d previewManagerBusy=%u previewMenuRetries=%d previewContinueQueued=%d headlessPreviewInputsReady=%d headlessPreviewContinueQueued=%d previewProceedResult=%d introProceedQueued=%d introFinished=%d visualStartEventQueued=%d previewCallbackActive=%d previewCallbackRestored=%d previewProbeDone=%d previewRequestTid=%d previewCallbackTid=%d",
+    snprintf(text, size, "previewMenuState=%d previewMenuFlow=%d previewRequested=%d previewCurrentNil=%d previewManagerBusy=%u previewMenuRetries=%d previewContinueQueued=%d headlessPreviewInputsReady=%d headlessPreviewContinueQueued=%d previewProceedResult=%d headlessPreviewFinished=%d previewFinishResult=%d introProceedQueued=%d introFinished=%d visualStartEventQueued=%d previewCallbackActive=%d previewCallbackRestored=%d previewProbeDone=%d previewRequestTid=%d previewCallbackTid=%d",
         last_menu.load(), last_flow.load(), last_requested.load(), last_current.load(), last_busy.load(),
-        retry_count.load(), sent.load(), last_headless_ready.load(), headless_continue.load(), proceed_result.load(),
+        retry_count.load(), sent.load(), last_headless_ready.load(), headless_continue.load(), proceed_result.load(), preview_finished.load(), preview_finish_result.load(),
         demo_sent.load(), demo_finished.load(), visual_start_sent.load(), active.load(), restored.load(), probe_done.load(), request_tid.load(), callback_tid.load());
 }

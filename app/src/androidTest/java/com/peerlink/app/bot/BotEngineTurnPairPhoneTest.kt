@@ -158,6 +158,7 @@ class BotEngineTurnPairPhoneTest {
                 val loadingStartedAt = android.os.SystemClock.elapsedRealtime()
                 var previewStartedAt = 0L
                 var continueObserved = false
+                var previewLeft = false
                 var kickoffObserved = false
                 repeat(holdSeconds) {
                     Thread.sleep(1000)
@@ -170,9 +171,10 @@ class BotEngineTurnPairPhoneTest {
                     if (details.contains("leaf=Match/Settings/MatchPreview") && previewStartedAt == 0L)
                         previewStartedAt = android.os.SystemClock.elapsedRealtime()
                     if (details.contains("previewContinueQueued=1")) continueObserved = true
+                    if (previewStartedAt != 0L && !details.contains("leaf=Match/Settings/MatchPreview")) previewLeft = true
                     if (promptContinue && previewStartedAt != 0L &&
                         android.os.SystemClock.elapsedRealtime() - previewStartedAt >= 15_000L)
-                        assertTrue("The bot is still relying on the preview countdown: $details", continueObserved)
+                        assertTrue("The bot is still relying on the preview countdown: $details", continueObserved && previewLeft)
                     if (loading.canTestPass && !kickoffObserved) {
                         kickoffObserved = true
                         Log.i("PeerlinkTurnTest", "KICKOFF_REACHED_$role elapsedMs=$elapsed")

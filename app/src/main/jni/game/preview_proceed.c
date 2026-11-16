@@ -28,6 +28,36 @@ long peerlink_original_preview_proceed_v271(uptr base){
  return original_proceed(base,"Match/Settings/MatchPreview");
 }
 __attribute__((visibility("default")))
+long peerlink_original_preview_finish(uptr base){
+ if(!base)return -1;
+ uptr flow=*(uptr*)(base+0xa53b6e8),task=flow?*(uptr*)(flow+0x190):0;
+ if(!flow||!task||task!=*(uptr*)(base+0xa53b780))return 0;
+ unsigned state=*(unsigned*)(flow+0x120);
+ if(state!=0&&state!=7&&state!=8)return 0;
+ uptr first=*(uptr*)(task+0x70),end=*(uptr*)(task+0x78);
+ if(!first||end<first+0xe0||(end-first)%0xe0||end-first>0x1c00)return 0;
+ uptr leaf=end-0xe0;
+ if(strcmp(value((unsigned char*)leaf),"Match/Settings/MatchPreview"))return 0;
+ if(state==0){
+  if(!*(unsigned char*)(leaf+0x50))return 0;
+  uptr root=((uptr(*)(void))(base+0x7a87db8))(),info=root?*(uptr*)(root+0x20):0;
+  uptr context=info?((uptr(*)(uptr))(base+0x7a58998))(info):0;
+  if(!context||*(unsigned*)(context+0x2c)!=0)return 0;
+  // This is the next original HOME flow observed after the preview in the
+  // working match. Its own tasks finalize settings and synchronize readiness.
+  // Request it through the same routing API used to enter the pre-match flow.
+  ((void(*)(uptr,const char*))(base+0x6aa70a8))(flow+0x118,"Online/Match/MatchProcessMatchSettingsEnd");
+  return 2;
+ }
+ if(!(*(unsigned char*)(flow+0x170)&1))return 0;
+ // The same original scene/transition callbacks used for the headless
+ // introduction. The caller has verified real two-user synchronization,
+ // the Null driver, the exact preview wait and a queued Continue input.
+ if(!*(unsigned char*)(leaf+0x50))((void(*)(uptr))(base+0x6aa9184))(leaf);
+ ((void(*)(uptr,uptr))(base+0x6aa6ec0))(flow+0x118,leaf);
+ return (*(uptr*)(flow+0x170)&4)?1:0;
+}
+__attribute__((visibility("default")))
 long peerlink_original_demo_proceed(uptr base){
  // The game's own MatchEnterDemoOnline flow maps "proceed" to MatchIdle.
  return original_proceed(base,"Match/Enter/MatchEnterDemoOnline");
