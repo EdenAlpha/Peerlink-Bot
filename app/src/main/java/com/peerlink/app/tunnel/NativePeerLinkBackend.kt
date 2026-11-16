@@ -132,6 +132,14 @@ class NativePeerLinkBackend(
         return@read nativeRebindPeerSocket(handle)
     }
 
+    /** A new bot room can reserve a new local listener while this VPN stays up. */
+    fun retargetLocalPeer(port: Int): Boolean = handleLock.read {
+        require(port in 1..65535)
+        val handle = nativeHandle
+        if (handle == 0L || stopping) return@read false
+        return@read nativeRetargetLocalPeer(handle, port)
+    }
+
     /**
      * Kernel thread IDs (gettid) of the latency-critical native loops — the TUN
      * reader, peer RX, peer TX and TUN-inject threads. Android gives these
@@ -226,6 +234,7 @@ class NativePeerLinkBackend(
     private external fun nativeDumpUdpTrace(handle: Long): String
     private external fun nativeFlushRawCapture(handle: Long): LongArray
     private external fun nativeRebindPeerSocket(handle: Long): Boolean
+    private external fun nativeRetargetLocalPeer(handle: Long, port: Int): Boolean
     private external fun nativeGetHotThreadTids(handle: Long): IntArray
     private external fun nativeVerifyPeerPath(handle: Long, timeoutMs: Int): Boolean
 

@@ -669,12 +669,14 @@ class PeerLinkVpnService : VpnService() {
      *   DOWN = the game's punches die between the TUN and the slot, and
      *          [NATIVE-STAT]/[NATIVE/TX] in the same log name the cause.
      */
-    private fun verifyBotPunchLoop() {
+    private fun verifyBotPunchLoop(port: Int) {
         val backend = nativeBackend ?: return
         thread(name = "bot-punch-verify") {
-            val rebindOk = backend.rebindPeerSocket()
-            AppState.appendLog("[VPN-UNDER ] Bot peer socket re-bound: " +
+            if (!PeerSlot.ownsListener(port)) return@thread
+            val rebindOk = backend.retargetLocalPeer(port)
+            AppState.appendLog("[VPN-UNDER ] Bot peer destination=127.0.0.1:$port updated: " +
                 (if (rebindOk) "ok" else "FAILED"))
+            if (!rebindOk || !PeerSlot.ownsListener(port)) return@thread
             val up = backend.verifyPeerPath(3_000)
             AppState.appendLog("[VPN-UNDER ] punch loop verify: " +
                 (if (up) "UP -- diverted frames reach the slot and answers come back"
@@ -831,7 +833,7 @@ class PeerLinkVpnService : VpnService() {
             // on PeerSlot.onArmed. Without this the backend keeps sending
             // diverted game punches into a poisoned socket and every frame
             // dies silently (Tunneled=0; the 04:37 2026-10-16 run).
-            PeerSlot.onArmed = { verifyBotPunchLoop() }
+            PeerSlot.onArmed = { port -> verifyBotPunchLoop(port) }
 
             AppState.appendLog("[VPN-UNDER ] Bot mode: the peer slot is local -- no peer-link probe")
 

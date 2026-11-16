@@ -418,6 +418,9 @@ class MainActivity : AppCompatActivity(), NsdDiscovery.NsdCallback {
                                         name = "manifest.txt",
                                         text = buildString {
                                             appendLine("PeerLink match export")
+                                            appendLine("App: ${com.peerlink.app.BuildConfig.VERSION_NAME} " +
+                                                "(${com.peerlink.app.BuildConfig.VERSION_CODE})")
+                                            appendLine("Source: ${com.peerlink.app.BuildConfig.SOURCE_COMMIT}")
                                             appendLine(
                                                 "Created: " + java.text.SimpleDateFormat(
                                                     "yyyy-MM-dd HH:mm:ss", java.util.Locale.US

@@ -264,6 +264,8 @@ object AppState {
         }
 
         appendLog("════ Session started: $currentSessionId ════")
+        appendLog("[APP-BUILD] version=${com.peerlink.app.BuildConfig.VERSION_NAME} " +
+            "code=${com.peerlink.app.BuildConfig.VERSION_CODE} source=${com.peerlink.app.BuildConfig.SOURCE_COMMIT}")
     }
 
     fun getSessionDurationSeconds(): Long {

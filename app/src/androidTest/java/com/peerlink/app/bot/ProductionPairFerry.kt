@@ -8,19 +8,35 @@ import java.net.SocketTimeoutException
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.concurrent.thread
 
-/** Drives the real PeerSlot with another original SDK. The fixture supplies
- * only the VPN's outer IPv4/UDP carrier; game payloads stay unchanged.
+/** Drives the real PeerSlot and native VPN backend with another original SDK.
+ * Only the TUN device is a packet-preserving socket pair; game bytes stay unchanged.
  */
 internal class ProductionPairFerry(botUid: Long, peerUid: Long) : AutoCloseable {
     private val running = AtomicBoolean(true)
     private val host = socket("127.0.0.1", 39202)
     private val reflexive = socket("127.0.0.2", 39204)
-    private val backend = socket("127.0.0.1", PeerSlot.BACKEND_PORT)
+    private val backend: NativeBotTransport
     @Volatile private var gameEndpoint: InetSocketAddress? = null
-    private val port = PeerSlot.reserveEndpoint()
+    private val port: Int
     init {
         BotMode.ensurePair()
-        PeerSlot.arm(peerUid, botUid, "", "127.0.0.1", 0)
+        val oldPort = PeerSlot.reserveEndpoint()
+        backend = NativeBotTransport(oldPort) { inner ->
+            require(inner.size >= 28 && inner[0].toInt() and 0xf0 == 0x40)
+            val offset = (inner[0].toInt() and 15) * 4 + 8
+            require(offset <= inner.size)
+            val payload = inner.copyOfRange(offset, inner.size)
+            gameEndpoint?.let { reflexive.send(DatagramPacket(payload, payload.size, it)) }
+        }
+        PeerSlot.disarm("test_new_room_with_running_vpn")
+        socket("127.0.0.1", oldPort).use {
+            port = PeerSlot.reserveEndpoint()
+            check(oldPort != port)
+            PeerSlot.onArmed = { target -> check(backend.retarget(target)) }
+            PeerSlot.arm(peerUid, botUid, "", "127.0.0.1", 0)
+            check(backend.verify()) { "The native VPN did not follow the new room port" }
+            Log.i("PeerlinkPairTest", "LIVE_VPN_NEW_ROOM_VERIFIED oldPort=$oldPort currentPort=$port")
+        }
     }
     private val threads = listOf(
         pump(host, "host") { packet, payload ->
@@ -34,14 +50,7 @@ internal class ProductionPairFerry(botUid: Long, peerUid: Long) : AutoCloseable 
         pump(reflexive, "reflexive") { packet, payload ->
             gameEndpoint = packet.socketAddress as InetSocketAddress
             val inner = carrier(payload, packet.port, port)
-            backend.send(DatagramPacket(inner, inner.size, InetSocketAddress("127.0.0.1", port)))
-        },
-        pump(backend, "backend") { _, inner ->
-            require(inner.size >= 28 && inner[0].toInt() and 0xf0 == 0x40)
-            val offset = (inner[0].toInt() and 15) * 4 + 8
-            require(offset <= inner.size)
-            val payload = inner.copyOfRange(offset, inner.size)
-            gameEndpoint?.let { reflexive.send(DatagramPacket(payload, payload.size, it)) }
+            backend.send(inner)
         }
     )
     private fun pump(socket: DatagramSocket, label: String,
@@ -59,8 +68,10 @@ internal class ProductionPairFerry(botUid: Long, peerUid: Long) : AutoCloseable 
     }
     override fun close() {
         running.set(false)
+        PeerSlot.onArmed = null
         PeerSlot.disarm()
-        listOf(host, reflexive, backend).forEach { it.close() }
+        backend.close()
+        listOf(host, reflexive).forEach { it.close() }
         threads.forEach { it.join(1000) }
     }
     companion object {
@@ -70,7 +81,7 @@ internal class ProductionPairFerry(botUid: Long, peerUid: Long) : AutoCloseable 
             fun put16(at: Int, value: Int) { bytes[at] = (value ushr 8).toByte(); bytes[at + 1] = value.toByte() }
             bytes[0] = 0x45; bytes[8] = 64; bytes[9] = 17
             put16(2, bytes.size)
-            byteArrayOf(10, 77, 0, 2).copyInto(bytes, 12)
+            byteArrayOf(10, 210.toByte(), 3, 251.toByte()).copyInto(bytes, 12)
             BotMode.BOT_FAB_IP.split('.').map { it.toInt().toByte() }.toByteArray().copyInto(bytes, 16)
             put16(20, sourcePort); put16(22, destinationPort); put16(24, payload.size + 8)
             payload.copyInto(bytes, 28)

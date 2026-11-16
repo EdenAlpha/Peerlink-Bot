@@ -317,6 +317,8 @@ struct BackendState {
     std::atomic<bool> peer_socket_connected{false};
 
     sockaddr_in peer_addr{};
+    // Mutable only for a local bot listener; receive validation stays lock-free.
+    std::atomic<uint16_t> peer_destination_port{0};
     std::array<uint8_t, 4> peer_lan_ip{};
     std::array<uint8_t, 4> configured_local_lan_ip{};
     bool has_configured_local_lan_ip = false;
@@ -3198,7 +3200,7 @@ void peer_rx_loop(BackendState *state) {
                     from_len >= sizeof(sockaddr_in) &&
                     from_addr.sin_family == AF_INET &&
                     from_addr.sin_addr.s_addr == state->peer_addr.sin_addr.s_addr &&
-                    from_addr.sin_port == state->peer_addr.sin_port;
+                    from_addr.sin_port == state->peer_destination_port.load(std::memory_order_acquire);
                 if (connected_peer_recv || addressed_peer_recv) {
                     handle_peer_packet(env, state, peer_buffer.data(), static_cast<size_t>(rc), userspace_rx_ns, kernel_to_user_us, kernel_rx_rt_ns);
                 } else {
@@ -3867,6 +3869,7 @@ Java_com_peerlink_app_tunnel_NativePeerLinkBackend_nativeStart(
     std::memset(&state->peer_addr, 0, sizeof(state->peer_addr));
     state->peer_addr.sin_family = AF_INET;
     state->peer_addr.sin_port = htons(static_cast<uint16_t>(peer_port));
+    state->peer_destination_port.store(state->peer_addr.sin_port, std::memory_order_release);
     std::memcpy(&state->peer_addr.sin_addr, state->peer_lan_ip.data(), 4);
 
     if (!prepare_peer_socket_callback(env, state)) {
@@ -4062,6 +4065,33 @@ Java_com_peerlink_app_tunnel_NativePeerLinkBackend_nativeRebindPeerSocket(
     const bool connected = connect_udp_socket(state->peer_fd, state->peer_addr);
     state->peer_socket_connected.store(connected, std::memory_order_release);
     return prepared && connected ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_peerlink_app_tunnel_NativePeerLinkBackend_nativeRetargetLocalPeer(
+        JNIEnv *env, jobject /*thiz*/, jlong handle, jint port) {
+    BackendState *state = from_handle(handle);
+    if (state == nullptr || state->peer_fd < 0 || port < 1 || port > 65535 ||
+        state->peer_lan_ip[0] != 127 || !state->running.load(std::memory_order_acquire)) return JNI_FALSE;
+    std::lock_guard<std::mutex> send_lock(state->peer_send_mutex);
+    if (!state->running.load(std::memory_order_acquire)) return JNI_FALSE;
+    sockaddr_in target = state->peer_addr;
+    target.sin_port = htons(static_cast<uint16_t>(port));
+    const unsigned previous = ntohs(state->peer_destination_port.load(std::memory_order_acquire));
+    // Re-connect directly: AF_UNSPEC can discard a UDP socket's local binding.
+    // Keep the protected descriptor and its loopback source port unchanged.
+    int pending_error = 0;
+    socklen_t error_size = sizeof(pending_error);
+    (void) getsockopt(state->peer_fd, SOL_SOCKET, SO_ERROR, &pending_error, &error_size);
+    if (!connect_udp_socket(state->peer_fd, target)) return JNI_FALSE;
+    state->peer_addr.sin_port = target.sin_port;
+    state->peer_destination_port.store(target.sin_port, std::memory_order_release);
+    state->peer_probe_ack.store(false, std::memory_order_release);
+    state->peer_socket_connected.store(true, std::memory_order_release);
+    char message[160];
+    std::snprintf(message, sizeof(message), "[NATIVE/EVENT] local bot destination updated oldPort=%u newPort=%d", previous, port);
+    emit_native_log(env, state, kNativeLogInfo, false, message);
+    return JNI_TRUE;
 }
 
 extern "C" JNIEXPORT jboolean JNICALL

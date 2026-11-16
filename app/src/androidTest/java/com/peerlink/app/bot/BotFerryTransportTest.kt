@@ -5,6 +5,8 @@ import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.net.*
+import java.util.concurrent.ArrayBlockingQueue
+import java.util.concurrent.TimeUnit
 
 /** Transport-only test with opaque bytes. It does not simulate a game handshake or prove kickoff. */
 @RunWith(AndroidJUnit4::class)
@@ -15,6 +17,72 @@ class BotFerryTransportTest {
     private fun DatagramSocket.receiveBytes(): ByteArray {
         val packet = DatagramPacket(ByteArray(4096), 4096); receive(packet)
         return packet.data.copyOf(packet.length)
+    }
+    @Test fun liveNativeVpnFollowsTwoReplacementRoomPortsAndCarriesBothDirections() {
+        BotMode.ensurePair()
+        val injected = ArrayBlockingQueue<ByteArray>(8)
+        val oldPort = PeerSlot.reserveEndpoint()
+        NativeBotTransport(oldPort) { injected.offer(it) }.use { vpn ->
+            PeerSlot.disarm("test_room_restart")
+            Thread.sleep(1200) // Exercise an already-running socket after its old listener closed.
+            socket(oldPort).use { stale ->
+                PeerSlot.onArmed = { check(vpn.retarget(it)) }
+                try {
+                    repeat(2) { round ->
+                        val current = PeerSlot.reserveEndpoint()
+                        assertNotEquals(oldPort, current)
+                        PeerSlot.arm(100, 200, "", "10.210.3.251", 47885)
+                        assertTrue("The local probe must reach this room", vpn.verify())
+                        PeerSlot.engineAttached = true
+                        socket().use { engine ->
+                            engine.sendTo(byteArrayOf(7), PeerSlot.ENGINE_PORT)
+                            val first = requireNotNull(injected.poll(3, TimeUnit.SECONDS))
+                            assertArrayEquals(byteArrayOf(7), first.copyOfRange(28, first.size))
+                            val payload = byteArrayOf(3, round.toByte(), 5, 7)
+                            val carrier = ByteArray(28 + payload.size)
+                            carrier[0] = 0x45; carrier[8] = 64; carrier[9] = 17
+                            carrier[2] = (carrier.size ushr 8).toByte(); carrier[3] = carrier.size.toByte()
+                            byteArrayOf(10, 210.toByte(), 3, 251.toByte()).copyInto(carrier, 12)
+                            byteArrayOf(197.toByte(), 210.toByte(), 53, 2).copyInto(carrier, 16)
+                            carrier[20] = (47885 ushr 8).toByte(); carrier[21] = 47885.toByte()
+                            carrier[22] = (current ushr 8).toByte(); carrier[23] = current.toByte()
+                            carrier[24] = 0; carrier[25] = (8 + payload.size).toByte(); payload.copyInto(carrier, 28)
+                            vpn.send(carrier)
+                            assertArrayEquals(payload, engine.receiveBytes())
+                            val reply = byteArrayOf(8, round.toByte(), 10)
+                            engine.sendTo(reply, PeerSlot.ENGINE_REFLEXIVE_PORT, PeerSlot.REFLEXIVE_PEER_IP)
+                            val returned = requireNotNull(injected.poll(3, TimeUnit.SECONDS))
+                            assertArrayEquals(reply, returned.copyOfRange(28, returned.size))
+                            assertEquals(1L, PeerSlot.gameTraffic().fromGame)
+                        }
+                        PeerSlot.disarm("test_next_room")
+                    }
+                    stale.soTimeout = 200
+                    try { stale.receiveBytes(); fail("The old room received traffic after retargeting") }
+                    catch (_: SocketTimeoutException) { }
+                } finally { PeerSlot.onArmed = null; PeerSlot.disarm() }
+            }
+        }
+    }
+
+    @Test fun directProxyFromAnotherLocalMobileAddressIsAccepted() {
+        val source = NetworkInterface.getNetworkInterfaces().toList().flatMap { it.inetAddresses.toList() }
+            .firstOrNull { it is Inet4Address && !it.isLoopbackAddress && !it.isLinkLocalAddress }
+        org.junit.Assume.assumeNotNull(source)
+        DatagramSocket(InetSocketAddress(source, 0)).use { game -> socket().use { engine ->
+            game.soTimeout = 3000
+            try {
+                val port = PeerSlot.reserveEndpoint()
+                PeerSlot.arm(100, 200, "", "10.210.3.251", 47885)
+                PeerSlot.engineAttached = true
+                val bytes = byteArrayOf(2, 4, 6, 8)
+                game.sendTo(bytes, port, requireNotNull(source).hostAddress!!)
+                engine.sendTo(byteArrayOf(9), PeerSlot.ENGINE_PORT)
+                assertArrayEquals(bytes, engine.receiveBytes())
+                assertArrayEquals(byteArrayOf(9), game.receiveBytes())
+                assertEquals(1L, PeerSlot.gameTraffic().fromGame)
+            } finally { PeerSlot.disarm() }
+        } }
     }
     @Test fun hostAndFabricatedCandidatesCarryUnchangedPayloadsOnSeparatePorts() {
         BotMode.ensurePair()

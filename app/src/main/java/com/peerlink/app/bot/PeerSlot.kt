@@ -7,6 +7,7 @@ import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetSocketAddress
 import java.net.SocketTimeoutException
+import java.net.NetworkInterface
 import kotlin.concurrent.thread
 
 /**
@@ -96,7 +97,8 @@ object PeerSlot {
     private var gameTargetPort = 0
     @Volatile private var directGamePeer: InetSocketAddress? = null
 
-    private var socket: DatagramSocket? = null
+    @Volatile private var socket: DatagramSocket? = null
+    private val acceptedLocalSources = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
     private var worker: Thread? = null
     private val loggedClasses = java.util.Collections.synchronizedSet(HashSet<Int>())
     @Volatile private var flowTrace = PacketFlowTrace(SystemClock::elapsedRealtime)
@@ -136,7 +138,10 @@ object PeerSlot {
      * connected UDP socket).
      */
     @Volatile
-    var onArmed: (() -> Unit)? = null
+    var onArmed: ((Int) -> Unit)? = null
+
+    /** Observe without reserving a new socket during a service-stop race. */
+    internal fun ownsListener(port: Int): Boolean = armed && socket?.let { !it.isClosed && it.localPort == port } == true
 
     /** TunnelEngine installs (and re-installs) the legacy injector lambda. */
     fun installInjector(fn: (ByteArray, String, Int, Int) -> Unit) {
@@ -170,6 +175,7 @@ object PeerSlot {
         gamePort = localPort
         gameHostIp = localIp
         gameHostPort = localPort
+        acceptedLocalSources.clear()
         gameTargetPort = BotMode.BOT_PORT
         flowTrace = PacketFlowTrace(SystemClock::elapsedRealtime)
         armed = true
@@ -190,7 +196,7 @@ object PeerSlot {
             "the ENGINE answers the game, this slot only carries the bytes")
         // The listener now exists -- clear the backend's poisoned connected
         // socket so its peer-TX sends reach this slot (see onArmed note).
-        runCatching { onArmed?.invoke() }
+        runCatching { onArmed?.invoke(s.localPort) }
         // The engine's own peer sockets, bound before anything is handed
         // over: its very first punch must have somewhere to land.
         openEngineSockets()
@@ -245,8 +251,17 @@ object PeerSlot {
                 // Raw traffic addressed to the server-advertised host candidate
                 // has no inner IP header. Carry it unchanged and reply to the
                 // same local socket (including the VPN's ordinary UDP proxy).
-                if (!pkt.address.isLoopbackAddress && pkt.address.hostAddress != BotMode.hostIp) {
-                    noteDrop("unexpected_game_source"); continue
+                val sourceIp = pkt.address.hostAddress.orEmpty()
+                val ownedAddress = pkt.address.isLoopbackAddress || sourceIp == gameHostIp ||
+                    sourceIp in acceptedLocalSources || runCatching {
+                        NetworkInterface.getByInetAddress(pkt.address) != null
+                    }.getOrDefault(false).also { if (it) acceptedLocalSources.add(sourceIp) }
+                if (!ownedAddress) {
+                    noteDrop("unexpected_game_source")
+                    if (loggedClasses.add(-3)) AppState.appendLog(
+                        "[BOT-SLOT] rejected source=$sourceIp:${pkt.port} expectedGame=$gameHostIp:$gameHostPort " +
+                            "declaredBot=${BotMode.hostIp} listener=${s.localPort}")
+                    continue
                 }
                 flowTrace.record(Point.GAME_RX, false, data.size)
                 directGamePeer = pkt.socketAddress as? InetSocketAddress
