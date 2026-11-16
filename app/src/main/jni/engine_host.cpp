@@ -21,6 +21,7 @@
 #include <vector>
 #include <utility>
 #include <unistd.h>
+#include "game/network_startup_diagnostics.h"
 
 extern "C" {
 long peerlink_game_database_input(uintptr_t, const char *);
@@ -385,6 +386,9 @@ JNIEXPORT jstring JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeLoadingD
     char preview[768];
     peerlink_preview_diagnostics(preview, sizeof(preview));
     text += " "; text += preview;
+    char networking[640];
+    peerlink_network_startup_diagnostics(g_client, networking, sizeof(networking));
+    text += " "; text += networking;
     uintptr_t user_sync = attached_task(lock.manager, g_user_sync_task, g_base + 0x990d9c8);
     if (user_sync) text += " userDataSyncState=" + std::to_string(*reinterpret_cast<uint32_t *>(user_sync + 0x70));
     uintptr_t root = entry<uintptr_t (*)()>(0x7a87db8)();
@@ -775,6 +779,7 @@ JNIEXPORT jlong JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeStart(
     uintptr_t services = *reinterpret_cast<uintptr_t *>(g_base + 0xa5d9cd0);
     uintptr_t clock = services ? *reinterpret_cast<uintptr_t *>(services + 8) : 0;
     if (!clock) return 0;
+    peerlink_observe_network_startup(g_base);
     entry<void (*)(uintptr_t, uint32_t)>(0x7e14a38)(clock, static_cast<uint32_t>(time(nullptr)));
     // Five real arguments; the old four-argument trampoline left the last
     // argument undefined. Let the engine choose its real local UDP port.

@@ -50,6 +50,7 @@ add_library(peerlinkbackend SHARED
         game/preview_proceed.c
         game/preview_host.cpp
         game/executable_patch.cpp
+        game/network_startup_diagnostics.cpp
         game/null_ui_guard.cpp)
 
 target_link_libraries(peerlinkbackend c++_shared log android dl)
