@@ -34,6 +34,14 @@ class BotEngineTurnPairPhoneTest {
             .apply { soTimeout = 25 }
         val ferry = if (role == "A") ProductionPairFerry(uid, peer) else null
         try {
+            if (args.getString("verifyNoExtraFiles") == "true") {
+                GameResourcePacks.prepare(context)
+                val audit = AppState.getLogs()
+                assertTrue("The phone-only discovery did not run", audit.contains("RESOURCE_DISCOVERY"))
+                assertTrue("Extra resource downloads were not disabled", audit.contains("networkAllowed=false"))
+                assertTrue("The no-extra-files setup was not exercised", audit.contains("HEADLESS_OPTIONAL missing=63"))
+                Log.i("PeerlinkTurnTest", "NO_EXTRA_FILES_PREPARED role=$role downloads=0 missing=63")
+            }
             assertTrue(EngineBridge.stageEngine(context))
             assertTrue(EngineHost.lastError, EngineHost.prepare(context, uid))
             assertTrue("File verification did not reach the exported log",
