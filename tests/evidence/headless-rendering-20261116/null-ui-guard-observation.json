@@ -239,6 +239,7 @@
     "fatalSignalObserved": false,
     "proofZipSha256": "cca8d5a0f48551b4c408f47a8e216b308647c12780f42c8d16ddf779f924c332",
     "passObservationZipSha256": "bc0bbe84d533abc67abf46e0c89e921c432be2b1aab3f0e106187463f179453d",
-    "scope": "Android 15 ARM64 lab, debugger patched; the fixture summary incorrectly says no external observer. The user phone was not tested."
+    "scope": "Android 15 ARM64 lab, debugger patched; the fixture summary incorrectly says no external observer. The user phone was not tested.",
+    "awayAutomaticInputEnabled": true
   }
 }
