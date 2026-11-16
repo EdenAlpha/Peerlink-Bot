@@ -31,9 +31,13 @@ uintptr_t peerlink_original_online_inputs_v224(uintptr_t, uint32_t, uint32_t);
 long peerlink_live_match_context_input(uintptr_t, const char *);
 long peerlink_original_preview_proceed_v271(uintptr_t);
 long peerlink_preview_drive(uintptr_t);
+long peerlink_demo_drive(uintptr_t);
 long peerlink_preview_probe(uintptr_t);
 void peerlink_preview_stop();
 void peerlink_preview_diagnostics(char *, size_t);
+bool peerlink_install_null_client_rhi(uintptr_t);
+bool peerlink_null_client_rhi_ready(uintptr_t);
+bool peerlink_null_client_rhi_failed(uintptr_t);
 }
 
 #define TAG "PeerlinkEngineHost"
@@ -546,6 +550,13 @@ JNIEXPORT jint JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeAdvanceMatc
         if (preview < 0) { peerlink_preview_stop(); return -210; }
         if (preview == 1) g_preview_proceeded = true;
     }
+    if (g_match_stage == 2) {
+        uintptr_t rhi = *reinterpret_cast<uintptr_t *>(g_base + 0xa0111f8);
+        if (rhi && *reinterpret_cast<uintptr_t *>(rhi) == g_base + 0x93b6e98) {
+            long demo = peerlink_demo_drive(g_base);
+            if (demo < 0) { peerlink_preview_stop(); return -211; }
+        }
+    }
     // Explicit controller configuration for the test, permitted only by the
     // current room's server response. These are original input setters, not
     // proof that the server field's full native model mapping has been ported.
@@ -724,6 +735,17 @@ JNIEXPORT jlong JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeLoad(
     // Loading here only pins and locates the verified binary. Its installed
     // Java class loader and framework NativeActivity perform JNI/lifecycle init.
     return static_cast<jlong>(g_base);
+}
+
+JNIEXPORT jboolean JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeEnableHeadless(
+        JNIEnv *, jobject, jlong base) {
+    return valid(base) && peerlink_install_null_client_rhi(g_base) ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT jint JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeHeadlessState(
+        JNIEnv *, jobject, jlong base) {
+    if (!valid(base) || peerlink_null_client_rhi_failed(g_base)) return -1;
+    return peerlink_null_client_rhi_ready(g_base) ? 1 : 0;
 }
 
 JNIEXPORT jlong JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeStart(

@@ -47,9 +47,14 @@ internal object GameResourcePacks {
         val packs = manifest(context)
         val report: (String) -> Unit = { AppState.appendLog(it) }
         val local = GameResourceLocalCopies(context, packs.map { it.name }.toSet(), report)
-        prepareLocalSet(directory(context), packs, report, { done, total ->
-            PeerBotService.status("Preparing bot match files ${done * 100 / total}%")
-        }, local::open)
+        try {
+            prepareLocalSet(directory(context), packs, report, { done, total ->
+                PeerBotService.status("Preparing bot match files ${done * 100 / total}%")
+            }, local::open)
+        } catch (missing: MissingResources) {
+            if (!BotRendering.headless(context)) throw missing
+            report("[BOT-FILES] HEADLESS_OPTIONAL missing=${missing.missingFiles} source=phone_only")
+        }
     }
 
     /** Never start a resource download, even when a previous caller requested one. */
@@ -148,15 +153,30 @@ internal object GameResourcePacks {
         report("[BOT-FILES] RESOURCE_SET result=PASS files=${packs.size} bytes=$total source=pinned_original_11.1.1_match_packs")
     }
 
-    /** Refuse to start with only the base pack; a copy audit must cover these too. */
-    fun verifyAndLink(context: Context, nativePaks: File, report: (String) -> Unit) {
-        val source = directory(context)
-        for (pack in manifest(context)) {
+    /** Validate any existing match files; only the graphics-free experiment may omit them. */
+    fun verifyAndLink(context: Context, nativePaks: File, report: (String) -> Unit,
+                      allowMissing: Boolean = false) {
+        verifyAndLinkSet(directory(context), nativePaks, manifest(context), report, allowMissing)
+    }
+
+    internal fun verifyAndLinkSet(source: File, nativePaks: File, packs: List<Pack>,
+                                  report: (String) -> Unit, allowMissing: Boolean) {
+        for (pack in packs) {
             val input = File(source, pack.name)
-            check(input.isFile && input.inputStream().use(GameFileIntegrity::fingerprint) == pack.fingerprint) {
-                "Bot match resource missing or damaged: ${pack.name}; prepare the match files before creating a room"
+            val valid = input.isFile && input.inputStream().use(GameFileIntegrity::fingerprint) == pack.fingerprint
+            val target = File(nativePaks, pack.name)
+            if (!valid && allowMissing) {
+                val nativeValid = target.isFile && target.inputStream().use(GameFileIntegrity::fingerprint) == pack.fingerprint
+                if (nativeValid) {
+                    report("[BOT-FILES] RESOURCE_NATIVE_COPY file=${pack.name} result=PASS")
+                } else {
+                    check(!target.exists() || target.delete()) { "Cannot remove damaged bot resource alias" }
+                    report("[BOT-FILES] RESOURCE_OPTIONAL file=${pack.name} result=NOT_AVAILABLE")
+                }
+                continue
             }
-            link(input, File(nativePaks, pack.name), pack.fingerprint, report)
+            check(valid) { "Bot match resource missing or damaged: ${pack.name}" }
+            link(input, target, pack.fingerprint, report)
             report("[BOT-FILES] RESOURCE_PASS file=${pack.name} bytes=${pack.bytes} SHA256=${pack.sha256}")
         }
     }

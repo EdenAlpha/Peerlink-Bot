@@ -93,6 +93,25 @@ class GameResourcePacksTest {
         } finally { root.deleteRecursively() }
     }
 
+    @Test fun headlessModeKeepsOnlyVerifiedExistingAliasesWithoutCreatingMissingFiles() {
+        val root = kotlin.io.path.createTempDirectory("resource-headless-alias").toFile()
+        try {
+            val source = File(root, "source").apply { mkdirs() }
+            val native = File(root, "native").apply { mkdirs() }
+            File(source, packs[0].name).writeBytes(contents)
+            File(native, packs[1].name).writeBytes(contents)
+            File(native, packs[2].name).writeBytes(ByteArray(contents.size))
+            GameResourcePacks.verifyAndLinkSet(source, native, packs, {}, true)
+            assertArrayEquals(contents, File(native, packs[0].name).readBytes())
+            assertArrayEquals(contents, File(native, packs[1].name).readBytes())
+            assertFalse(File(native, packs[2].name).exists())
+            assertFalse(File(source, packs[2].name).exists())
+            assertThrows(IllegalStateException::class.java) {
+                GameResourcePacks.verifyAndLinkSet(source, native, packs, {}, false)
+            }
+        } finally { root.deleteRecursively() }
+    }
+
     @Test fun changedLocalDataIsRejectedAndAnotherMatchingLocalCopyCanBeUsed() {
         val root = kotlin.io.path.createTempDirectory("resource-local-hash").toFile()
         try {

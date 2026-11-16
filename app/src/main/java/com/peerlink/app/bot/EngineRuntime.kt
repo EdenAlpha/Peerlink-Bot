@@ -80,7 +80,11 @@ internal object EngineRuntime {
             val engine = File(app.filesDir, "engine/libUE4.so")
             check(android.os.Build.VERSION.SDK_INT >= 31) { "Bot engine requires Android 12 or later" }
             if (!engine.isFile || !onRuntime { load(engine) }) return false
-            val files = GameAssets.prepare(app, report, audit)
+            val headless = BotRendering.headless(app)
+            if (headless) check(nativeEnableHeadless(base)) {
+                "This phone could not start the graphics-free bot"
+            }
+            val files = GameAssets.prepare(app, report, audit, allowMissingMatchResources = headless)
             report("Starting bot simulation")
             check(nativeConfigureFiles(base, File(files.root, "assets").absolutePath)) { "Bot asset directory is unavailable" }
             // NativeActivity creates its own NativeCode. Its surface belongs
@@ -89,6 +93,9 @@ internal object EngineRuntime {
             val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(120)
             var nextReport = 0L
             while (!nativeApplicationReady(base)) {
+                if (headless) check(nativeHeadlessState(base) >= 0) {
+                    "This phone could not start the graphics-free bot"
+                }
                 if (System.nanoTime() >= nextReport) {
                     android.util.Log.i("PeerlinkEngineHost", nativeStartupInfo(base))
                     nextReport = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
@@ -96,6 +103,7 @@ internal object EngineRuntime {
                 check(System.nanoTime() < deadline) { "Bot simulation startup timed out" }
                 Thread.sleep(200)
             }
+            if (headless) check(nativeHeadlessState(base) == 1) { "Graphics-free bot did not initialize" }
             check(onRuntime { nativeLoadDatabase(base, files.database.absolutePath) }) { "Bot game database could not start" }
             // The original Java resume callback checks kernel phase == 1.
             // Framework onResume runs before our native window is attached;
@@ -241,6 +249,8 @@ internal object EngineRuntime {
     fun closeHost() { stopPreview(); gameHost?.close(); gameHost = null }
 
     private external fun nativeLoad(path: String): Long
+    private external fun nativeEnableHeadless(base: Long): Boolean
+    private external fun nativeHeadlessState(base: Long): Int
     private external fun nativeBeginIntroduction(base: Long, peer: Long, connectingStart: Long): Boolean
     private external fun nativeTransportIoReady(base: Long): Int
     private external fun nativeConfigureTurn(base: Long, input: ByteArray): Boolean

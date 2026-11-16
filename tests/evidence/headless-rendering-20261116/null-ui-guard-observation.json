@@ -1,0 +1,42 @@
+{
+  "engineSha256": "2cea0c85344d7d7f295aea1c2353621f02db78dbccd888a0a21a0508ac330659",
+  "runtime": "Android 15 ARM64 lab; original NullDrv graphics backend, Android ES3.1 shader profile",
+  "graphicsGuard": {
+    "textureResourceReadOffset": "0x5431af8",
+    "nullResourceBehavior": "Skip graphics-dimension calls while keeping the allocated wrapper and parent pointer",
+    "normalResourceBehavior": "Execute the original pointer load and subsequent code",
+    "prototypeAppliedByDebugger": true
+  },
+  "fullExtraResources": {
+    "files": 63,
+    "actualFreshP2PSession": true,
+    "bothPlayable": true,
+    "playersPerSide": 22,
+    "playableSamples": {
+      "A": 118,
+      "B": 116
+    },
+    "distinctBallPositions": {
+      "A": 57,
+      "B": 57
+    },
+    "acceptedHomePassPresses": 10,
+    "acceptedHomePassReleases": 10,
+    "proofZipSha256": "c5d142c972c636c3bbdad08ce1a41e83a465fba744bd85f0c1282857548b53c7"
+  },
+  "withoutExtraResources": {
+    "removedBeforeOriginalJni": true,
+    "sourceFilesAndNativeAliasesHidden": 63,
+    "bothNativeConnectionsEstablished": true,
+    "realServerMatchSelected": true,
+    "samplesPerSide": 300,
+    "homeOuterState": 13,
+    "homePlayers": 0,
+    "awayOuterState": 17,
+    "awayPlayers": 22,
+    "homeReachedKickoff": false,
+    "stoppedAt": "Match/Enter/MatchEnterDemoOnline",
+    "proofZipSha256": "29edbd9b21e0d783c3586578dbe218a10bf4e16f8d9cb29948a2a0a66fab3dd9"
+  },
+  "scope": "The 47 installed game packs and base APK assets were present; this is an Android lab, not the user phone. Pre-JNI Java preparation had access to full files before both copies were hidden. Production APK support and demo-skip changes are not yet validated."
+}

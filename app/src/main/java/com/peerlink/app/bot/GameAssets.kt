@@ -11,11 +11,12 @@ internal object GameAssets {
         val database get() = File(root, "database")
     }
 
-    fun prepare(owner: Context, status: (String) -> Unit, audit: (String) -> Unit = {}): Prepared {
+    fun prepare(owner: Context, status: (String) -> Unit, audit: (String) -> Unit = {},
+                allowMissingMatchResources: Boolean = false): Prepared {
         val report = StringBuilder("PeerLink startup file audit\nstartedAtMillis=${System.currentTimeMillis()}\n" +
             "This is the last startup audit; exporting or reusing an engine does not rerun it.\n")
         val record: (String) -> Unit = { line -> report.appendLine(line); audit(line) }
-        try { return prepareChecked(owner, status, record) }
+        try { return prepareChecked(owner, status, record, allowMissingMatchResources) }
         catch (error: Exception) {
             record("[BOT-FILES] SUMMARY result=FAIL error=${error.javaClass.simpleName}: ${error.message}")
             throw error
@@ -33,7 +34,8 @@ internal object GameAssets {
 
     fun auditReportFile(owner: Context): File = File(owner.filesDir, "bot-startup-file-audit.txt")
 
-    private fun prepareChecked(owner: Context, status: (String) -> Unit, audit: (String) -> Unit): Prepared {
+    private fun prepareChecked(owner: Context, status: (String) -> Unit, audit: (String) -> Unit,
+                               allowMissingMatchResources: Boolean): Prepared {
         val game = owner.createPackageContext("jp.konami.pesam", Context.CONTEXT_IGNORE_SECURITY)
         fun installation(): String {
             val info = owner.packageManager.getPackageInfo("jp.konami.pesam", 0)
@@ -136,7 +138,7 @@ internal object GameAssets {
             val fingerprint = source.inputStream().use(GameFileIntegrity::fingerprint)
             GameResourcePacks.link(source, File(nativePaks, name), fingerprint, audit)
         }
-        GameResourcePacks.verifyAndLink(owner, nativePaks, audit)
+        GameResourcePacks.verifyAndLink(owner, nativePaks, audit, allowMissingMatchResources)
         check(installation() == identity) { "Installed game changed during verification; retry with the game update finished" }
         audit("[BOT-FILES] SUMMARY result=PASS verified=${integrity.verified} repaired=${integrity.repaired} " +
             "cpk=${names.size} resources=${resources.size} nativeResources=${resources.size} databaseTables=$databaseTables nativeDatabaseTables=44 " +

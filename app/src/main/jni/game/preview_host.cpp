@@ -11,6 +11,7 @@
 #include <sys/mman.h>
 
 extern "C" long peerlink_original_preview_proceed_v271(uintptr_t);
+extern "C" long peerlink_original_demo_proceed(uintptr_t);
 namespace {
 using uptr = uintptr_t;
 using Tick = void (*)(uptr, float);
@@ -18,6 +19,7 @@ uptr base_address = 0, target = 0;
 uptr *slot = nullptr;
 Tick original = nullptr;
 std::atomic<int> active{0}, mode{0}, sent{0}, retry_count{0}, restored{1};
+std::atomic<int> demo_sent{0};
 std::atomic<int> probe_done{0}, request_tid{0}, callback_tid{0};
 std::atomic<int> last_flow{-1}, last_menu{-1}, last_requested{-1}, last_current{-1};
 std::atomic<unsigned> last_busy{0};
@@ -36,7 +38,7 @@ bool exact16(uptr object, const char *text) {
         if (data[i] != static_cast<unsigned char>(text[i])) return false;
     return true;
 }
-bool preview_leaf(uptr base, unsigned &flow_state) {
+bool flow_leaf(uptr base, const char *name, unsigned &flow_state) {
     uptr flow = *reinterpret_cast<uptr *>(base + 0xa53b6e8);
     uptr task = flow ? *reinterpret_cast<uptr *>(flow + 0x190) : 0;
     if (!task) return false;
@@ -46,9 +48,11 @@ bool preview_leaf(uptr base, unsigned &flow_state) {
     auto *leaf = reinterpret_cast<const unsigned char *>(end - 0xe0);
     auto *words = reinterpret_cast<const uptr *>(leaf);
     size_t count = leaf[0] & 1 ? words[1] : leaf[0] >> 1;
-    constexpr char name[] = "Match/Settings/MatchPreview";
     const char *text = leaf[0] & 1 ? reinterpret_cast<const char *>(words[2]) : reinterpret_cast<const char *>(leaf + 1);
-    return count == sizeof(name) - 1 && text && !memcmp(text, name, count);
+    return count == strlen(name) && text && !memcmp(text, name, count);
+}
+bool preview_leaf(uptr base, unsigned &flow_state) {
+    return flow_leaf(base, "Match/Settings/MatchPreview", flow_state);
 }
 bool writable(bool yes) {
     long size = sysconf(_SC_PAGESIZE);
@@ -91,6 +95,14 @@ void menu_tick(uptr actor, float delta) {
     if (!lock.manager) { active.store(0, std::memory_order_release); return; }
     callback_tid.store(gettid(), std::memory_order_relaxed);
     unsigned flow_state = 0;
+    if (mode.load() == 3) {
+        bool demo = flow_leaf(base_address, "Match/Enter/MatchEnterDemoOnline", flow_state);
+        if (demo && flow_state == 7 && peerlink_original_demo_proceed(base_address) == 1) {
+            demo_sent.store(1, std::memory_order_release);
+            dprintf(2, "HEADLESS_INTRO_PROCEED original_event=1 gameThreadTid=%d\n", gettid());
+        }
+        active.store(0, std::memory_order_release); return;
+    }
     bool leaf = preview_leaf(base_address, flow_state);
     uptr manager = *reinterpret_cast<uptr *>(actor + 0x290);
     unsigned state = *reinterpret_cast<unsigned *>(actor + 0x28c);
@@ -160,8 +172,15 @@ extern "C" long peerlink_preview_drive(uintptr_t base) {
     unsigned flow = 0;
     if (!preview_leaf(base, flow)) return 0;
     if (!started.load()) started.store(now_ms());
-    if (now_ms() - started.load() > 90000) return -2;
+    if (now_ms() - started.load() > 300000) return -2;
     return arm(base, 2);
+}
+extern "C" long peerlink_demo_drive(uintptr_t base) {
+    if (!base) return -1;
+    if (demo_sent.load(std::memory_order_acquire)) return 1;
+    unsigned flow = 0;
+    if (!flow_leaf(base, "Match/Enter/MatchEnterDemoOnline", flow) || flow != 7) return 0;
+    return arm(base, 3);
 }
 extern "C" long peerlink_preview_probe(uintptr_t base) {
     if (probe_done.load(std::memory_order_acquire)) return 1;
@@ -174,7 +193,7 @@ extern "C" void peerlink_preview_stop() {
     if (active.load() == 1) { restore(); active.store(0); }
 }
 extern "C" void peerlink_preview_diagnostics(char *text, size_t size) {
-    snprintf(text, size, "previewMenuState=%d previewMenuFlow=%d previewRequested=%d previewCurrentNil=%d previewManagerBusy=%u previewMenuRetries=%d previewContinueQueued=%d previewCallbackActive=%d previewCallbackRestored=%d previewProbeDone=%d previewRequestTid=%d previewCallbackTid=%d",
+    snprintf(text, size, "previewMenuState=%d previewMenuFlow=%d previewRequested=%d previewCurrentNil=%d previewManagerBusy=%u previewMenuRetries=%d previewContinueQueued=%d introProceedQueued=%d previewCallbackActive=%d previewCallbackRestored=%d previewProbeDone=%d previewRequestTid=%d previewCallbackTid=%d",
         last_menu.load(), last_flow.load(), last_requested.load(), last_current.load(), last_busy.load(),
-        retry_count.load(), sent.load(), active.load(), restored.load(), probe_done.load(), request_tid.load(), callback_tid.load());
+        retry_count.load(), sent.load(), demo_sent.load(), active.load(), restored.load(), probe_done.load(), request_tid.load(), callback_tid.load());
 }

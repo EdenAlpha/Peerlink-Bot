@@ -186,6 +186,7 @@ class BotEngineService : Service() {
                     -208 -> "The bot's server match context was rejected"
                     -209 -> "The bot's match-preview menu did not finish loading"
                     -210 -> "The bot could not queue its match-preview step on the game thread"
+                    -211 -> "The bot could not skip the match introduction"
                     else -> "Bot match setup failed"
                 }
                 "$reason (native stage $advance)"

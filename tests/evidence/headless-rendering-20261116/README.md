@@ -1,6 +1,12 @@
 # Headless rendering investigation, 16 November 2026
 
-An Android 15 controlled match now reached live play using **174,990,422 bytes of original extra-resource data in sparse native asset files**, with the original OpenGL ES 3.1 renderer. Both engines had 22 players and a moving ball, and ended with the same observed ball position. The graphics-disabled experiments have **not** reached kickoff. The released phone APK still requires the full resource set.
+An Android 15 controlled match reached live play using **174,990,422 bytes of original extra-resource data in sparse native asset files**, with the original OpenGL ES 3.1 renderer. A later graphics-disabled experiment also reached kickoff with the full extra-resource set. When all 63 extra files were hidden, that bot connected and reached the pre-match introduction, but it did **not** reach kickoff. The released phone APK still requires the full resource set.
+
+## Graphics-disabled and no-extra-file experiments
+
+The recovered 11.1.1 code showed a texture setup call dereferencing an absent graphics resource. A debugger-only guard retained the original behavior for a present resource and skipped its graphics-dimension calls when absent. With the original NullDrv backend and all extra files available, both engines reached live play, each observed 57 ball positions, and the home engine accepted ten Pass presses and releases. No match-state or network-readiness values were fabricated.
+
+A separate test hid all 63 extra resource files and their native aliases before the original JNI startup. Both native peers connected and the server selected a fresh match. With the extra files absent, HOME remained at `Match/Enter/MatchEnterDemoOnline` and had no players after 300 samples; the fully resourced AWAY side reached 22 players. The game's original flow JSON maps `proceed` from that introduction to `Match/MatchIdle`. A host change to send that original event in graphics-disabled mode is under test; it is not yet proof of no-download kickoff.
 
 ## Reduced-resource native match
 
@@ -64,6 +70,7 @@ All experiments used the unchanged released test APK with lab-only runtime confi
 - `full-resource-match-read-ranges.json`: per-file observed native read ranges and original resource fingerprints.
 - `sparse-resource-match-observation.json`: reduced-resource installation, live-state, input and read-coverage observations.
 - `range-seed-verification.json`: archive size, exact round-trip comparison, sparse allocation and corruption rejection.
+- `null-ui-guard-observation.json`: graphics-disabled and no-extra-file test observations.
 - `render-resource-crashes.json`: failed experiment locations and limits.
 
 Private authentication DTOs, account sessions, original game binaries and raw device logs are excluded.
