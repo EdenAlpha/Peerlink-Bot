@@ -30,7 +30,7 @@ uint32_t peerlink_lab_uid_participants(uintptr_t, uint32_t, uint32_t, uint32_t);
 uintptr_t peerlink_original_online_inputs_v224(uintptr_t, uint32_t, uint32_t);
 long peerlink_live_match_context_input(uintptr_t, const char *);
 long peerlink_original_preview_proceed_v271(uintptr_t);
-long peerlink_preview_drive(uintptr_t);
+long peerlink_preview_drive(uintptr_t, bool);
 long peerlink_demo_drive(uintptr_t);
 long peerlink_visual_start_drive(uintptr_t);
 long peerlink_preview_probe(uintptr_t);
@@ -381,7 +381,7 @@ JNIEXPORT jstring JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeLoadingD
     std::string text = "MATCH_LOADING hostStage=" + std::to_string(g_match_stage) +
         " previewEventSubmitted=" + std::to_string(g_preview_proceeded) +
         " userDataSyncComplete=" + std::to_string(g_user_sync_complete);
-    char preview[512];
+    char preview[768];
     peerlink_preview_diagnostics(preview, sizeof(preview));
     text += " "; text += preview;
     uintptr_t user_sync = attached_task(lock.manager, g_user_sync_task, g_base + 0x990d9c8);
@@ -547,7 +547,7 @@ JNIEXPORT jint JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeAdvanceMatc
         g_match_stage = 2;
     }
     if (g_match_stage == 2 && !g_preview_proceeded) {
-        long preview = peerlink_preview_drive(g_base);
+        long preview = peerlink_preview_drive(g_base, g_user_sync_complete);
         if (preview == -2) { peerlink_preview_stop(); return -209; }
         if (preview < 0) { peerlink_preview_stop(); return -210; }
         if (preview == 1) g_preview_proceeded = true;

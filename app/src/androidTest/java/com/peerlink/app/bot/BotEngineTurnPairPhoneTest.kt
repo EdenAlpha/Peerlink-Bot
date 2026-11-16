@@ -152,6 +152,13 @@ class BotEngineTurnPairPhoneTest {
                 require(holdSeconds in 30..600)
                 val passDelaySeconds = args.getString("passProbeDelaySeconds", "0").toInt()
                 require(passDelaySeconds in 0..180)
+                val promptContinue = args.getString("requirePromptContinue") == "true"
+                val kickoffDeadlineSeconds = args.getString("kickoffDeadlineSeconds", "0").toInt()
+                require(kickoffDeadlineSeconds in 0..300)
+                val loadingStartedAt = android.os.SystemClock.elapsedRealtime()
+                var previewStartedAt = 0L
+                var continueObserved = false
+                var kickoffObserved = false
                 repeat(holdSeconds) {
                     Thread.sleep(1000)
                     val loading = EngineHost.snapshot()
@@ -159,6 +166,19 @@ class BotEngineTurnPairPhoneTest {
                     Log.i("PeerlinkTurnTest", "MATCH_LOADING_PROBE_$role state=${loading.values.contentToString()}")
                     val details = EngineHost.loadingDiagnostics()
                     Log.i("PeerlinkTurnTest", "MATCH_LOADING_DETAILS_$role $details")
+                    val elapsed = android.os.SystemClock.elapsedRealtime() - loadingStartedAt
+                    if (details.contains("leaf=Match/Settings/MatchPreview") && previewStartedAt == 0L)
+                        previewStartedAt = android.os.SystemClock.elapsedRealtime()
+                    if (details.contains("previewContinueQueued=1")) continueObserved = true
+                    if (promptContinue && previewStartedAt != 0L &&
+                        android.os.SystemClock.elapsedRealtime() - previewStartedAt >= 15_000L)
+                        assertTrue("The bot is still relying on the preview countdown: $details", continueObserved)
+                    if (loading.canTestPass && !kickoffObserved) {
+                        kickoffObserved = true
+                        Log.i("PeerlinkTurnTest", "KICKOFF_REACHED_$role elapsedMs=$elapsed")
+                    }
+                    if (kickoffDeadlineSeconds > 0 && elapsed >= kickoffDeadlineSeconds * 1000L)
+                        assertTrue("Kickoff exceeded ${kickoffDeadlineSeconds}s: $details", kickoffObserved)
                     if (details.contains("hostStage=2")) {
                         assertTrue("Pre-match started before native user-data synchronization: $details",
                             details.contains("userDataSyncComplete=1"))
@@ -177,6 +197,7 @@ class BotEngineTurnPairPhoneTest {
                     }
                 }
                 assertTrue("The native user-data task did not complete before pre-match", synchronizedBeforePrematch)
+                if (promptContinue) assertTrue("No bot Continue event was observed", continueObserved)
                 if (manualPassProbe) {
                     assertTrue("The original engine did not construct a playable match", playableSamples > 0)
                     if (role == "A") assertTrue("No Pass reached the original private engine", passAccepted)

@@ -30,6 +30,29 @@ int main() {
     v.requested_preview = true; v.current_nil = false;
     assert(decide(v) == Action::Wait);
 
+    // Physical phone and successful no-extra-file HOME both waited here.
+    // Only the lab survived long enough for the later automatic transition.
+    View no_graphics{true, 7, 5, true, true, false, true, false, true, 1, true};
+    assert(decide(no_graphics) == Action::ContinueHeadless);
+    no_graphics.headless_inputs_ready = false;
+    assert(decide(no_graphics) == Action::Wait); // Normal renderer or incomplete real synchronization.
+    no_graphics.headless_inputs_ready = true; no_graphics.graphics_wait_settled = false;
+    assert(decide(no_graphics) == Action::Wait); // Let normal menu loading finish first.
+    no_graphics.graphics_wait_settled = true;
+    const unsigned other_busy[] = {0U, 2U, 3U, 4U, 5U, 6U, 7U, 8U};
+    for (unsigned busy : other_busy) {
+        no_graphics.manager_busy = busy;
+        assert(decide(no_graphics) == Action::Wait); // Do not skip a different menu operation.
+    }
+    no_graphics.manager_busy = 1; no_graphics.flow_state = 8;
+    assert(decide(no_graphics) == Action::Wait);
+    no_graphics.flow_state = 7; no_graphics.preview_leaf = false;
+    assert(decide(no_graphics) == Action::Wait);
+    no_graphics.preview_leaf = true; no_graphics.requested_preview = false;
+    assert(decide(no_graphics) == Action::Wait);
+    no_graphics.requested_preview = true; no_graphics.current_nil = false;
+    assert(decide(no_graphics) == Action::Wait);
+
     VisualStartView start{true, true, 12, false, true, true, true, true, true};
     assert(should_complete_visual_start(start));
     start.intro_finished = false; assert(!should_complete_visual_start(start)); start.intro_finished = true;
@@ -41,5 +64,5 @@ int main() {
     start.visual_idle = false; assert(!should_complete_visual_start(start)); start.visual_idle = true;
     start.event_manager_present = false; assert(!should_complete_visual_start(start)); start.event_manager_present = true;
     start.settled = false; assert(!should_complete_visual_start(start));
-    puts("Preview lifecycle gates passed: loading waits, idle retry is bounded, ready Continue requires the original menu state");
+    puts("Preview lifecycle gates passed: normal loading waits; verified headless inputs can Continue through the exact optional menu wait");
 }

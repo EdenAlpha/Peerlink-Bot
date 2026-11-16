@@ -13,6 +13,7 @@
 extern "C" long peerlink_original_preview_proceed_v271(uintptr_t);
 extern "C" long peerlink_original_demo_proceed(uintptr_t);
 extern "C" long peerlink_original_demo_finish(uintptr_t);
+extern "C" bool peerlink_null_client_rhi_ready(uintptr_t);
 namespace {
 using uptr = uintptr_t;
 using Tick = void (*)(uptr, float);
@@ -28,6 +29,19 @@ std::atomic<int> last_flow{-1}, last_menu{-1}, last_requested{-1}, last_current{
 std::atomic<unsigned> last_busy{0};
 std::atomic<uint64_t> idle_since{0}, started{0};
 std::atomic<uint64_t> visual_ready_since{0};
+std::atomic<uint64_t> graphics_wait_since{0};
+std::atomic<int> inputs_synchronized{0}, last_headless_ready{0}, headless_continue{0}, proceed_result{0};
+
+bool headless_preview_inputs_ready(uptr base) {
+    if (!inputs_synchronized.load(std::memory_order_acquire) || !peerlink_null_client_rhi_ready(base)) return false;
+    uptr model = *reinterpret_cast<uptr *>(base + 0xa5bb188);
+    if (!model || *reinterpret_cast<unsigned *>(model + 0x7b8) != 5 ||
+        !*reinterpret_cast<unsigned char *>(model + 0x7f1) ||
+        *reinterpret_cast<unsigned char *>(model + 0x7f2)) return false;
+    uptr handler = *reinterpret_cast<uptr *>(model + 0x848);
+    uptr first = *reinterpret_cast<uptr *>(model + 8), end = *reinterpret_cast<uptr *>(model + 16);
+    return handler && *reinterpret_cast<uptr *>(handler) && first && end >= first && end - first == 2 * 0x510;
+}
 
 uint64_t now_ms() {
     timespec value{}; clock_gettime(CLOCK_MONOTONIC, &value);
@@ -173,8 +187,16 @@ void menu_tick(uptr actor, float delta) {
     uint64_t since = idle_since.load();
     if (!idle) idle_since.store(0);
     else if (!since) { since = now; idle_since.store(now); }
+    const bool headless_ready = headless_preview_inputs_ready(base_address);
+    last_headless_ready.store(headless_ready);
+    const bool graphics_wait = leaf && flow_state == 7 && state == 5 && requested && current &&
+        busy == 1 && headless_ready;
+    uint64_t graphics_since = graphics_wait_since.load();
+    if (!graphics_wait) graphics_wait_since.store(0);
+    else if (!graphics_since) { graphics_since = now; graphics_wait_since.store(now); }
     auto action = peerlink_preview::decide({leaf, flow_state, state, requested, current,
-        manager && !busy, retry_count.load() != 0, idle && now - since >= 2000});
+        manager && !busy, retry_count.load() != 0, idle && now - since >= 2000,
+        headless_ready, busy, graphics_wait && now - graphics_since >= 2000});
     if (action == peerlink_preview::Action::RetryMenu) {
         // Same original close/request pair used by the successful QEMU host.
         uint16_t copy[64];
@@ -188,15 +210,19 @@ void menu_tick(uptr actor, float delta) {
         reinterpret_cast<void (*)(uptr, void *, unsigned, unsigned)>(base_address + 0x3ad089c)(actor, &saved, first, second);
         retry_count.fetch_add(1);
         dprintf(2, "PREVIEW_MENU_RETRY original_api=1 gameThreadTid=%d\n", gettid());
-    } else if (action == peerlink_preview::Action::Continue) {
-        if (peerlink_original_preview_proceed_v271(base_address) == 1) {
+    } else if (action == peerlink_preview::Action::Continue || action == peerlink_preview::Action::ContinueHeadless) {
+        const long result = peerlink_original_preview_proceed_v271(base_address);
+        proceed_result.store(static_cast<int>(result));
+        if (result == 1) {
+            const bool headless = action == peerlink_preview::Action::ContinueHeadless;
+            headless_continue.store(headless ? 1 : 0, std::memory_order_release);
             sent.store(1, std::memory_order_release);
-            dprintf(2, "PREVIEW_CONTINUE_QUEUED menuState=6 flowState=7 gameThreadTid=%d\n", gettid());
+            dprintf(2, "PREVIEW_CONTINUE_QUEUED menuState=%u flowState=7 headless=%d gameThreadTid=%d\n", state, headless, gettid());
         }
     }
     active.store(0, std::memory_order_release);
 }
-int arm(uptr base, int requested_mode) {
+int arm(uptr base, int requested_mode, bool user_data_synchronized = false) {
     int state = active.load(std::memory_order_acquire);
     if (state < 0) return -1;
     if (state) return 0;
@@ -207,6 +233,7 @@ int arm(uptr base, int requested_mode) {
     if (__atomic_load_n(candidate, __ATOMIC_ACQUIRE) != base + 0x3ac97c8) return -1;
     base_address = base; target = actor; slot = candidate;
     original = reinterpret_cast<Tick>(base + 0x3ac97c8);
+    inputs_synchronized.store(user_data_synchronized ? 1 : 0, std::memory_order_release);
     mode.store(requested_mode); request_tid.store(gettid());
     if (!writable(true)) return -1;
     restored.store(0); active.store(1, std::memory_order_release);
@@ -215,14 +242,14 @@ int arm(uptr base, int requested_mode) {
     return 0;
 }
 }
-extern "C" long peerlink_preview_drive(uintptr_t base) {
+extern "C" long peerlink_preview_drive(uintptr_t base, bool user_data_synchronized) {
     if (!base) return -1;
     if (sent.load(std::memory_order_acquire)) return 1;
     unsigned flow = 0;
     if (!preview_leaf(base, flow)) return 0;
     if (!started.load()) started.store(now_ms());
     if (now_ms() - started.load() > 300000) return -2;
-    return arm(base, 2);
+    return arm(base, 2, user_data_synchronized);
 }
 extern "C" long peerlink_demo_drive(uintptr_t base) {
     if (!base) return -1;
@@ -263,7 +290,8 @@ extern "C" void peerlink_preview_stop() {
     if (active.load() == 1) { restore(); active.store(0); }
 }
 extern "C" void peerlink_preview_diagnostics(char *text, size_t size) {
-    snprintf(text, size, "previewMenuState=%d previewMenuFlow=%d previewRequested=%d previewCurrentNil=%d previewManagerBusy=%u previewMenuRetries=%d previewContinueQueued=%d introProceedQueued=%d introFinished=%d visualStartEventQueued=%d previewCallbackActive=%d previewCallbackRestored=%d previewProbeDone=%d previewRequestTid=%d previewCallbackTid=%d",
+    snprintf(text, size, "previewMenuState=%d previewMenuFlow=%d previewRequested=%d previewCurrentNil=%d previewManagerBusy=%u previewMenuRetries=%d previewContinueQueued=%d headlessPreviewInputsReady=%d headlessPreviewContinueQueued=%d previewProceedResult=%d introProceedQueued=%d introFinished=%d visualStartEventQueued=%d previewCallbackActive=%d previewCallbackRestored=%d previewProbeDone=%d previewRequestTid=%d previewCallbackTid=%d",
         last_menu.load(), last_flow.load(), last_requested.load(), last_current.load(), last_busy.load(),
-        retry_count.load(), sent.load(), demo_sent.load(), demo_finished.load(), visual_start_sent.load(), active.load(), restored.load(), probe_done.load(), request_tid.load(), callback_tid.load());
+        retry_count.load(), sent.load(), last_headless_ready.load(), headless_continue.load(), proceed_result.load(),
+        demo_sent.load(), demo_finished.load(), visual_start_sent.load(), active.load(), restored.load(), probe_done.load(), request_tid.load(), callback_tid.load());
 }

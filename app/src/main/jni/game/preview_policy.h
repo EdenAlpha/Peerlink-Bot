@@ -1,7 +1,7 @@
 #pragma once
 
 namespace peerlink_preview {
-enum class Action { Wait, RetryMenu, Continue };
+enum class Action { Wait, RetryMenu, Continue, ContinueHeadless };
 struct View {
     bool preview_leaf;
     unsigned flow_state;
@@ -11,6 +11,9 @@ struct View {
     bool manager_idle;
     bool retried;
     bool idle_settled;
+    bool headless_inputs_ready = false;
+    unsigned manager_busy = 0;
+    bool graphics_wait_settled = false;
 };
 inline Action decide(const View &v) {
     if (!v.preview_leaf || !v.requested_preview || !v.current_nil) return Action::Wait;
@@ -18,6 +21,12 @@ inline Action decide(const View &v) {
     // Continue. It is normal while a menu is open. Actor state 6 separately
     // identifies the completed menu-opening lifecycle (3ac97c8 cases 5/6).
     if (v.flow_state == 7 && v.menu_state == 6) return Action::Continue;
+    // A no-render preview may keep loading its optional menu indefinitely.
+    // The original flow can leave this same state on its countdown. Submit
+    // its normal Continue event once the real match inputs are synchronized;
+    // do not mark the menu, players or transport ready.
+    if (v.flow_state == 7 && v.menu_state == 5 && v.headless_inputs_ready &&
+        v.manager_busy == 1 && v.graphics_wait_settled) return Action::ContinueHeadless;
     if (v.flow_state == 7 && v.menu_state == 0 && v.manager_idle &&
         !v.retried && v.idle_settled) return Action::RetryMenu;
     return Action::Wait;
