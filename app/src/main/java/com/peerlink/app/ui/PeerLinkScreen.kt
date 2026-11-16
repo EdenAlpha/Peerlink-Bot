@@ -84,6 +84,9 @@ import com.peerlink.app.godmode.PrimeLinkState
 import com.peerlink.app.godmode.PrimeClient
 import com.peerlink.app.godmode.PrimeMemoryAggression
 import com.peerlink.app.bot.BotRoomService
+import com.peerlink.app.bot.BotMode
+import com.peerlink.app.bot.BotPacketCounts
+import com.peerlink.app.bot.PeerSlot
 import com.peerlink.app.play.PlayRoomController
 import com.peerlink.app.play.RoomState
 import com.peerlink.app.service.CallMonitorService
@@ -92,7 +95,7 @@ import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
 /* PeerLink: charcoal, warm paper, lime and violet. */
-private object PL {
+internal object PL {
     val bg        = Color(0xFF111318)
     val elevated  = Color(0xFF181B22)
     val surface   = Color(0xFF21242D)
@@ -172,6 +175,8 @@ fun PeerLinkScreen(
     var sessionError by remember { mutableStateOf(AppState.sessionError.get()) }
     var tunneled by remember { mutableStateOf(AppState.tunneled.get()) }
     var passed by remember { mutableStateOf(AppState.passedThrough.get()) }
+    var botSession by remember { mutableStateOf(BotMode.active) }
+    var botTraffic by remember { mutableStateOf(PeerSlot.gameTraffic()) }
     var myIp by remember { mutableStateOf(AppState.myFabricatedIp) }
     var peerIp by remember { mutableStateOf(AppState.peerFabricatedIp) }
     var since by remember { mutableStateOf(0L) }
@@ -184,6 +189,8 @@ fun PeerLinkScreen(
                 since = AppState.sessionStartedElapsedMs.get()
                 tunneled = AppState.tunneled.get()
                 passed = AppState.passedThrough.get()
+                botSession = BotMode.active
+                botTraffic = PeerSlot.gameTraffic()
                 sessionPhase = AppState.sessionPhase.get()
                 sessionError = AppState.sessionError.get()
                 myIp = AppState.myFabricatedIp
@@ -193,7 +200,10 @@ fun PeerLinkScreen(
         }
     }
 
-    LaunchedEffect(Unit) { currentActions.startDiscovery() }
+    LaunchedEffect(Unit) {
+        PlayRoomController.attach(BotRoomService, ctx)
+        currentActions.startDiscovery()
+    }
 
     // ── Auto-restart discovery when Wi-Fi connects ─────────────────────
     // Previously, discovery was started once at screen load. If the user
@@ -274,7 +284,7 @@ fun PeerLinkScreen(
             Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 14.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Image(painterResource(R.drawable.ic_peerlink_mark), null, Modifier.size(42.dp))
+                Image(painterResource(R.drawable.peerlink_emblem), null, Modifier.size(42.dp).scale(1.4f))
                 Column(Modifier.weight(1f).pointerInput(actions.isAdmin) {
                     detectTapGestures(onLongPress = { if (!actions.isAdmin) adminUnlockOpen = true })
                 }) {
@@ -282,20 +292,20 @@ fun PeerLinkScreen(
                         color = PL.ink, letterSpacing = (-0.6).sp)
                     Text("Better together", fontSize = 12.sp, color = PL.muted)
                 }
-                DarkHeaderBtn(Icons.Rounded.Settings) { adminOpen = true }
+                DarkHeaderBtn(Icons.Rounded.Settings) { showGeneralSettings = true }
                 StatusChip(sessionPhase)
             }
 
             HorizontalPager(state = pager, modifier = Modifier.weight(1f)) { page ->
                 if (page == 0) MainPage(
                     name, { name = it; actions.saveName(it) },
-                    connected, sessionPhase, sessionError, peers, discovery, tunneled, passed, myIp, peerIp, since, primeActive, primeReady,
+                    connected, sessionPhase, sessionError, peers, discovery, tunneled, passed, myIp, peerIp, since, primeActive, primeReady, botSession, botTraffic,
                     onTapPeer = { p ->
                         if (!connected && (sessionPhase == PeerSessionPhase.IDLE || sessionPhase == PeerSessionPhase.ERROR)) {
                             actions.connectToPeer(p)
                         }
                     },
-                    onDisconnect = { actions.disconnect() },
+                    onDisconnect = { if (botSession) PlayRoomController.endSession() else actions.disconnect() },
                     onRetryDiscovery = actions.startDiscovery,
                     onToolToggle = { key, want ->
                         if (!primeReady) { primeToast(); false }
@@ -316,6 +326,9 @@ fun PeerLinkScreen(
                     ctx = ctx,
                     primeReady = primeReady,
                     primeActive = primeActive,
+                    botSession = botSession,
+                    traffic = botTraffic,
+                    onExportLogs = actions.exportMatchLogs,
                 )
             }
             NavigationBar(containerColor = PL.elevated, tonalElevation = 0.dp) {
@@ -359,6 +372,7 @@ fun PeerLinkScreen(
                 onSetupPrime = actions.onSetupPrimeMode,
                 onBatterySettings = actions.openBatterySettings,
                 onExportLogs = actions.exportMatchLogs,
+                onOpenDiagnostics = { showGeneralSettings = false; adminOpen = true },
                 onMatchMarker = actions.setMatchMarker,
                 ctx = ctx,
             )
@@ -381,6 +395,7 @@ private fun MainPage(
     peers: List<PeerInfo>, discovery: DiscoveryUiState,
     tunneled: Long, passed: Long, myIp: String, peerIp: String,
     since: Long, primeActive: Boolean, primeReady: Boolean,
+    botSession: Boolean, botTraffic: BotPacketCounts,
     onTapPeer: (PeerInfo) -> Unit, onDisconnect: () -> Unit,
     onRetryDiscovery: () -> Unit,
     onToolToggle: (String, Boolean) -> Boolean, callBlockOn: Boolean,
@@ -398,7 +413,7 @@ private fun MainPage(
     ) {
         item(key = "identity") { NameRow(name, onName) }
         item(key = "connection") {
-            ConnectionCore(connected, sessionPhase, sessionError, myIp, peerIp, since) {
+            ConnectionCore(connected, sessionPhase, sessionError, myIp, peerIp, since, botSession) {
                 val launch = ctx.packageManager.getLaunchIntentForPackage("jp.konami.pesam")
                 if (launch != null) runCatching { ctx.startActivity(launch) }.onFailure {
                     Toast.makeText(ctx, "Open eFootball from your home screen", Toast.LENGTH_SHORT).show()
@@ -407,13 +422,14 @@ private fun MainPage(
         }
         if (connected) {
             item(key = "traffic") {
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                if (botSession) BotTrafficCard(botTraffic)
+                else Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     StatCard(Modifier.weight(1f), "Game packets", tunneled, PL.green, true)
                     StatCard(Modifier.weight(1f), "Other packets", passed, PL.gold, false)
                 }
             }
             item(key = "disconnect") {
-                DisconnectCard(AppState.connectedPeerName.ifBlank { "Player" }, onDisconnect)
+                DisconnectCard(if (botSession) "PeerLink bot" else AppState.connectedPeerName.ifBlank { "Player" }, onDisconnect)
             }
         } else if (connectionPending) {
             item(key = "progress") { ConnectionProgressCard(sessionPhase, onDisconnect) }
@@ -480,7 +496,7 @@ private fun DisconnectCard(peerName: String, onDisconnect: () -> Unit) {
 /* ─── Components ─── */
 @Composable private fun DarkHeaderBtn(icon: ImageVector, onClick: () -> Unit) {
     IconButton(onClick = onClick, modifier = Modifier.size(48.dp)) {
-        Icon(icon, contentDescription = if (icon == Icons.Rounded.Settings) "Administration" else "Open menu", tint = PL.inkSoft)
+        Icon(icon, contentDescription = if (icon == Icons.Rounded.Settings) "Settings" else "Open menu", tint = PL.inkSoft)
     }
 }
 
@@ -542,7 +558,7 @@ private fun DisconnectCard(peerName: String, onDisconnect: () -> Unit) {
 
 @Composable private fun ConnectionCore(
     connected: Boolean, phase: PeerSessionPhase, error: String?,
-    myIp: String, peerIp: String, since: Long,
+    myIp: String, peerIp: String, since: Long, botSession: Boolean,
     onOpenGame: () -> Unit,
 ) {
     val owner = LocalLifecycleOwner.current
@@ -557,7 +573,7 @@ private fun DisconnectCard(peerName: String, onDisconnect: () -> Unit) {
             elapsed = "00:00"
         }
     }
-    val title = when (phase) {
+    val title = if (botSession && connected) "Your bot.\nYour match." else when (phase) {
         PeerSessionPhase.IDLE -> "Good games.\nGreat company."
         PeerSessionPhase.PAIRING -> "Meeting your player."
         PeerSessionPhase.STARTING_TUNNEL -> "Preparing your link."
@@ -566,7 +582,7 @@ private fun DisconnectCard(peerName: String, onDisconnect: () -> Unit) {
         PeerSessionPhase.STOPPING -> "Ending the connection."
         PeerSessionPhase.ERROR -> "Let's reconnect."
     }
-    val description = when (phase) {
+    val description = if (botSession && connected) "Open eFootball on this phone and join the bot's room." else when (phase) {
         PeerSessionPhase.IDLE -> "Join the same Wi-Fi or hotspot. Find your friend below and connect."
         PeerSessionPhase.PAIRING -> "Keep PeerLink open on both phones while they pair."
         PeerSessionPhase.STARTING_TUNNEL -> "Allow the VPN request on each phone to continue."
@@ -586,8 +602,9 @@ private fun DisconnectCard(peerName: String, onDisconnect: () -> Unit) {
                 Text(if (connected) "LINK ACTIVE · $elapsed" else "PLAY SIDE BY SIDE", color = PL.paperSoft,
                     fontSize = 11.sp, letterSpacing = 1.sp, fontWeight = FontWeight.SemiBold)
             }
-            Image(painterResource(R.drawable.ic_peerlink_mark), null,
-                Modifier.size(54.dp).background(PL.paperInk, CircleShape).padding(7.dp))
+            Box(Modifier.size(54.dp).background(PL.paperInk, CircleShape), contentAlignment = Alignment.Center) {
+                Image(painterResource(R.drawable.peerlink_emblem), null, Modifier.size(54.dp).scale(1.35f))
+            }
         }
         Text(title, color = PL.paperInk, fontSize = 32.sp, lineHeight = 36.sp,
             fontWeight = FontWeight.Bold, letterSpacing = (-1).sp)
@@ -1053,136 +1070,6 @@ private fun statLabel(name: String): String = when (name) {
         }
     }
 }
-/* ─── Play PeerLink: the bot hosts a room; you join it in your own eFootball ─── */
-@Composable
-private fun PlayPeerLinkPage(
-    ctx: Context,
-    primeReady: Boolean,
-    primeActive: Boolean,
-) {
-    val room by PlayRoomController.state.collectAsStateWithLifecycle()
-    LaunchedEffect(Unit) { PlayRoomController.attach(BotRoomService, ctx) }
-
-    Column(
-        Modifier.fillMaxSize().padding(horizontal = 20.dp).verticalScroll(rememberScrollState()),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
-        Spacer(Modifier.height(4.dp))
-        Text("Play PeerLink", color = PL.ink, fontSize = 28.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.5).sp)
-        Text(
-            "The bot hosts the match on this phone. Create a room, then type its number into your own eFootball to play — no second phone needed.",
-            color = PL.inkSoft, fontSize = 14.sp, lineHeight = 20.sp,
-        )
-        Spacer(Modifier.height(2.dp))
-
-        // Hero: one phone, two sides — bot hosts, game joins.
-        Box(
-            Modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp))
-                .background(Brush.linearGradient(listOf(Color(0xFF2A3320), Color(0xFF1E241A))))
-                .border(1.dp, PL.gold.copy(alpha = 0.25f), RoundedCornerShape(28.dp))
-                .padding(22.dp)
-        ) {
-            Column {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(44.dp).clip(RoundedCornerShape(14.dp)).background(PL.gold.copy(alpha = 0.16f)), contentAlignment = Alignment.Center) {
-                        Icon(Icons.Rounded.SportsSoccer, null, tint = PL.gold, modifier = Modifier.size(22.dp))
-                    }
-                    Spacer(Modifier.width(12.dp))
-                    Column {
-                        Text("YOUR MATCH", fontSize = 10.sp, color = PL.gold, letterSpacing = 1.4.sp, fontWeight = FontWeight.Bold)
-                        Text("Bot hosts, you join", fontSize = 17.sp, color = PL.ink, fontWeight = FontWeight.Bold)
-                    }
-                }
-                Spacer(Modifier.height(14.dp))
-                Text(
-                    "The bot opens a room at Konami and gets a number. You type that number into eFootball on this phone; the game connects to the bot over the PeerLink VPN as a normal peer-to-peer match.",
-                    fontSize = 12.5.sp, color = PL.inkSoft, lineHeight = 19.sp,
-                )
-                Spacer(Modifier.height(16.dp))
-                GhostBtn("Create room", Icons.Rounded.Add) { PlayRoomController.createRoom() }
-            }
-        }
-
-        when (val s = room) {
-            is RoomState.Creating -> DarkCard {
-                Text("Opening a room…", color = PL.ink, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-                Spacer(Modifier.height(6.dp))
-                Text(s.note, color = PL.inkSoft, fontSize = 12.5.sp, lineHeight = 19.sp)
-            }
-            is RoomState.Ready -> RoomCodeCard(s.number, ctx)
-            is RoomState.FilesNeeded -> DarkCard {
-                Text("Bot files needed", color = PL.ink, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-                Spacer(Modifier.height(6.dp))
-                Text("PeerLink couldn't find or read ${s.missingFiles} match files. The game's main files are checked separately.",
-                    color = PL.inkSoft, fontSize = 12.5.sp, lineHeight = 19.sp)
-                Spacer(Modifier.height(6.dp))
-                Text("PeerLink will use files already on this phone. Some eFootball files may be private to the game.",
-                    color = PL.muted, fontSize = 12.sp, lineHeight = 18.sp)
-                Spacer(Modifier.height(10.dp))
-                GhostBtn("Check phone files again", Icons.Rounded.Refresh) { PlayRoomController.createRoom() }
-            }
-            is RoomState.Failed -> DarkCard {
-                Text("Couldn't open a room", color = PL.red, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-                Spacer(Modifier.height(6.dp))
-                Text(s.reason, color = PL.inkSoft, fontSize = 12.5.sp, lineHeight = 19.sp)
-                Spacer(Modifier.height(10.dp))
-                GhostBtn("Try again", Icons.Rounded.Refresh) { PlayRoomController.createRoom() }
-            }
-            is RoomState.Idle -> {}
-        }
-
-        SectionTitle("How it works")
-        DarkCard {
-            Feat("The bot hosts", "It opens the room at Konami, so the number comes from the bot — not from your game.")
-            Feat("You join in eFootball", "Type the number into your own eFootball to enter the match against the bot.")
-            Feat("PeerLink VPN", "The tunnel fakes open NAT for both sides, keeping the game on a direct peer-to-peer path.")
-            if (!primeReady) {
-                Spacer(Modifier.height(2.dp))
-                Text(
-                    "Prime Mode is optional here, but pairing it keeps the connection steadier. Find it under the gear → General Settings.",
-                    fontSize = 12.sp, color = PL.muted, lineHeight = 17.sp,
-                )
-            } else if (primeActive) {
-                Spacer(Modifier.height(2.dp))
-                Text("Prime Mode is on.", fontSize = 12.sp, color = PL.green, lineHeight = 17.sp)
-            }
-            if (room is RoomState.Ready) {
-                Spacer(Modifier.height(8.dp))
-                GhostBtn("Clear room", Icons.Rounded.Delete) { PlayRoomController.clear() }
-            }
-        }
-        Spacer(Modifier.height(4.dp))
-    }
-}
-
-/** Big, copyable room number — type this into your own eFootball to join the bot. */
-@Composable
-private fun RoomCodeCard(number: String, ctx: Context) {
-    Column(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp))
-            .background(Brush.linearGradient(listOf(Color(0xFF26301E), Color(0xFF1B2117))))
-            .border(1.dp, PL.gold.copy(alpha = 0.35f), RoundedCornerShape(24.dp))
-            .padding(22.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Text("ROOM NUMBER", fontSize = 10.sp, color = PL.gold, letterSpacing = 1.6.sp, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.height(12.dp))
-        Text(
-            number,
-            fontSize = 32.sp, fontWeight = FontWeight.Bold, color = PL.ink,
-            fontFamily = FontFamily.Monospace, letterSpacing = 3.sp,
-            textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth(),
-        )
-        Spacer(Modifier.height(6.dp))
-        Text("Open eFootball on this phone and enter this number to join the bot.", fontSize = 12.sp, color = PL.inkSoft, textAlign = TextAlign.Center)
-        Spacer(Modifier.height(16.dp))
-        GhostBtn("Copy number", Icons.Rounded.ContentCopy) {
-            PlayRoomController.copyNumber(ctx, number)
-            Toast.makeText(ctx, "Room number copied", Toast.LENGTH_SHORT).show()
-        }
-    }
-}
-
 /* ─── General Settings: the settings page, opened from the gear panel ─── */
 @Composable
 private fun GeneralSettingsOverlay(
@@ -1192,17 +1079,18 @@ private fun GeneralSettingsOverlay(
     onSetupPrime: () -> Unit,
     onBatterySettings: () -> Unit,
     onExportLogs: () -> Unit,
+    onOpenDiagnostics: () -> Unit,
     onMatchMarker: (Boolean) -> Unit,
     ctx: Context,
 ) {
     Box(Modifier.fillMaxSize().background(PL.bg)) {
         Column(Modifier.fillMaxSize().statusBarsPadding()) {
             Row(
-                Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp).testTag("settings-screen"),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 IconButton(onClick = onBack) { Icon(Icons.Rounded.ArrowBack, "Back", tint = PL.ink) }
-                Text("General Settings", color = PL.ink, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                Text("Settings", color = PL.ink, fontSize = 18.sp, fontWeight = FontWeight.Bold)
             }
             Box(Modifier.weight(1f)) {
                 SettingsPage(
@@ -1211,6 +1099,7 @@ private fun GeneralSettingsOverlay(
                     onSetupPrime = onSetupPrime,
                     onBatterySettings = onBatterySettings,
                     onExportLogs = onExportLogs,
+                    onOpenDiagnostics = onOpenDiagnostics,
                     onMatchMarker = onMatchMarker,
                     ctx = ctx,
                 )
@@ -1226,6 +1115,7 @@ private fun SettingsPage(
     onSetupPrime: () -> Unit,
     onBatterySettings: () -> Unit,
     onExportLogs: () -> Unit,
+    onOpenDiagnostics: () -> Unit,
     onMatchMarker: (Boolean) -> Unit,
     ctx: Context,
 ) {
@@ -1237,75 +1127,124 @@ private fun SettingsPage(
                 .getBoolean("match_marker_enabled", true) && android.provider.Settings.canDrawOverlays(ctx)
         }
     }
-    var open by remember { mutableStateOf(-1) }
-    Column(
-        Modifier.fillMaxSize().padding(horizontal = 20.dp).verticalScroll(rememberScrollState()),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
+    var whistleOpen by rememberSaveable { mutableStateOf(false) }
+    LazyColumn(
+        Modifier.fillMaxSize().testTag("settings-list"),
+        contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 32.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        Spacer(Modifier.height(4.dp))
-        Text("Settings", color = PL.ink, fontSize = 28.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.5).sp)
-        Text("Everything here is optional. Matches work the same without any of it.", color = PL.inkSoft, fontSize = 14.sp)
-        Spacer(Modifier.height(2.dp))
-
-        SectionTitle("Prime Mode")
-        DarkCard {
-            GhostBtn(
-                when {
-                    primeActive -> "Prime Mode is on"
-                    primeReady -> "Turn Prime Mode on"
-                    else -> "Set up Prime Mode"
-                },
-                Icons.Rounded.AutoAwesome,
-            ) { onSetupPrime() }
-            Spacer(Modifier.height(10.dp))
-            Text(
-                when {
-                    primeActive -> "Running now. It keeps your connection steady while you play."
-                    primeReady -> "Ready to go. Turn it on before your next match."
-                    else -> "Pair once, then it can guard your connection during matches."
-                },
-                fontSize = 12.5.sp, color = PL.inkSoft, lineHeight = 19.sp,
-            )
-            Spacer(Modifier.height(12.dp))
-            Feat("Airplane-mode shield", "A mis-tap will not drop your link.")
-            Feat("Call blocking", "Calls are ignored only while you are playing.")
-            Spacer(Modifier.height(4.dp))
-            GhostBtn("Battery protection", Icons.Rounded.BatterySaver) { onBatterySettings() }
-            Spacer(Modifier.height(6.dp))
-            Text("Stops Android from putting PeerLink to sleep mid-match.", fontSize = 12.sp, color = PL.muted, lineHeight = 17.sp)
+        item(key = "heading") {
+            Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                Text("YOUR EXPERIENCE", color = PL.indigoGlow, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.4.sp)
+                Text("Make it yours.", color = PL.ink, fontSize = 29.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.7).sp)
+                Text("A few thoughtful controls for the way you play.", color = PL.inkSoft, fontSize = 14.sp, lineHeight = 20.sp)
+            }
         }
-
-        SectionTitle("While you play")
-        DarkCard {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text("Match markers", color = PL.ink, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-                    Text("Shows which side you are on", color = PL.muted, fontSize = 12.sp)
+        item(key = "prime") {
+            val shape = RoundedCornerShape(26.dp)
+            Column(
+                Modifier.fillMaxWidth().clip(shape)
+                    .background(Brush.linearGradient(listOf(Color(0xFF302C48), Color(0xFF242633), Color(0xFF222D29))))
+                    .border(1.dp, PL.indigo.copy(alpha = 0.25f), shape).padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Box(Modifier.size(46.dp).clip(RoundedCornerShape(15.dp)).background(PL.indigo.copy(alpha = 0.16f)),
+                        contentAlignment = Alignment.Center) {
+                        Icon(Icons.Rounded.AutoAwesome, null, tint = PL.indigoGlow, modifier = Modifier.size(23.dp))
+                    }
+                    Column(Modifier.weight(1f)) {
+                        Text("PRIME MODE", color = PL.indigoGlow, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp)
+                        Text(if (primeActive) "Active" else if (primeReady) "Ready to activate" else "Optional setup",
+                            color = PL.ink, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                    }
                 }
-                Switch(checked = markerEnabled, onCheckedChange = { markerEnabled = it; onMatchMarker(it) })
+                Text("More control over your phone while you play.", color = PL.ink, fontSize = 18.sp,
+                    lineHeight = 23.sp, fontWeight = FontWeight.Bold)
+                Text("Pair once to access the controls supported by your phone.", color = PL.inkSoft, fontSize = 12.5.sp, lineHeight = 18.sp)
+                Button(onClick = onSetupPrime, modifier = Modifier.fillMaxWidth().heightIn(min = 50.dp).testTag("settings-prime"),
+                    shape = RoundedCornerShape(15.dp), colors = ButtonDefaults.buttonColors(containerColor = PL.gold, contentColor = PL.bg)) {
+                    Text(if (primeReady || primeActive) "Open Prime Mode" else "Set up Prime Mode",
+                        Modifier.weight(1f), fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    Icon(Icons.Rounded.ArrowForward, null, Modifier.size(18.dp))
+                }
             }
-            Spacer(Modifier.height(6.dp))
-            Acc(3, open, "Whistle sounds", "Record and play the final whistle", Icons.Rounded.GraphicEq, { open = if (open == 3) -1 else 3 }) {
-                WhistleSoundsBody(ctx)
+        }
+        item(key = "phone-label") { SettingsSectionLabel("ON YOUR PHONE") }
+        item(key = "phone") {
+            SettingsGroup {
+                SettingsActionRow(Icons.Rounded.BatterySaver, "Battery settings", "Help PeerLink stay available in the background", onBatterySettings)
+                HorizontalDivider(color = PL.line, modifier = Modifier.padding(start = 62.dp))
+                Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 11.dp), verticalAlignment = Alignment.CenterVertically) {
+                    SettingsRowIcon(Icons.Rounded.SportsSoccer)
+                    Column(Modifier.weight(1f).padding(start = 12.dp, end = 8.dp)) {
+                        Text("Match markers", color = PL.ink, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                        Text("Show your side during a match", color = PL.muted, fontSize = 12.sp, lineHeight = 17.sp)
+                    }
+                    Switch(checked = markerEnabled, onCheckedChange = {
+                        markerEnabled = it && android.provider.Settings.canDrawOverlays(ctx)
+                        onMatchMarker(it)
+                    })
+                }
             }
         }
-
-        SectionTitle("Your coins")
-        DarkCard {
-            Text(
-                "You earn PeerCoins by playing and winning over PeerLink. Beating your rival by more earns more. " +
-                    "Only matches verified from the eFootball result screen count.",
-                fontSize = 12.5.sp, color = PL.inkSoft, lineHeight = 19.sp,
-            )
+        item(key = "match-label") { SettingsSectionLabel("MATCH EXPERIENCE") }
+        item(key = "match") {
+            SettingsGroup {
+                SettingsActionRow(Icons.Rounded.GraphicEq, "Whistle sounds", "Record and listen to a test", { whistleOpen = !whistleOpen },
+                    if (whistleOpen) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore)
+                AnimatedVisibility(whistleOpen) {
+                    Column(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 16.dp)) { WhistleSoundsBody(ctx) }
+                }
+                HorizontalDivider(color = PL.line, modifier = Modifier.padding(start = 62.dp))
+                Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.Top) {
+                    SettingsRowIcon(Icons.Rounded.Star)
+                    Column(Modifier.padding(start = 12.dp)) {
+                        Text("PeerCoins", color = PL.ink, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                        Text("Earn coins from matches verified on the eFootball result screen.", color = PL.muted, fontSize = 12.sp, lineHeight = 17.sp)
+                    }
+                }
+            }
         }
-
-        SectionTitle("Help")
-        DarkCard {
-            GhostBtn("Export match diagnostics", Icons.Rounded.Download) { onExportLogs() }
-            Spacer(Modifier.height(6.dp))
-            Text("Saves a copy of the match log you can share if something looks wrong.", fontSize = 12.sp, color = PL.muted, lineHeight = 17.sp)
+        item(key = "help-label") { SettingsSectionLabel("HELP & DIAGNOSTICS") }
+        item(key = "help") {
+            SettingsGroup {
+                SettingsActionRow(Icons.Rounded.Download, "Export match logs", "Save a copy to share when you need help", onExportLogs)
+                HorizontalDivider(color = PL.line, modifier = Modifier.padding(start = 62.dp))
+                SettingsActionRow(Icons.Rounded.Description, "Crash logs & advanced", "View crash reports and additional tools", onOpenDiagnostics)
+            }
         }
-        Spacer(Modifier.height(4.dp))
+    }
+}
+
+@Composable private fun SettingsSectionLabel(label: String) {
+    Text(label, color = PL.muted, fontSize = 10.sp, fontWeight = FontWeight.Bold,
+        letterSpacing = 1.3.sp, modifier = Modifier.padding(start = 3.dp, top = 2.dp))
+}
+
+@Composable private fun SettingsGroup(content: @Composable ColumnScope.() -> Unit) {
+    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp)).background(PL.elevated)
+        .border(1.dp, PL.line.copy(alpha = 0.8f), RoundedCornerShape(22.dp)), content = content)
+}
+
+@Composable private fun SettingsRowIcon(icon: ImageVector) {
+    Box(Modifier.size(38.dp).clip(RoundedCornerShape(12.dp)).background(PL.surface), contentAlignment = Alignment.Center) {
+        Icon(icon, null, tint = PL.indigoGlow, modifier = Modifier.size(19.dp))
+    }
+}
+
+@Composable private fun SettingsActionRow(
+    icon: ImageVector, title: String, detail: String, onClick: () -> Unit,
+    trailing: ImageVector = Icons.Rounded.ArrowForward,
+) {
+    Row(Modifier.fillMaxWidth().clickable(role = Role.Button, onClick = onClick).padding(16.dp),
+        verticalAlignment = Alignment.CenterVertically) {
+        SettingsRowIcon(icon)
+        Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
+            Text(title, color = PL.ink, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+            Text(detail, color = PL.muted, fontSize = 12.sp, lineHeight = 17.sp)
+        }
+        Icon(trailing, null, tint = PL.muted, modifier = Modifier.size(18.dp))
     }
 }
 
@@ -1655,13 +1594,13 @@ fun PrimeSetupScreen(
         }
     }
     var showForgetConfirm by remember { mutableStateOf(false) }
-    var shellInput by remember { mutableStateOf(TextFieldValue("pm disable-user --user 0 com.transsion.phonemaster")) }
+    var showPairingHelp by rememberSaveable { mutableStateOf(false) }
+    var showAdvanced by rememberSaveable { mutableStateOf(false) }
+    var shellInput by remember { mutableStateOf(TextFieldValue("")) }
     var shellOutput by remember { mutableStateOf("") }
     var shellOk by remember { mutableStateOf<Boolean?>(null) }
     var shellBusy by remember { mutableStateOf(false) }
     val shellScope = rememberCoroutineScope()
-    val mainHandler = remember { android.os.Handler(android.os.Looper.getMainLooper()) }
-
     val (heroLabel, heroColor) = when {
         isActive -> "Prime Mode Active" to PL.green
         state == GodModeManager.State.PAIRED_IDLE && snap.bootstrapped -> "Prime Mode Ready" to PL.green
@@ -1672,86 +1611,78 @@ fun PrimeSetupScreen(
         else -> "Not set up" to PL.muted
     }
 
-    Column(Modifier.fillMaxSize().background(PL.bg).statusBarsPadding().verticalScroll(rememberScrollState())) {
-        Row(Modifier.fillMaxWidth().padding(16.dp, 10.dp, 16.dp, 6.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(38.dp).clip(RoundedCornerShape(12.dp)).background(PL.surface).clickable { onBack() }, contentAlignment = Alignment.Center) {
-                Icon(Icons.Rounded.ArrowBack, null, tint = PL.ink, modifier = Modifier.size(19.dp))
-            }
-            Spacer(Modifier.width(12.dp))
-            Text("Prime Mode", fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, color = PL.ink)
+    Column(Modifier.fillMaxSize().background(PL.bg).statusBarsPadding().verticalScroll(rememberScrollState()).testTag("prime-setup-screen")) {
+        Row(Modifier.fillMaxWidth().padding(12.dp, 8.dp, 16.dp, 6.dp), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onBack) { Icon(Icons.Rounded.ArrowBack, "Back", tint = PL.ink) }
+            Text("Prime Mode", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = PL.ink)
         }
-        Column(Modifier.padding(16.dp, 4.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(Modifier.padding(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
 
             // status hero
-            Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(PL.surface).border(1.dp, PL.line, RoundedCornerShape(16.dp)).padding(16.dp)) {
-                Column {
+            Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(26.dp))
+                .background(Brush.linearGradient(listOf(Color(0xFF302B49), Color(0xFF222C2C))))
+                .border(1.dp, PL.indigo.copy(alpha = 0.25f), RoundedCornerShape(26.dp)).padding(20.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(13.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(Modifier.size(46.dp).clip(RoundedCornerShape(14.dp)).background(if (isPaired) PL.gold.copy(alpha = 0.16f) else PL.elevated), contentAlignment = Alignment.Center) {
-                            Icon(if (isActive) Icons.Rounded.FlashOn else if (isPaired) Icons.Rounded.CheckCircle else Icons.Rounded.Lock, null, tint = if (isPaired) PL.gold else PL.muted, modifier = Modifier.size(22.dp))
+                        Box(Modifier.size(46.dp).clip(RoundedCornerShape(15.dp)).background(PL.indigo.copy(alpha = 0.17f)), contentAlignment = Alignment.Center) {
+                            Icon(if (isActive) Icons.Rounded.FlashOn else Icons.Rounded.AutoAwesome, null, tint = PL.indigoGlow, modifier = Modifier.size(23.dp))
                         }
                         Spacer(Modifier.width(13.dp))
                         Column(Modifier.weight(1f)) {
-                            Text(heroLabel, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold, color = PL.ink)
-                            Text(status.ifBlank { "One-time pairing unlocks verified Prime controls" }, fontSize = 11.sp, color = PL.muted, lineHeight = 15.sp)
+                            Text("PRIME MODE", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = PL.indigoGlow, letterSpacing = 1.2.sp)
+                            Text(heroLabel, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = PL.ink)
                         }
-                        Box(Modifier.size(11.dp).clip(CircleShape).background(heroColor))
+                        Box(Modifier.size(8.dp).clip(CircleShape).background(heroColor))
                     }
-                    Spacer(Modifier.height(12.dp))
+                    Text(if (isActive) "Ready for your match." else if (isPaired) "Your controls, ready when you are." else "A little setup.\nMore control.",
+                        color = PL.ink, fontSize = 23.sp, lineHeight = 28.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.5).sp)
+                    Text(status.ifBlank { "Pair this phone once to use supported Prime controls." },
+                        fontSize = 12.sp, color = PL.inkSoft, lineHeight = 18.sp)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         PrimeStatusPill(Modifier.weight(1f), "PAIRED", isPaired)
                         PrimeStatusPill(Modifier.weight(1f), "GRANT", snap.bootstrapped)
-                        PrimeStatusPill(Modifier.weight(1f), "SERVER", snap.primeServerAlive)
+                        PrimeStatusPill(Modifier.weight(1f), "ENGINE", snap.primeServerAlive)
                     }
                 }
             }
 
-            // Setup and recovery controls remain visible throughout the flow.
-            // Users move between PeerLink and Developer Options several times;
-            // no transient state is allowed to remove the next required action.
-            PrimeSetupStep(
-                "1",
-                "Open Wireless Debugging",
-                "Turn Wireless Debugging ON, then choose “Pair device with pairing code”. Android 11 or newer is required.",
-            ) {
-                GhostBtn("Open Developer Options", Icons.Rounded.Settings) {
-                    GodModeManager.openWirelessDebuggingSettings(ctx)
+            if (isPaired && !isBusy) {
+                TextButton(onClick = { showPairingHelp = !showPairingHelp }) {
+                    Text(if (showPairingHelp) "Hide pairing help" else "Pairing help", color = PL.indigoGlow)
                 }
-                Spacer(Modifier.height(7.dp))
-                Text(
-                    if (wirelessDebugAvailable) "Wireless Debugging service detected on this phone."
-                    else "PeerLink has not detected Android's Wireless Debugging service yet.",
-                    fontSize = 10.5.sp,
-                    color = if (wirelessDebugAvailable) PL.green else PL.muted,
-                    lineHeight = 15.sp,
-                )
             }
-
-            PrimeSetupStep(
-                "2",
-                if (pairingBusy) "PeerLink is watching for the pairing port" else "Start the pairing watcher",
-                "Start this first, then open the pairing-code dialog on your phone. The code goes into the PeerLink notification — there is nothing to type here, so allow notifications.",
-            ) {
-                GhostBtn(
-                    when (state) {
-                        GodModeManager.State.PAIRING -> "Pairing…"
-                        GodModeManager.State.DISCOVERING -> "Restart pairing watcher"
-                        else -> "Start pairing watcher"
-                    },
-                    Icons.Rounded.Notifications,
-                    enabled = !activationBusy && !isActive && state != GodModeManager.State.PAIRING,
-                    onClick = onStartPairing,
-                )
-                Spacer(Modifier.height(7.dp))
-                Text(
-                    when {
-                        GodModeManager.isPairingPortReady -> "Ready. Type the 6-digit code in the PeerLink notification."
-                        pairingBusy -> "Waiting for Android's pairing endpoint."
-                        else -> "Not watching yet. Start it, then open the pairing-code dialog on your phone."
-                    },
-                    fontSize = 10.5.sp,
-                    color = if (GodModeManager.isPairingPortReady) PL.green else PL.muted,
-                    lineHeight = 15.sp,
-                )
+            if (!isPaired || isBusy || showPairingHelp) {
+                SettingsSectionLabel("PAIR THIS PHONE")
+                PrimeSetupStep(
+                    "1", "Start pairing",
+                    "Start PeerLink's pairing notification first. Allow notifications if Android asks.",
+                ) {
+                    GhostBtn(
+                        when (state) {
+                            GodModeManager.State.PAIRING -> "Pairing…"
+                            GodModeManager.State.DISCOVERING -> "Restart pairing"
+                            else -> "Start pairing"
+                        }, Icons.Rounded.Notifications,
+                        enabled = !activationBusy && !isActive && state != GodModeManager.State.PAIRING,
+                        onClick = onStartPairing,
+                    )
+                    Spacer(Modifier.height(7.dp))
+                    Text(when {
+                        GodModeManager.isPairingPortReady -> "Enter the 6-digit code in the PeerLink notification."
+                        pairingBusy -> "PeerLink is waiting for the pairing code."
+                        else -> "Start here, then open Wireless Debugging."
+                    }, fontSize = 11.sp, color = if (pairingBusy) PL.green else PL.muted, lineHeight = 16.sp)
+                }
+                PrimeSetupStep(
+                    "2", "Open Wireless Debugging",
+                    "Turn it on, choose “Pair device with pairing code”, then enter the 6-digit code in the PeerLink notification.",
+                ) {
+                    GhostBtn("Open Developer Options", Icons.Rounded.Settings) { GodModeManager.openWirelessDebuggingSettings(ctx) }
+                    Spacer(Modifier.height(7.dp))
+                    Text(if (wirelessDebugAvailable) "Wireless Debugging detected."
+                        else "Android 11 or newer is required.", fontSize = 11.sp,
+                        color = if (wirelessDebugAvailable) PL.green else PL.muted, lineHeight = 16.sp)
+                }
             }
 
             if (isPaired) {
@@ -1810,6 +1741,14 @@ fun PrimeSetupScreen(
             if (isPaired) {
                 PrimeEngineStrip(primeLinkState, snap.primeServerAlive)
 
+                SettingsGroup {
+                    SettingsActionRow(Icons.Rounded.Tune, "Advanced controls", "Memory, graphics, CPU and shell",
+                        { showAdvanced = !showAdvanced },
+                        if (showAdvanced) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore)
+                }
+                AnimatedVisibility(showAdvanced) {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+
                 PrimeControlCard(
                     title = "Prime Shell",
                     subtitle = "Run one privileged command. Prime engine must be alive.",
@@ -1834,7 +1773,7 @@ fun PrimeSetupScreen(
                                     .padding(12.dp),
                             ) {
                                 if (shellInput.text.isEmpty()) {
-                                    Text("pm disable-user --user 0 <package>", color = PL.muted, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
+                                    Text("Enter a command", color = PL.muted, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
                                 }
                                 inner()
                             }
@@ -2063,6 +2002,8 @@ fun PrimeSetupScreen(
                     PrimeInfoLine("Rule #1", "PeerLink packet path stays protected")
                     PrimeInfoLine("Rule #2", "Meet 30/60 FPS smoothly before reducing quality")
                 }
+                    }
+                }
             }
 
             // what it unlocks
@@ -2070,10 +2011,10 @@ fun PrimeSetupScreen(
                 Column {
                     Text("What Prime Mode unlocks", fontSize = 9.sp, fontWeight = FontWeight.ExtraBold, color = PL.muted, letterSpacing = 1.5.sp)
                     Spacer(Modifier.height(8.dp))
-                    Feat("Shield", "Mis-tap airplane mode mid-match? Only data drops — your link survives.")
-                    Feat("Prime Memory", "Instant Vault outside matches; Return Shield during multiplayer. Android cannot truly pin another app in RAM, so Prime protects it intelligently instead.")
-                    Feat("No Calls", "Silently rejects calls only while you're playing.")
-                    Feat("Prime Auto Tuner", "Measures real frame consistency and adapts only supported controls; manual settings always remain available.")
+                    Feat("Connection controls", "Optional protections for your connection while you play.")
+                    Feat("Memory", "Supported controls help keep your game and PeerLink available.")
+                    Feat("Call protection", "Choose whether calls are blocked during a match.")
+                    Feat("Performance", "Use the tuning controls your phone supports.")
                 }
             }
             Spacer(Modifier.height(10.dp))
@@ -2329,15 +2270,15 @@ private fun PrimeActionButton(
 @Composable private fun PrimeSetupStep(num: String, title: String, desc: String, action: @Composable ColumnScope.() -> Unit) {
     Box(
         Modifier.fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .background(PL.surface)
-            .border(1.dp, PL.line, RoundedCornerShape(16.dp))
-            .padding(16.dp)
+            .clip(RoundedCornerShape(22.dp))
+            .background(PL.elevated)
+            .border(1.dp, PL.line, RoundedCornerShape(22.dp))
+            .padding(18.dp)
     ) {
         Column {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(26.dp).clip(CircleShape).background(PL.gold.copy(alpha = 0.16f)), contentAlignment = Alignment.Center) {
-                    Text(num, fontSize = 12.sp, fontWeight = FontWeight.ExtraBold, color = PL.gold)
+                Box(Modifier.size(30.dp).clip(RoundedCornerShape(10.dp)).background(PL.gold.copy(alpha = 0.12f)), contentAlignment = Alignment.Center) {
+                    Text(num, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = PL.gold)
                 }
                 Spacer(Modifier.width(10.dp))
                 Text(title, fontSize = 13.5.sp, fontWeight = FontWeight.Bold, color = PL.ink)

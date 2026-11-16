@@ -950,9 +950,9 @@ class MainActivity : AppCompatActivity(), NsdDiscovery.NsdCallback {
                 Spacer(modifier = Modifier.height(24.dp))
 
                 androidx.compose.foundation.Image(
-                    painter = androidx.compose.ui.res.painterResource(com.peerlink.app.R.drawable.ic_peerlink_mark),
+                    painter = androidx.compose.ui.res.painterResource(com.peerlink.app.R.drawable.peerlink_emblem),
                     contentDescription = null,
-                    modifier = Modifier.size(64.dp)
+                    modifier = Modifier.size(64.dp).scale(1.35f)
                 )
                 Spacer(modifier = Modifier.height(16.dp))
 

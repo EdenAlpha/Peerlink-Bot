@@ -55,6 +55,11 @@ class BotFerryTransportTest {
                 // return route, even when both candidates are active.
                 engine.sendTo(reply, PeerSlot.ENGINE_PORT)
                 assertArrayEquals(reply, game.receiveBytes())
+                val deadline = System.nanoTime() + 1_000_000_000L
+                while (PeerSlot.gameTraffic().toGame < 4 && System.nanoTime() < deadline) Thread.sleep(10)
+                val traffic = PeerSlot.gameTraffic()
+                assertEquals("Both game routes are counted once", 2L, traffic.fromGame)
+                assertEquals("Only forwarded bot replies are counted", 4L, traffic.toGame)
             } finally { PeerSlot.disarm() }
         } } }
     }

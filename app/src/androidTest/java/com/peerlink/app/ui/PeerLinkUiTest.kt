@@ -12,6 +12,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import com.peerlink.app.core.AppState
 import com.peerlink.app.core.PeerInfo
 import com.peerlink.app.core.PeerSessionPhase
+import com.peerlink.app.godmode.GodModeManager
 import org.junit.After
 import org.junit.Rule
 import org.junit.Test
@@ -23,7 +24,8 @@ class PeerLinkUiTest {
     @get:Rule val compose = createComposeRule()
     private val context get() = InstrumentationRegistry.getInstrumentation().targetContext
 
-    private fun show(active: Boolean = false, largeText: Boolean = false, connect: () -> Unit = {}, disconnect: () -> Unit = {}) {
+    private fun show(active: Boolean = false, largeText: Boolean = false, connect: () -> Unit = {}, disconnect: () -> Unit = {}, prime: () -> Unit = {}) {
+        GodModeManager.init(context)
         context.getSharedPreferences("peerlink_prefs", Context.MODE_PRIVATE).edit().putString("username", "Emmanuel").commit()
         AppState.isRunning.set(active)
         AppState.sessionPhase.set(if (active) PeerSessionPhase.ACTIVE else PeerSessionPhase.IDLE)
@@ -36,7 +38,8 @@ class PeerLinkUiTest {
                 PeerLinkTheme {
                     PeerLinkScreen(context, listOf(PeerInfo("Alex", "192.0.2.2")),
                         DiscoveryUiState(phase = DiscoveryPhase.PEERS_FOUND, message = "One player nearby", peerCount = 1),
-                        PeerLinkActions(saveName = {}, connectToPeer = { connect() }, disconnect = disconnect))
+                        PeerLinkActions(saveName = {}, connectToPeer = { connect() }, disconnect = disconnect,
+                            onSetupPrimeMode = prime))
                 }
             }
         }
@@ -87,8 +90,40 @@ class PeerLinkUiTest {
         screenshot("large-text")
         compose.onNodeWithTag("home-list").performScrollToNode(hasText("Alex"))
         compose.onNodeWithText("Alex").assertIsDisplayed()
-        compose.onNodeWithText("Settings", useUnmergedTree = true).performClick()
-        compose.onNodeWithContentDescription("Close panel").assertIsDisplayed().performClick()
-        compose.onNodeWithContentDescription("Close panel").assertDoesNotExist()
+        compose.onNodeWithContentDescription("Settings").performClick()
+        compose.onNodeWithTag("settings-screen").assertIsDisplayed()
+        compose.onNodeWithText("Make it yours.").assertIsDisplayed()
+        screenshot("settings-large-text")
+        compose.onNodeWithContentDescription("Back").performClick()
+        compose.onNodeWithTag("home-list").assertIsDisplayed()
+    }
+
+    @Test fun botPageHasOneClearRoomAction() {
+        show()
+        compose.onNodeWithText("Play PeerLink", useUnmergedTree = true).performClick()
+        compose.onNodeWithTag("bot-match-page").assertIsDisplayed()
+        compose.onNodeWithTag("bot-create-room").assertIsDisplayed()
+        compose.onAllNodesWithText("Create room").assertCountEquals(1)
+        screenshot("bot-match")
+    }
+
+    @Test fun settingsOpensPrimeSetupAndKeepsCrashLogsReachable() {
+        var openedPrime = 0
+        show(prime = { openedPrime++ })
+        compose.onNodeWithContentDescription("Settings").performClick()
+        compose.onNodeWithTag("settings-prime").performClick()
+        compose.runOnIdle { assertEquals(1, openedPrime) }
+        screenshot("settings")
+        compose.onNodeWithTag("settings-list").performScrollToNode(hasText("Crash logs & advanced"))
+        compose.onNodeWithText("Crash logs & advanced").performClick()
+        compose.onNodeWithText("Crash Logs").assertIsDisplayed()
+    }
+
+    @Test fun primeSetupShowsPairingActions() {
+        GodModeManager.init(context)
+        compose.setContent { PeerLinkTheme { PrimeSetupScreen(context, onBack = {}, onStartPairing = {}) } }
+        compose.onNodeWithTag("prime-setup-screen").assertIsDisplayed()
+        compose.onNodeWithText("Prime Mode").assertIsDisplayed()
+        screenshot("prime-setup")
     }
 }

@@ -241,5 +241,42 @@
     "passObservationZipSha256": "bc0bbe84d533abc67abf46e0c89e921c432be2b1aab3f0e106187463f179453d",
     "scope": "Android 15 ARM64 lab, debugger patched; the fixture summary incorrectly says no external observer. The user phone was not tested.",
     "awayAutomaticInputEnabled": true
+  },
+  "headlessMeshWaitCleanAppTest": {
+    "commit": "cf5f9260ede1413c32fb021610bc5d86bd43d30c",
+    "apkSha256": "5af5570702ef7fda07a1b2a59577043de238553cdc2d0e49250037499cb8de34",
+    "ciRun": 43826335790,
+    "debuggerAssisted": false,
+    "extraPacksAbsent": 63,
+    "gameResourceDownloads": 0,
+    "bothConnectedAndRealServerContext": true,
+    "awayAutomaticInputEnabled": false,
+    "home": {
+      "samples": 420,
+      "outerState": 17,
+      "coreState": 54,
+      "players": 22,
+      "ballOnPitch": true,
+      "passQueueAccepted": true,
+      "distinctBallPositions": 12
+    },
+    "away": {
+      "samples": 420,
+      "outerState": 17,
+      "coreState": 54,
+      "players": 22,
+      "ballOnPitch": true,
+      "distinctBallPositions": 15
+    },
+    "homeStationarySamplesBeforePass": 8,
+    "firstChanged100msSampleAfterPass": 3,
+    "sameFinalBallPosition": [
+      3152,
+      108,
+      6733
+    ],
+    "fatalSignalObserved": false,
+    "proofZipSha256": "7d8febac2c4584ee96d577d65779ecbfab7a7548404ee01adcf27c949e48206c",
+    "scope": "Android 15 ARM64 lab, actual clean APK; the real game-to-bot match on the user phone was not tested."
   }
 }

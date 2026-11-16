@@ -3,6 +3,13 @@ package com.peerlink.app.bot
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
 
+/** Counts observed at the game's side of the ferry, across both routes. */
+internal data class BotPacketCounts(
+    val fromGame: Long = 0,
+    val toGame: Long = 0,
+    val lastFromGameAtMs: Long = -1,
+)
+
 /** UDP send success means the local socket accepted bytes, not that the
  * destination game consumed them. Payloads are never inspected or retained. */
 internal class PacketFlowTrace(private val now: () -> Long) {
@@ -23,6 +30,16 @@ internal class PacketFlowTrace(private val now: () -> Long) {
     }
 
     fun drop(reason: String): Long = drops.computeIfAbsent(reason) { AtomicLong() }.incrementAndGet()
+
+    fun gameTraffic(): BotPacketCounts {
+        val gameRx = counters.map { it[Point.GAME_RX.ordinal] }
+        val gameTx = counters.map { it[Point.GAME_TX.ordinal] }
+        return BotPacketCounts(
+            fromGame = gameRx.sumOf { it.packets.get() },
+            toGame = gameTx.sumOf { it.packets.get() },
+            lastFromGameAtMs = gameRx.maxOf { it.lastAt.get() },
+        )
+    }
 
     fun summary(): String {
         val time = now()

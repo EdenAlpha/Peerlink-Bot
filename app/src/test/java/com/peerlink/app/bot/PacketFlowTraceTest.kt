@@ -4,6 +4,21 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class PacketFlowTraceTest {
+    @Test fun gameTrafficCountsBothRoutesWithoutCountingInternalEnginePackets() {
+        var time = 1000L
+        val flow = PacketFlowTrace { time }
+        flow.record(PacketFlowTrace.Point.ENGINE_RX, false, 32)
+        flow.record(PacketFlowTrace.Point.ENGINE_TX, true, 32)
+        assertEquals(BotPacketCounts(), flow.gameTraffic())
+
+        flow.record(PacketFlowTrace.Point.GAME_RX, false, 100)
+        time += 50
+        flow.record(PacketFlowTrace.Point.GAME_RX, true, 120)
+        flow.record(PacketFlowTrace.Point.GAME_TX, false, 80)
+        flow.record(PacketFlowTrace.Point.GAME_TX, true, 90)
+        assertEquals(BotPacketCounts(fromGame = 2, toGame = 2, lastFromGameAtMs = 1050), flow.gameTraffic())
+    }
+
     @Test fun distinguishesPacketsReceivedFromPacketsActuallyHandedToAnOutgoingSocket() {
         var time = 1000L
         val flow = PacketFlowTrace { time }

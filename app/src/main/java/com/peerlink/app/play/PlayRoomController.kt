@@ -6,7 +6,16 @@ import android.content.Context
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
+import com.peerlink.app.bot.BotMatchDriver
+import com.peerlink.app.bot.BotMode
+import com.peerlink.app.bot.EngineHost
+import com.peerlink.app.bot.PeerSlot
+import com.peerlink.app.service.PeerBotService
+import com.peerlink.app.service.PeerLinkVpnService
+import android.content.Intent
 
 /**
  * Backend that actually creates a Konami match room on the bot's behalf.
@@ -47,6 +56,9 @@ sealed interface RoomState {
     data class Failed(val reason: String) : RoomState
 
     data class FilesNeeded(val missingFiles: Int, val missingBytes: Long, val totalFiles: Int) : RoomState
+
+    /** The local bot and its connection are still shutting down. */
+    data object Ending : RoomState
 }
 
 /**
@@ -79,8 +91,8 @@ object PlayRoomController {
      * Ask the bot to create a room: login at the gate, CMD_CREATEJOIN_ROOM,
      * surface the returned number. Never invents one on failure.
      */
-    fun createRoom(allowResourceDownload: Boolean = false) {
-        if (_state.value is RoomState.Creating) return
+    @Synchronized fun createRoom(allowResourceDownload: Boolean = false) {
+        if (_state.value is RoomState.Creating || _state.value is RoomState.Ready || _state.value is RoomState.Ending) return
         val be = backend
         val ctx = appContext
         if (be == null || ctx == null) {
@@ -121,9 +133,32 @@ object PlayRoomController {
         if (_state.value is RoomState.Creating) _state.value = RoomState.Creating(note)
     }
 
-    /** Drop the held room and return to idle. */
-    fun clear() {
-        _state.value = RoomState.Idle
+    /** End the local bot session before allowing another room to be opened. */
+    @Synchronized fun endSession() {
+        if (_state.value is RoomState.Creating || _state.value is RoomState.Ending) return
+        val ctx = appContext ?: return
+        _state.value = RoomState.Ending
+        io.launch {
+            try {
+                val serviceRunning = PeerBotService.running
+                PeerBotService.stop(ctx)
+                if (!serviceRunning) {
+                    BotMatchDriver.stop("user_end_session")
+                    PeerSlot.disarm("user_end_session")
+                    if (BotMode.active) ctx.stopService(Intent(ctx, PeerLinkVpnService::class.java))
+                    BotMode.stop()
+                    if (EngineHost.isReady) EngineHost.stop("user_end_session")
+                }
+                val stopped = withTimeoutOrNull(45_000L) {
+                    while (PeerBotService.running || EngineHost.isReady) delay(100L)
+                    true
+                } == true
+                _state.value = if (stopped) RoomState.Idle
+                else RoomState.Failed("The bot is still closing. Wait a moment, then try again.")
+            } catch (error: Exception) {
+                _state.value = RoomState.Failed(error.message ?: "Couldn't end the bot session.")
+            }
+        }
     }
 
     /** Copy the room number so it can be typed into eFootball. */

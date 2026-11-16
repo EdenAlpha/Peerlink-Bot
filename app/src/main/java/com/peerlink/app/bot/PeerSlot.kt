@@ -101,6 +101,9 @@ object PeerSlot {
     private val loggedClasses = java.util.Collections.synchronizedSet(HashSet<Int>())
     @Volatile private var flowTrace = PacketFlowTrace(SystemClock::elapsedRealtime)
 
+    /** Counts game-side packets once, including direct and VPN candidates. */
+    internal fun gameTraffic(): BotPacketCounts = flowTrace.gameTraffic()
+
     fun logFlow(trigger: String) {
         AppState.appendLog("[BOT-FLOW] trigger=$trigger armed=$armed engineAttached=$engineAttached " + flowTrace.summary())
     }
