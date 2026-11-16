@@ -1,0 +1,8 @@
+
+com.peerlink.app.bot.BotFerryTransportTest:...
+
+Time: 1.462
+
+OK (3 tests)
+
+

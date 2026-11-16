@@ -60,6 +60,24 @@ use and phone-game kickoff require separate evidence.
 
 ## Verification
 
+### Current room-reconnect routing fix (2026-11-16)
+
+Release [`phone-engine-test-4a86b1e`](https://github.com/EdenAlpha/Peerlink-Bot/releases/tag/phone-engine-test-4a86b1e)
+fixes two regressions observed in the phone export: the running VPN kept an
+earlier room's port, and the direct-route source filter rejected the phone's
+other valid local address. Room arming now retargets the native backend to the
+actual bound listener port; direct-route validation accepts the game's declared
+address and addresses currently owned by the phone.
+
+The exact retained APK passed all three ARM64 routing tests and a two-engine
+match through the production native backend after a room-port change. Both
+engines reached kickoff, and a bot Pass moved the ball. The bot had none of
+the 63 extra packs. This lab uses an owned TLS TURN fixture and a datagram
+socket pair instead of the Android TUN device. Physical Infinix kickoff remains
+unconfirmed. See [evidence and build identity](tests/evidence/phone-room-reconnect-20261116/README.md).
+
+### Earlier diagnostic builds
+
 The phone export after `eaf7f2a` shows that peer-record parsing now completes,
 but the original bot session and data channels fail before server match setup.
 The initiating side and underlying cause are not established by that export.
