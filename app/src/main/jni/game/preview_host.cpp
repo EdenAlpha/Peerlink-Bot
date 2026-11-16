@@ -190,7 +190,9 @@ extern "C" long peerlink_demo_drive(uintptr_t base) {
     if (!flow_leaf(base, "Match/Enter/MatchEnterDemoOnline", flow) || flow != 7) return 0;
     if (demo_sent.load(std::memory_order_acquire)) {
         uptr match = *reinterpret_cast<uptr *>(base + 0xa533ec0);
-        if (!match || *reinterpret_cast<unsigned char *>(match + 0x138) != 13) return 0;
+        if (!match) return 0;
+        unsigned phase = *reinterpret_cast<unsigned char *>(match + 0x138);
+        if (phase != 13 && phase != 12) return 0;
     }
     return arm(base, 3);
 }

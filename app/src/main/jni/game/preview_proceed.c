@@ -38,7 +38,10 @@ long peerlink_original_demo_finish(uptr base){
  uptr flow=*(uptr*)(base+0xa53b6e8),task=flow?*(uptr*)(flow+0x190):0;
  uptr match=*(uptr*)(base+0xa533ec0);
  if(!flow||!task||task!=*(uptr*)(base+0xa53b780)||!match)return 0;
- if(*(unsigned char*)(match+0x138)!=13||*(unsigned*)(flow+0x120)!=7||
+ unsigned phase=*(unsigned char*)(match+0x138);
+ // The HUD can complete between host polls, advancing phase 13 to 12.
+ // Either phase is still the original pre-match setup, not live play.
+ if((phase!=13&&phase!=12)||*(unsigned*)(flow+0x120)!=7||
     !(*(unsigned char*)(flow+0x170)&1))return 0;
  uptr first=*(uptr*)(task+0x70),end=*(uptr*)(task+0x78);
  if(!first||end<first+0xe0||(end-first)%0xe0||end-first>0x1c00)return 0;

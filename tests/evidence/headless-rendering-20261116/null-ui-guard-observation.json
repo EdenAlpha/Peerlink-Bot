@@ -98,5 +98,35 @@
     },
     "proofZipSha256": "538c458bea04e0d180afe422632340f90a616ec8f69957bb0535fbde2838a445",
     "scope": "Android 15 ARM64 lab, exact app candidate; not the physical user phone."
+  },
+  "appCandidateWithoutHudWait": {
+    "commit": "188586937786dd9f7d69325846d42a26f51e738f",
+    "apkSha256": "336009eae0fb83d6f0ec3d33d44bba071abd18b5b958a67565a032be0b525b58",
+    "ciRun": 43807284835,
+    "extraPacksAbsentBeforeAppPreparation": 63,
+    "gameResourceDownloadsStarted": 0,
+    "headlessPatchInstalledByApp": true,
+    "bothConnectedAndRealServerContext": true,
+    "home": {
+      "samples": 240,
+      "outerStateAtEnd": 12,
+      "players": 0,
+      "kickoff": false,
+      "passAccepted": false,
+      "matchUiTaskComplete": true,
+      "hudWidgetsLoaded": 0,
+      "hudDescriptors": 7,
+      "originalHudReadyEventSent": true
+    },
+    "awayWithExtraFiles": {
+      "samples": 240,
+      "outerStateAtEnd": 17,
+      "players": 22,
+      "kickoff": true,
+      "matchUiTaskComplete": true,
+      "hudWidgetsLoaded": 7
+    },
+    "proofZipSha256": "fd8c85acaff4eb3fd5786034d1bd05a6c6df0228d4f5872871cdc654c11a5f80",
+    "scope": "Android 15 ARM64 lab; no physical user phone was tested."
   }
 }
