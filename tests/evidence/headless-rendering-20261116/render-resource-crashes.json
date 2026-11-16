@@ -1,0 +1,42 @@
+{
+  "engineSha256": "2cea0c85344d7d7f295aea1c2353621f02db78dbccd888a0a21a0508ac330659",
+  "nullBackendRuntimeVerified": true,
+  "initialCrash": {
+    "thread": "RenderThread 1",
+    "pcOffset": "0x5ff95c8",
+    "callingInstructionOffset": "0x3a12a24",
+    "argument": "0x60: null parent resource plus subobject offset",
+    "kickoffVerified": false
+  },
+  "firstGuardRegression": {
+    "validInstructionCasesEquivalent": 24,
+    "nextCrashOffset": "0x3a12bac",
+    "nextFaultAddress": "0x50",
+    "kickoffVerified": false
+  },
+  "gpuCallOmissionExperiment": {
+    "callOffsets": [
+      "0x3a12a24",
+      "0x3a12de4"
+    ],
+    "requiredNullBackendFlag": 1,
+    "cleanupCodeUnchanged": true,
+    "result": "GameThread null-pointer crash during preview; no kickoff",
+    "kickoffVerified": false
+  },
+  "sharedResourceCreationCheck": {
+    "cachedCommandMode": "0x9a95a68",
+    "guard": "0x9a95a70",
+    "originalNullInitializerFlagGot": "0x99e4e50",
+    "textureUpdateFunction": "0x5ff12a0",
+    "finding": "The shared cached nullrhi argument causes texture resource creation to return before assigning param_1[0x13]"
+  },
+  "sharedResourceModeExperiment": {
+    "change": "After the original NullDrv initializer sets its runtime flag, clear only the initialized cached nullrhi command-mode byte at 0x9a95a68",
+    "originalNullRhiFlagStillOne": true,
+    "originalRhiObjectUnchanged": true,
+    "codeBytesUnchanged": true,
+    "result": "Engine process calls System.exit(0) during startup; EngineHost.prepare fails before opening native channels",
+    "kickoffVerified": false
+  }
+}

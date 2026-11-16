@@ -1,0 +1,19 @@
+{
+  "lab": "ARM64 Android 15",
+  "apkCommit": "7abcf970b8236f3f1f00dec520d88eb9a59894f1",
+  "roles": {
+    "A": {
+      "samples": 300,
+      "playableSamples": 101,
+      "distinctBallPositions": 58
+    },
+    "B": {
+      "samples": 300,
+      "playableSamples": 100,
+      "distinctBallPositions": 58
+    }
+  },
+  "graphics": "OpenGL ES 3.1, 320x180, full resource set",
+  "kickoffVerified": true,
+  "smallBundleValidated": false
+}
