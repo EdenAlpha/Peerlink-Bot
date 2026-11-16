@@ -19,6 +19,7 @@ import org.junit.After
 import org.junit.Rule
 import org.junit.Test
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import java.io.File
 
 /** Real Compose rendering and interaction with a local, service-free fixture. */
@@ -161,5 +162,15 @@ class PeerLinkUiTest {
         compose.onNodeWithTag("prime-setup-screen").assertIsDisplayed()
         compose.onNodeWithText("Prime Mode").assertIsDisplayed()
         screenshot("prime-setup")
+    }
+
+    @Test fun launcherIconRendersAsAnAndroidDrawable() {
+        val icon = context.packageManager.getApplicationIcon(context.packageName)
+        val bitmap = Bitmap.createBitmap(256, 256, Bitmap.Config.ARGB_8888)
+        icon.setBounds(0, 0, bitmap.width, bitmap.height)
+        icon.draw(android.graphics.Canvas(bitmap))
+        assertTrue(android.graphics.Color.alpha(bitmap.getPixel(128, 128)) > 0)
+        val dir = File(context.getExternalFilesDir(null), "ui-checks").apply { mkdirs() }
+        File(dir, "launcher-icon.png").outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
     }
 }

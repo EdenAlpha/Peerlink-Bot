@@ -324,14 +324,20 @@ class PeerLinkVpnService : VpnService() {
             else                   -> "$tunPkts pkts"
         }
 
+        val packetStatus = if (BotMode.active) {
+            val traffic = com.peerlink.app.bot.PeerSlot.gameTraffic()
+            val formatter = java.text.NumberFormat.getIntegerInstance()
+            "${formatter.format(traffic.fromGame)} from game · ${formatter.format(traffic.toGame)} sent to game"
+        } else "▲▼ $pktsStr · $transportLabel"
+
         val builder = (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             Notification.Builder(this, NOTIFICATION_CHANNEL_ID)
         } else {
             @Suppress("DEPRECATION")
             Notification.Builder(this)
         })
-            .setContentTitle(if (AppState.isRunning.get()) "PeerLink Active" else "PeerLink Starting")
-            .setContentText("▲▼ $pktsStr · $transportLabel")
+            .setContentTitle(if (BotMode.active) "PeerLink bot session" else if (AppState.isRunning.get()) "PeerLink Active" else "PeerLink Starting")
+            .setContentText(packetStatus)
             .setSmallIcon(android.R.drawable.ic_menu_share)
             .setContentIntent(mainPi)
             .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Stop", stopPi)
