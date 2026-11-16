@@ -171,5 +171,33 @@
     "possibleDebuggerEffectNotRuledOut": true,
     "proofZipSha256": "0014791feffaf0b0afb9f8791896528ecdc4cbc0fc35bcd07b0891f0cb5a3acf",
     "scope": "Android 15 ARM64 lab; no physical user phone was tested. The proof summary source label does not account for the debugger-assisted event injection."
+  },
+  "appCandidateWithVisualStartAndNullGuard": {
+    "commit": "5a75dfc7432bb8c34411341d2e715be2a7d99e08",
+    "apkSha256": "f5e9b81957e2de3d383c6fd87834ffa629095a736d3a94833f6bcb1000364e56",
+    "ciRun": 43816690663,
+    "extraPacksAbsentBeforeAppPreparation": 63,
+    "gameResourceDownloadsStarted": 0,
+    "bothConnectedAndRealServerContext": true,
+    "debuggerAssisted": false,
+    "home": {
+      "samples": 300,
+      "maxOuterState": 16,
+      "coreStateAtEnd": 52,
+      "players": 22,
+      "ballOnPitch": true,
+      "visualStartEventQueued": true,
+      "fatalSignalObserved": false,
+      "kickoff": false,
+      "passAccepted": false
+    },
+    "awayWithExtraFiles": {
+      "samples": 300,
+      "maxOuterState": 17,
+      "players": 22,
+      "kickoff": true
+    },
+    "proofZipSha256": "f24f8efee89850fb03b550076c13efd11b660cf7ddc37abfe28b70994134a215",
+    "scope": "Android 15 ARM64 lab; no physical user phone was tested."
   }
 }
