@@ -37,3 +37,40 @@ stall. Raw packets, session inputs and credentials remain private.
 
 The subsequent memory-cleanup source `9e127bb` is not part of this tested APK;
 its CI verification is separate. No memory-kill fix is claimed for 5.0.18.
+
+## New physical export: 1794861730087
+
+This export is from 5.0.18 / source `5418dfa`. Its last attempt contains 9,120
+capture events, with no capture drops or write errors. Pairing each route and
+direction shows byte-identical GAME_RX → ENGINE_TX and ENGINE_RX → GAME_TX:
+the host route contains 1,865 and 2,690 pairs respectively, and the VPN route
+contains 2 and 3 pairs. This establishes forwarding at those recorded
+boundaries, not receipt or acceptance by the remote native engine.
+
+The first observed stop is earlier than the generic transport failure:
+
+| Phone time | Observation |
+| --- | --- |
+| 21:40:40–45 | Original simulation wait reason 10, result 2; the match is constructed but sampled ball position remains at the centre. |
+| 21:40:50 | Original simulation wait reason 3, result 1, with failure latch 0. |
+| 21:41:00.507 | Last captured datagram from the phone game. |
+| 21:41:30.688 | First generic native model reason 1 / channel failure. Bot process remains alive. |
+
+Pinned build-B Ghidra output resolves reason 3 to command-controller
+vtable+0x68 (0x70165f8), which reads its stop latch at +0x49. Function
+0x701794c sets that latch. Its callers are the local outgoing-command path
+(0x7017560) and the synchronized input-command path (0x7018738, command 0x50).
+The earlier reason 10 is an input-frame readiness mask and also occurs during
+normal play; its presence alone does not identify the cause.
+
+The completed comparison with reversed account ordering reached ball movement
+on both roles. Account order is therefore not an established cause, and no
+participant-role change was made. The original stop trigger remains unknown.
+
+The next candidate adds pass-through observers for the local stop request,
+outgoing command processing and synchronized input application. They preserve
+arguments, errno and the original input return value, and record the first
+stop transition plus the native command-frame/missing-input masks. An input
+path event is labelled `applied_input_command`; it is not automatically
+attributed to the remote phone because synchronized inputs include both
+participants. No stop flags, readiness gates or input queues are modified.

@@ -23,6 +23,7 @@
 #include <utility>
 #include <unistd.h>
 #include "game/network_startup_diagnostics.h"
+#include "game/match_stop_diagnostics.h"
 
 extern "C" {
 long peerlink_game_database_input(uintptr_t, const char *);
@@ -412,6 +413,10 @@ JNIEXPORT jstring JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeLoadingD
             " simulationWaitReason=" + std::to_string(wait_reason) +
             " simulationFailureLatched=" + std::to_string(inner ? *reinterpret_cast<unsigned char *>(inner + 0x12) : -1) +
             " simulationTickGate=" + std::to_string(*reinterpret_cast<unsigned char *>(g_base + 0xa541870));
+        char stop[1024];
+        peerlink_match_stop_diagnostics(inner ? *reinterpret_cast<uintptr_t *>(inner + 0xa0) : 0,
+                                        stop, sizeof(stop));
+        text += " "; text += stop;
     } else text += " simulationWait=unavailable";
     uintptr_t user_sync = attached_task(lock.manager, g_user_sync_task, g_base + 0x990d9c8);
     if (user_sync) text += " userDataSyncState=" + std::to_string(*reinterpret_cast<uint32_t *>(user_sync + 0x70));
@@ -849,6 +854,7 @@ JNIEXPORT jlong JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeStart(
     if (!clock) return 0;
     peerlink_observe_network_sockets(g_base);
     peerlink_observe_network_startup(g_base);
+    peerlink_observe_match_stop(g_base);
     entry<void (*)(uintptr_t, uint32_t)>(0x7e14a38)(clock, static_cast<uint32_t>(time(nullptr)));
     // Five real arguments; the old four-argument trampoline left the last
     // argument undefined. Let the engine choose its real local UDP port.
