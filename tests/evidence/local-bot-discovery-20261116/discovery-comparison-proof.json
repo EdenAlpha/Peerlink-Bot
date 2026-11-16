@@ -1,0 +1,171 @@
+{
+  "old_apk_source": "825a50a6f151c7597d59ee1bf5c8e97afd8dc312",
+  "old_apk_sha256": "3a7131763cada935f9572399c058f2f7f4dd1d9cb0a22e974d3a9e961bc3754b",
+  "failed_test": "Both original SDKs resolve owned loopback STUN endpoint and send3requests each; ownedserver deliberatelydoesnotreply. Both SDKs reportphase7/error1 anddiscardIO.",
+  "recovered_test": "SameoldAPK; headlessA useslocalSTUNresponseprofilewithsameattrsasStunFabricator, originalrenderedB normaldiscovery. Bothoriginalenginesconnectandsynchronizedmetadata. Noconnectionflagsorsocketpointerswritten.",
+  "rows": {
+    "1008": {
+      "evidence_sha256": "af4076a12ac00a8300f6b6c886a7bf1b97c8e7e567296dee61f2fa09bea30b7a",
+      "roles_passed": {
+        "A": false,
+        "B": false
+      },
+      "native_observations": [
+        {
+          "role": "B",
+          "phase": 0,
+          "error": 0,
+          "stop": 0,
+          "v4": false,
+          "v6": false
+        },
+        {
+          "role": "B",
+          "phase": 1,
+          "error": 0,
+          "stop": 0,
+          "v4": false,
+          "v6": false
+        },
+        {
+          "role": "A",
+          "phase": 0,
+          "error": 0,
+          "stop": 0,
+          "v4": false,
+          "v6": false
+        },
+        {
+          "role": "A",
+          "phase": 1,
+          "error": 0,
+          "stop": 0,
+          "v4": false,
+          "v6": false
+        },
+        {
+          "role": "B",
+          "phase": 1,
+          "error": 1,
+          "stop": 0,
+          "v4": true,
+          "v6": false
+        },
+        {
+          "role": "B",
+          "phase": 7,
+          "error": 1,
+          "stop": 1,
+          "v4": false,
+          "v6": false
+        },
+        {
+          "role": "A",
+          "phase": 1,
+          "error": 1,
+          "stop": 0,
+          "v4": true,
+          "v6": false
+        },
+        {
+          "role": "A",
+          "phase": 7,
+          "error": 1,
+          "stop": 1,
+          "v4": false,
+          "v6": false
+        }
+      ]
+    },
+    "1010": {
+      "evidence_sha256": "bfaeca0729fdad7891f13f04787c11e7cb4756bcf0d7fd057be1e6ead9e7af7c",
+      "roles_passed": {
+        "A": true,
+        "B": true
+      },
+      "native_observations": [
+        {
+          "role": "B",
+          "phase": 0,
+          "error": 0,
+          "stop": 0,
+          "v4": false,
+          "v6": false
+        },
+        {
+          "role": "B",
+          "phase": 1,
+          "error": 0,
+          "stop": 0,
+          "v4": false,
+          "v6": false
+        },
+        {
+          "role": "A",
+          "phase": 0,
+          "error": 0,
+          "stop": 0,
+          "v4": false,
+          "v6": false
+        },
+        {
+          "role": "A",
+          "phase": 1,
+          "error": 0,
+          "stop": 0,
+          "v4": false,
+          "v6": false
+        },
+        {
+          "role": "B",
+          "phase": 2,
+          "error": 0,
+          "stop": 0,
+          "v4": true,
+          "v6": false
+        },
+        {
+          "role": "B",
+          "phase": 3,
+          "error": 0,
+          "stop": 0,
+          "v4": true,
+          "v6": false
+        },
+        {
+          "role": "A",
+          "phase": 2,
+          "error": 0,
+          "stop": 0,
+          "v4": true,
+          "v6": false
+        },
+        {
+          "role": "A",
+          "phase": 3,
+          "error": 0,
+          "stop": 0,
+          "v4": true,
+          "v6": false
+        },
+        {
+          "role": "A",
+          "phase": 4,
+          "error": 0,
+          "stop": 0,
+          "v4": true,
+          "v6": false
+        },
+        {
+          "role": "B",
+          "phase": 4,
+          "error": 0,
+          "stop": 0,
+          "v4": true,
+          "v6": false
+        }
+      ]
+    }
+  },
+  "limitation": "Physical trace confirms failed discovery; does not identify which upstream device/carrier/server caused responses to be unavailable. New app fix removes externalSTUNdependency for local bot."
+}

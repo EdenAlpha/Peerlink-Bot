@@ -60,7 +60,31 @@ use and phone-game kickoff require separate evidence.
 
 ## Verification
 
-### Current room-reconnect routing fix (2026-11-16)
+### Current local bot discovery repair (2026-11-16)
+
+Release [`phone-engine-test-a80521e`](https://github.com/EdenAlpha/Peerlink-Bot/releases/tag/phone-engine-test-a80521e)
+(5.0.17) handles the bot's STUN discovery on the phone. The 5.0.16 physical
+export showed original SDK phase 7 / error 1, successful file/socket/bind/DNS
+checks and no local peer sends. Withholding STUN replies reproduces this same
+failure in the earlier connected APK. The bot now starts a local responder
+before SDK Start and supplies its endpoint through the original SDK input.
+Requests from the SDK's physical-address-bound sockets are accepted when the
+source address belongs to this phone.
+
+The exact released APK passed local-discovery and channel-connectivity
+assertions, reached kickoff in 37.086 / 54.128 seconds, and completed 120 samples
+with 22 players on both sides. Only the home bot received Pass; the ball moved
+at a peak of 13.064 m/s and both engines finished with matching ball coordinates.
+The bot had none of the 63 extra packs and performed zero extra downloads.
+Unit/native checks and Android 14/15 host checks passed. The published artifact
+is unchanged from the installed and tested APK.
+
+This lab uses the production forwarding backend with a socket-pair TUN and a
+rendered reference engine. The new build's actual Infinix/game/Android-VPN
+kickoff still requires physical validation. See [diagnosis and retained APK
+proof](tests/evidence/local-bot-discovery-20261116/README.md).
+
+### Earlier room-reconnect routing fix (2026-11-16)
 
 Release [`phone-engine-test-4a86b1e`](https://github.com/EdenAlpha/Peerlink-Bot/releases/tag/phone-engine-test-4a86b1e)
 fixes two regressions observed in the phone export: the running VPN kept an

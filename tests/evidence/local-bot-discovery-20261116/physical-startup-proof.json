@@ -1,0 +1,27 @@
+{
+  "export": "1794852963309",
+  "source": "5c1a06b50e88bf1494bac4282ede6a5d87879688",
+  "observed": {
+    "sdk_phase": 7,
+    "sdk_error": 1,
+    "thread_stop": 1,
+    "v4_holder": false,
+    "v6_holder": false,
+    "socket_calls": 29,
+    "socket_failures": 0,
+    "bind_calls": 4,
+    "bind_failures": 0,
+    "dns_failures": 0,
+    "connect_failures": 7,
+    "connect_errno": 101,
+    "send_calls": 14,
+    "send_failures": 0,
+    "ipv4_send_attempts": 3,
+    "last_ipv4_send": "54.64.79.140:3478",
+    "loopback_sends": 0,
+    "vpn_probe": "UP",
+    "game_rx_each_route": 12
+  },
+  "native_trace": "7e00574: after native IO creation and option reads,7dc2944 returnsfalse -> sdk_error1 -> releaseIO -> stopthread -> phase7",
+  "interpretation": "No copied-file/socket-creation/binding/DNS failure observed. Native connectivity-discovery validation fails before local peer sends. ENETUNREACH errors observed, but family/endpoint and precise causal role remain unproven. Do not confuse errno101 with permission denied."
+}

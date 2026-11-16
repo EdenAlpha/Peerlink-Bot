@@ -1,0 +1,91 @@
+{
+  "source_commit": "a80521e6025b59aab3271d012fbdbaf481fee6c7",
+  "ci_run": 43933884415,
+  "artifact_id": 14259528550,
+  "apk_sha256": "545c197ee7f298f0858ebd8bb12786263142082eebaabe94668d1811990a1b68",
+  "evidence_sha256": "21a10fa9df71ba21f59fa13f3bf653cc99a9802ed48694e0f5510b1cb5640c66",
+  "policy": {
+    "home_manual_pass_delay_playable_samples": 30,
+    "require_prompt_continue": true,
+    "kickoff_deadline_seconds": 90,
+    "away_automatic_input": false,
+    "instrumentation": "no_debugger"
+  },
+  "test_summary": {
+    "roles": {
+      "B": {
+        "harness_passed": true,
+        "samples": 120,
+        "max_outer": 17,
+        "max_players": 22,
+        "playable_observed": true,
+        "pass_queue_accepted": false,
+        "distinct_ball_positions": 8
+      },
+      "A": {
+        "harness_passed": true,
+        "samples": 120,
+        "max_outer": 17,
+        "max_players": 22,
+        "playable_observed": true,
+        "pass_queue_accepted": true,
+        "distinct_ball_positions": 5
+      }
+    },
+    "files": 63,
+    "source": "exact_candidate_apk_no_external_observer",
+    "kickoff_verified": true
+  },
+  "roles": {
+    "A": {
+      "kickoff_ms": 37086,
+      "final_ball_mm": [
+        -9610,
+        108,
+        -5928
+      ],
+      "pass_accepted": true,
+      "pass_after_samples": 30,
+      "pass_peak_ball_speed_mm_per_s": 13064,
+      "pass_ball_before_mm": [
+        0,
+        108,
+        0
+      ],
+      "pass_ball_after_mm": [
+        -9243,
+        108,
+        -5522
+      ]
+    },
+    "B": {
+      "kickoff_ms": 54128,
+      "final_ball_mm": [
+        -9610,
+        108,
+        -5928
+      ],
+      "pass_accepted": false,
+      "pass_after_samples": 0
+    }
+  },
+  "bot_downloads": 0,
+  "bot_extra_packs_absent": 63,
+  "production_native_vpn": {
+    "old_room_port": 43699,
+    "current_room_port": 51341,
+    "new_room_probe_verified": true,
+    "tun_fixture": "packet_preserving_unix_datagram_socketpair",
+    "turn_fixture": "owned_local_tls_server"
+  },
+  "verified": true,
+  "local_discovery": {
+    "original_host_override_verified": true,
+    "original_sdk_channel_assertion_passed": true,
+    "error": 0,
+    "thread_stop": 0,
+    "ipv4_io_present": true,
+    "external_discovery_helper": false,
+    "physical_phone_still_requires_validation": true
+  }
+}
