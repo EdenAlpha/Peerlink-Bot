@@ -64,5 +64,39 @@
     },
     "proofZipSha256": "26610a61b498e4f157aa807bb891c3872989d6f6fc50f67b1336a0225dc9f2fd",
     "scope": "Android 15 ARM64 lab with original installed CPKs and base APK assets; not the user phone. This is not a no-download kickoff success."
+  },
+  "appCandidateWithOriginalIntroCallbacks": {
+    "commit": "7cc3bf61fa88d89cf338c7a0fd92e19eabd74d2b",
+    "apkSha256": "621fa8ad41aea49a5c542c1685ea96c830c0f63799d1dd0237a546f5f76bcdfb",
+    "ciRun": 43805742866,
+    "extraPacksHiddenBeforeAppPreparation": 63,
+    "networkResourcesDownloaded": 0,
+    "originalIntroProceedQueued": true,
+    "originalIntroAndTransitionCallbacksReported": true,
+    "nativeCrashObserved": false,
+    "home": {
+      "samples": 240,
+      "maxOuterState": 13,
+      "players": 0,
+      "kickoff": false,
+      "passAccepted": false,
+      "matchUiTaskState": 2,
+      "matchUiTaskCompleted": false,
+      "hudWidgetsLoaded": 0,
+      "hudDescriptors": 7,
+      "hudReadyEventSent": false
+    },
+    "awayWithExtraFiles": {
+      "samples": 240,
+      "maxOuterState": 17,
+      "players": 22,
+      "kickoff": true,
+      "matchUiTaskCompleted": true,
+      "hudWidgetsLoaded": 7,
+      "hudDescriptors": 7,
+      "hudReadyEventSent": true
+    },
+    "proofZipSha256": "538c458bea04e0d180afe422632340f90a616ec8f69957bb0535fbde2838a445",
+    "scope": "Android 15 ARM64 lab, exact app candidate; not the physical user phone."
   }
 }

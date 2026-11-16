@@ -63,7 +63,7 @@ bool set_code(Address offset, const uint8_t *bytes, size_t length) {
     protect(address, PROT_READ | PROT_EXEC);
     return false;
 }
-bool install_texture_guard() {
+bool install_graphics_guards() {
     static constexpr uint8_t factory_original[] = {
         0xfd,0x7b,0xbe,0xa9,0xf3,0x0b,0x00,0xf9,0xfd,0x03,0x00,0x91,0x00,0x2c,0x80,0x52
     };
@@ -72,13 +72,25 @@ bool install_texture_guard() {
         0x54,0x00,0x00,0xb5,0x38,0x30,0x2b,0x14,0x88,0x02,0x40,0xf9,0x2c,0x30,0x2b,0x14
     };
     static constexpr uint8_t branch[] = {0xd2,0xcf,0xd4,0x17};
+    static constexpr uint8_t hud_wait[] = {0x00,0x02,0x00,0x36};
+    static constexpr uint8_t nop[] = {0x1f,0x20,0x03,0xd5};
     if (memcmp(reinterpret_cast<void *>(engine + 0x4965a40), factory_original, sizeof(factory_original)) ||
-        memcmp(reinterpret_cast<void *>(engine + 0x5431af8), original, sizeof(original))) return false;
+        memcmp(reinterpret_cast<void *>(engine + 0x5431af8), original, sizeof(original)) ||
+        memcmp(reinterpret_cast<void *>(engine + 0x2fc27f4), hud_wait, sizeof(hud_wait))) return false;
     // The original factory has already returned. Its first four instructions
     // are now a trampoline: if the optional texture resource is missing, skip
     // only its graphics-dimension calls; otherwise execute the original load.
     if (!set_code(0x4965a40, trampoline, sizeof(trampoline))) return false;
-    if (set_code(0x5431af8, branch, sizeof(branch))) return true;
+    if (!set_code(0x5431af8, branch, sizeof(branch))) {
+        set_code(0x4965a40, factory_original, sizeof(factory_original));
+        return false;
+    }
+    // The original actor only reaches this check when its match HUD is active.
+    // Its callee checks that each HUD widget finished loading; a headless bot
+    // has no HUD to load. Continue through the original actor's own event and
+    // task updates; never modify the match, players or network verdict here.
+    if (set_code(0x2fc27f4, nop, sizeof(nop))) return true;
+    set_code(0x5431af8, original, sizeof(original));
     set_code(0x4965a40, factory_original, sizeof(factory_original));
     return false;
 }
@@ -112,7 +124,7 @@ void initialize_null_for_android(Address instance) {
     call(instance); // The original NullDrv initializer fills its shader mapping.
     bool profile_matches = *reinterpret_cast<uint32_t *>(platform) == 24 &&
         *reinterpret_cast<uint32_t *>(feature) == 1 && table[1] == 24;
-    if (profile_matches && install_texture_guard()) {
+    if (profile_matches && install_graphics_guards()) {
         // Keep normal client/UI logic enabled. Actual rendering still uses
         // the verified original NullDrv vtable.
         *reinterpret_cast<uint8_t *>(null_flag) = 0;
