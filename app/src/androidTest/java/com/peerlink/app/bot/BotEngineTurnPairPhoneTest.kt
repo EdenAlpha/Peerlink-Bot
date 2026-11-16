@@ -149,7 +149,7 @@ class BotEngineTurnPairPhoneTest {
                 var passAccepted = false
                 var playableSamples = 0
                 val holdSeconds = args.getString("matchLoadingProbeSeconds", "30").toInt()
-                require(holdSeconds in 30..300)
+                require(holdSeconds in 30..600)
                 repeat(holdSeconds) {
                     Thread.sleep(1000)
                     val loading = EngineHost.snapshot()
