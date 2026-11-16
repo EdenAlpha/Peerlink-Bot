@@ -42,3 +42,16 @@ the original comparison, stop request, and synchronized inputs are preserved.
 The extended native fixture checks both checksum arrival orders, rejects
 unverified contexts, and verifies that only the original stop setter changes
 engine state. ARM64 application verification remains required before release.
+
+The first unreleased state-capture candidate (`9cbbc40`, main APK SHA-256
+`ce288e66eba22815a8e5a41e9ccf94f0a43f6f87b43b3e70aed1d1cf83b0c470`)
+crashed in the new diagnostic reader and was rejected. The original call path
+`7053d8c -> 6affecc -> 6affee8 -> 6afff10 -> 6afff20` dereferences the map's
+service handle twice before passing the actual checksum state to its helpers.
+`195f869` corrects that argument. The extended native fixture distinguishes
+map, handle, and checksum-state storage, verifies all 71 helper calls receive
+the real state, and confirms diagnostic recomputation leaves the invocation
+counter unchanged. `verify_match_state_checksum.py` separately executes the
+original ARM64 pointer path and checksum fold with the pinned owned library.
+The rejected build has not been published; Android match validation of the
+corrected artifact is still required.
