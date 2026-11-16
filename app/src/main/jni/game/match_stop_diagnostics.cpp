@@ -170,12 +170,16 @@ void peerlink_match_stop_diagnostics(uintptr_t controller, char *text, size_t si
     event_text(first_local_stop, "stopOutgoing", local, sizeof(local));
     event_text(first_input_stop, "stopInput", input, sizeof(input));
     const uintptr_t base = image_base.load(std::memory_order_relaxed);
-    const bool valid = controller && base && *reinterpret_cast<const uintptr_t *>(controller) == base + kTable;
+    const uintptr_t table = controller ? *reinterpret_cast<const uintptr_t *>(controller) : 0;
+    const bool valid = controller && base && table == base + kTable;
+    const uintptr_t table_offset = base && table >= base && table - base < 0xb000000 ? table - base : 0;
     snprintf(text, size,
         "stopObserver=%d stopRequests=%u stopOutgoing=%u stopInput=%u "
+        "commandControllerValid=%u commandControllerVtable=0x%llx "
         "commandFrame=%u commandMissingMask=%u commandAheadMask=%u commandStopPending=%u commandStopped=%u%s%s%s",
         installed.load(std::memory_order_acquire), requests.load(std::memory_order_relaxed),
         local_stops.load(std::memory_order_relaxed), input_stops.load(std::memory_order_relaxed),
+        unsigned(valid), static_cast<unsigned long long>(table_offset),
         valid ? word(controller, 0x30) : 0, valid ? word(controller, 0x28) : 0,
         valid ? word(controller, 0x2c) : 0, valid ? byte(controller, 0x45) : 0,
         valid ? byte(controller, 0x49) : 0, request, local, input);

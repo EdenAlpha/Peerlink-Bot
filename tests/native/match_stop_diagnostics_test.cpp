@@ -92,9 +92,12 @@ int main() {
     char report[1024];
     peerlink_match_stop_diagnostics(expected_controller, report, sizeof(report));
     assert(strstr(report, "stopObserver=1 stopRequests=1 stopOutgoing=1 stopInput=1"));
+    assert(strstr(report, "commandControllerValid=1 commandControllerVtable=0x98aedd0"));
     assert(strstr(report, "commandFrame=7 commandMissingMask=2 commandAheadMask=0"));
     assert(strstr(report, "commandStopPending=1 commandStopped=1"));
     assert(first_request.state == 2 && first_local_stop.state == 2 && first_input_stop.state == 2);
+    peerlink_match_stop_diagnostics(0, report, sizeof(report));
+    assert(strstr(report, "commandControllerValid=0 commandControllerVtable=0x0"));
     assert(request_calls == 1 && outgoing_calls == 2 && apply_calls == 3);
     char short_report[10];
     memset(short_report, 'x', sizeof(short_report));
