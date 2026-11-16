@@ -12,6 +12,7 @@
 
 extern "C" long peerlink_original_preview_proceed_v271(uintptr_t);
 extern "C" long peerlink_original_demo_proceed(uintptr_t);
+extern "C" long peerlink_original_demo_finish(uintptr_t);
 namespace {
 using uptr = uintptr_t;
 using Tick = void (*)(uptr, float);
@@ -20,6 +21,7 @@ uptr *slot = nullptr;
 Tick original = nullptr;
 std::atomic<int> active{0}, mode{0}, sent{0}, retry_count{0}, restored{1};
 std::atomic<int> demo_sent{0};
+std::atomic<int> demo_finished{0};
 std::atomic<int> probe_done{0}, request_tid{0}, callback_tid{0};
 std::atomic<int> last_flow{-1}, last_menu{-1}, last_requested{-1}, last_current{-1};
 std::atomic<unsigned> last_busy{0};
@@ -97,9 +99,15 @@ void menu_tick(uptr actor, float delta) {
     unsigned flow_state = 0;
     if (mode.load() == 3) {
         bool demo = flow_leaf(base_address, "Match/Enter/MatchEnterDemoOnline", flow_state);
-        if (demo && flow_state == 7 && peerlink_original_demo_proceed(base_address) == 1) {
-            demo_sent.store(1, std::memory_order_release);
-            dprintf(2, "HEADLESS_INTRO_PROCEED original_event=1 gameThreadTid=%d\n", gettid());
+        if (demo && flow_state == 7) {
+            if (!demo_sent.load() && peerlink_original_demo_proceed(base_address) == 1) {
+                demo_sent.store(1, std::memory_order_release);
+                dprintf(2, "HEADLESS_INTRO_PROCEED original_event=1 gameThreadTid=%d\n", gettid());
+            }
+            if (demo_sent.load() && peerlink_original_demo_finish(base_address) == 1) {
+                demo_finished.store(1, std::memory_order_release);
+                dprintf(2, "HEADLESS_INTRO_FINISHED original_callbacks=1 gameThreadTid=%d\n", gettid());
+            }
         }
         active.store(0, std::memory_order_release); return;
     }
@@ -177,9 +185,13 @@ extern "C" long peerlink_preview_drive(uintptr_t base) {
 }
 extern "C" long peerlink_demo_drive(uintptr_t base) {
     if (!base) return -1;
-    if (demo_sent.load(std::memory_order_acquire)) return 1;
+    if (demo_finished.load(std::memory_order_acquire)) return 1;
     unsigned flow = 0;
     if (!flow_leaf(base, "Match/Enter/MatchEnterDemoOnline", flow) || flow != 7) return 0;
+    if (demo_sent.load(std::memory_order_acquire)) {
+        uptr match = *reinterpret_cast<uptr *>(base + 0xa533ec0);
+        if (!match || *reinterpret_cast<unsigned char *>(match + 0x138) != 13) return 0;
+    }
     return arm(base, 3);
 }
 extern "C" long peerlink_preview_probe(uintptr_t base) {
@@ -193,7 +205,7 @@ extern "C" void peerlink_preview_stop() {
     if (active.load() == 1) { restore(); active.store(0); }
 }
 extern "C" void peerlink_preview_diagnostics(char *text, size_t size) {
-    snprintf(text, size, "previewMenuState=%d previewMenuFlow=%d previewRequested=%d previewCurrentNil=%d previewManagerBusy=%u previewMenuRetries=%d previewContinueQueued=%d introProceedQueued=%d previewCallbackActive=%d previewCallbackRestored=%d previewProbeDone=%d previewRequestTid=%d previewCallbackTid=%d",
+    snprintf(text, size, "previewMenuState=%d previewMenuFlow=%d previewRequested=%d previewCurrentNil=%d previewManagerBusy=%u previewMenuRetries=%d previewContinueQueued=%d introProceedQueued=%d introFinished=%d previewCallbackActive=%d previewCallbackRestored=%d previewProbeDone=%d previewRequestTid=%d previewCallbackTid=%d",
         last_menu.load(), last_flow.load(), last_requested.load(), last_current.load(), last_busy.load(),
-        retry_count.load(), sent.load(), demo_sent.load(), active.load(), restored.load(), probe_done.load(), request_tid.load(), callback_tid.load());
+        retry_count.load(), sent.load(), demo_sent.load(), demo_finished.load(), active.load(), restored.load(), probe_done.load(), request_tid.load(), callback_tid.load());
 }

@@ -38,5 +38,31 @@
     "stoppedAt": "Match/Enter/MatchEnterDemoOnline",
     "proofZipSha256": "29edbd9b21e0d783c3586578dbe218a10bf4e16f8d9cb29948a2a0a66fab3dd9"
   },
-  "scope": "The 47 installed game packs and base APK assets were present; this is an Android lab, not the user phone. Pre-JNI Java preparation had access to full files before both copies were hidden. Production APK support and demo-skip changes are not yet validated."
+  "scope": "The 47 installed game packs and base APK assets were present; this is an Android lab, not the user phone. Pre-JNI Java preparation had access to full files before both copies were hidden. Production APK support and demo-skip changes are not yet validated.",
+  "appCandidateWithoutExtraResources": {
+    "commit": "8b9519253f2504bf8aae7a11f870e3eae72d5fd8",
+    "apkSha256": "73ad4a81f5e717f47963bdd37c290c11b389513c3c21c3f21c2a5f8e23e4fa20",
+    "ciRun": 43802574092,
+    "matchPacksHiddenBeforeAppPreparation": 63,
+    "resourceDownloadsStarted": 0,
+    "appInstalledNullDriverWithoutDebugger": true,
+    "realServerMatchContextAndBothConnections": true,
+    "originalIntroductionProceedQueued": true,
+    "home": {
+      "samples": 300,
+      "maxOuterState": 13,
+      "players": 0,
+      "passAccepted": false,
+      "kickoff": false
+    },
+    "awayWithExtraFiles": {
+      "samples": 300,
+      "maxOuterState": 17,
+      "players": 22,
+      "kickoff": true,
+      "distinctBallPositions": 1
+    },
+    "proofZipSha256": "26610a61b498e4f157aa807bb891c3872989d6f6fc50f67b1336a0225dc9f2fd",
+    "scope": "Android 15 ARM64 lab with original installed CPKs and base APK assets; not the user phone. This is not a no-download kickoff success."
+  }
 }

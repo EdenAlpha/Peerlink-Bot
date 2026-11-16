@@ -32,3 +32,22 @@ long peerlink_original_demo_proceed(uptr base){
  // The game's own MatchEnterDemoOnline flow maps "proceed" to MatchIdle.
  return original_proceed(base,"Match/Enter/MatchEnterDemoOnline");
 }
+__attribute__((visibility("default")))
+long peerlink_original_demo_finish(uptr base){
+ if(!base)return -1;
+ uptr flow=*(uptr*)(base+0xa53b6e8),task=flow?*(uptr*)(flow+0x190):0;
+ uptr match=*(uptr*)(base+0xa533ec0);
+ if(!flow||!task||task!=*(uptr*)(base+0xa53b780)||!match)return 0;
+ if(*(unsigned char*)(match+0x138)!=13||*(unsigned*)(flow+0x120)!=7||
+    !(*(unsigned char*)(flow+0x170)&1))return 0;
+ uptr first=*(uptr*)(task+0x70),end=*(uptr*)(task+0x78);
+ if(!first||end<first+0xe0||(end-first)%0xe0||end-first>0x1c00)return 0;
+ uptr leaf=end-0xe0;
+ if(strcmp(value((unsigned char*)leaf),"Match/Enter/MatchEnterDemoOnline"))return 0;
+ // These are the game's own scene and transition completion callbacks.
+ // Only the exact headless introduction is skipped: the original engine
+ // continues to decide network, player and match-simulation readiness.
+ if(!*(unsigned char*)(leaf+0x50))((void(*)(uptr))(base+0x6aa9184))(leaf);
+ ((void(*)(uptr,uptr))(base+0x6aa6ec0))(flow+0x118,leaf);
+ return (*(uptr*)(flow+0x170)&4)?1:0;
+}
