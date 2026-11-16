@@ -61,6 +61,9 @@ class BotEngineTurnPairPhoneTest {
                 startupAudit.contains("networkResolverObserver=1"))
             assertTrue("The original socket observers were not installed",
                 startupAudit.contains("socketObservers=127"))
+            if (BotRendering.headless(context)) assertTrue(
+                "The bot's local discovery service was not ready before network startup",
+                startupAudit.contains("localStunReady=true"))
             Log.i("PeerlinkTurnTest", "NETWORK_STARTUP_${role}_EXPORTED_BEFORE_MATCH_SETUP")
             val revisionCheck = MatchServerSettings.revisionCheck(mapOf("result" to "NOERR",
                 "is_revision_check" to args.getString("revisionCheck", "YES")))
@@ -127,6 +130,12 @@ class BotEngineTurnPairPhoneTest {
             Log.i("PeerlinkTurnTest", "ORIGINAL_CONFIGURED_TURN_${role}_METADATA localBytes=${EngineHost.turnAddress()?.size ?: 0} peerAccepted=$acceptedPeerRecord")
             assertFalse(EngineHost.snapshot().canTestPass)
             Log.i("PeerlinkTurnTest", "ORIGINAL_CONFIGURED_TURN_${role}_CHANNELS_CONNECTED")
+            if (BotRendering.headless(context)) {
+                val discoveryLog = AppState.getLogs()
+                assertTrue("The original SDK did not receive local STUN replies",
+                    Regex("localStunReplies=[1-9][0-9]*").containsMatchIn(discoveryLog))
+                Log.i("PeerlinkTurnTest", "LOCAL_DISCOVERY_${role}_ORIGINAL_SDK_CONNECTED")
+            }
             Thread.sleep(3000)
             val connected = EngineHost.snapshot()
             assertTrue(connected.connected)

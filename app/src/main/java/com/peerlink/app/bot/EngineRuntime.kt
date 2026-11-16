@@ -20,6 +20,7 @@ internal object EngineRuntime {
         private set
     @Volatile private var ownerUid = 0L
     private var gameHost: GameAndroidRuntime? = null
+    private var discovery: BotDiscoveryServer? = null
     var report: (String) -> Unit = {}
     var audit: (String) -> Unit = {}
     @Volatile var startupRetryable = true
@@ -128,6 +129,12 @@ internal object EngineRuntime {
             // startup, matching the successful full-application host.
             gameHost?.engineReady()
             onRuntime {
+                if (headless) {
+                    if (discovery == null) discovery = BotDiscoveryServer(audit)
+                    check(nativeConfigureLocalDiscovery(base, BotDiscoveryServer.ADDRESS)) {
+                        "The bot's local connection settings were rejected"
+                    }
+                }
                 client = nativeStart(base, uid)
                 if (client == 0L) return@onRuntime false
                 ownerUid = uid
@@ -167,7 +174,9 @@ internal object EngineRuntime {
     }
 
     fun databaseDiagnostics(): String = onRuntime { nativeDatabaseDiagnostics(base) }
-    fun networkStartupDiagnostics(): String = onRuntime { nativeNetworkStartupDiagnostics(base) }
+    fun networkStartupDiagnostics(): String = onRuntime {
+        nativeNetworkStartupDiagnostics(base) + " " + (discovery?.diagnostics() ?: "localStunReady=false")
+    }
     fun loadingDiagnostics(): String = onRuntime { nativeLoadingDiagnostics(base) }
     fun turnRequest(): ByteArray? = onRuntime { if (client == 0L) null else nativeTurnRequest(base) }
 
@@ -264,12 +273,16 @@ internal object EngineRuntime {
     fun probeController(): Boolean = onRuntime { base != 0L && nativeProbeController(base) }
     fun probePreviewCallback(): Boolean = onRuntime { base != 0L && nativePreviewProbe(base) }
     fun stopPreview() = onRuntime { if (base != 0L) nativeStopPreview(base) }
-    fun closeHost() { stopPreview(); gameHost?.close(); gameHost = null }
+    fun closeHost() {
+        stopPreview(); gameHost?.close(); gameHost = null
+        discovery?.close(); discovery = null
+    }
 
     private external fun nativeLoad(path: String): Long
     private external fun nativeEnableHeadless(base: Long, missingMatchResources: Boolean): Boolean
     private external fun nativeHeadlessState(base: Long): Int
     private external fun nativeHeadlessDiagnostics(base: Long): String
+    private external fun nativeConfigureLocalDiscovery(base: Long, address: String): Boolean
     private external fun nativeBeginIntroduction(base: Long, peer: Long, connectingStart: Long): Boolean
     private external fun nativeTransportIoReady(base: Long): Int
     private external fun nativeConfigureTurn(base: Long, input: ByteArray): Boolean

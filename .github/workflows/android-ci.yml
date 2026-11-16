@@ -68,6 +68,8 @@ jobs:
           "$RUNNER_TEMP/preview-policy-test"
           g++ -std=c++17 -Wall -Wextra -Werror -Iapp/src/main/jni/game tests/native/executable_patch_test.cpp tests/native/executable_patch_checks.cpp app/src/main/jni/game/executable_patch.cpp -o "$RUNNER_TEMP/executable-patch-test"
           "$RUNNER_TEMP/executable-patch-test"
+          g++ -std=c++17 -Wall -Wextra -Werror -Iapp/src/main/jni/game tests/native/network_socket_diagnostics_test.cpp app/src/main/jni/game/network_socket_diagnostics.cpp -ldl -o "$RUNNER_TEMP/network-socket-diagnostics-test"
+          "$RUNNER_TEMP/network-socket-diagnostics-test"
 
       - name: Verify APK
         run: |

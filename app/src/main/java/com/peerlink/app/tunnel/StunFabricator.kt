@@ -9,6 +9,28 @@ import com.peerlink.app.core.AppState
  */
 object StunFabricator {
 
+    // A separate, explicitly local profile for the private bot's discovery.
+    // Public game interception still accepts only the capture-backed profiles.
+    internal val LOCAL_BOT_SERVERS = listOf("127.0.0.80", "127.0.0.81", "127.0.0.82")
+    private val LOCAL_BOT_CLUSTER = ServerCluster("127.0.0.80", "127.0.0.81", "127.0.0.82")
+    internal data class LocalBindingReply(
+        val sourceIp: String, val sourcePort: Int, val destinationPort: Int, val payload: ByteArray,
+    )
+
+    internal fun localBotBindingReply(
+        request: ByteArray, destinationIp: String, destinationPort: Int,
+        clientPort: Int, mappedIp: String,
+    ): LocalBindingReply? {
+        if (destinationIp !in LOCAL_BOT_SERVERS || destinationPort !in 3478..3479 ||
+            clientPort !in 1..65535) return null
+        val parsed = parseStunRequest(request, 0, request.size) ?: return null
+        val source = determineResponseSource(destinationIp, destinationPort, parsed, LOCAL_BOT_CLUSTER)
+        return LocalBindingReply(source.spoofIp, source.spoofPort,
+            responseDestinationPort(parsed, clientPort),
+            buildStunResponse(parsed.transactionId, ipToBytes(mappedIp), clientPort,
+                source, LOCAL_BOT_CLUSTER, parsed.hasKonamiExt))
+    }
+
     // ==================== CONSTANTS ====================
     
     private const val STUN_MAGIC_COOKIE = 0x2112A442

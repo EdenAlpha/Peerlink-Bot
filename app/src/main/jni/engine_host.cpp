@@ -775,6 +775,36 @@ JNIEXPORT jstring JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeHeadless
     return env->NewStringUTF(peerlink_null_client_rhi_diagnostics());
 }
 
+JNIEXPORT jboolean JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeConfigureLocalDiscovery(
+        JNIEnv *env, jobject, jlong base, jstring input) {
+    if (!valid(base) || !g_core_ready || g_client || !input) return JNI_FALSE;
+    const char *address = env->GetStringUTFChars(input, nullptr);
+    if (!address) return JNI_FALSE;
+    const bool local = strcmp(address, "127.0.0.80") == 0;
+    env->ReleaseStringUTFChars(input, address);
+    if (!local) return JNI_FALSE;
+    TaskLock lock;
+    if (!lock.manager) return JNI_FALSE;
+    // This is the SDK's owned STUN-host override string, not a connection or
+    // socket state. Getter 7e45354 selects it instead of the default hostname;
+    // 7dffa28 copies it into the original NTL configuration before discovery.
+    // The SDK still sends real UDP requests and parses real STUN responses.
+    auto *override = reinterpret_cast<EngineString *>(g_base + 0xa5da978);
+    destroy_string(*override);
+    memset(override, 0, sizeof(*override));
+    entry<void (*)(void *, const char *, size_t)>(0x2f3877c)(override, "127.0.0.80", 10);
+    EngineString selected{};
+    entry<void (*)(void *)>(0x7e45354)(&selected);
+    const unsigned char *bytes = reinterpret_cast<const unsigned char *>(&selected);
+    const size_t count = bytes[0] & 1 ? selected.words[1] : bytes[0] >> 1;
+    const char *value = bytes[0] & 1 ? reinterpret_cast<const char *>(selected.words[2]) :
+        reinterpret_cast<const char *>(bytes + 1);
+    const bool accepted = count == 10 && value && memcmp(value, "127.0.0.80", 10) == 0;
+    destroy_string(selected);
+    __android_log_print(ANDROID_LOG_INFO, TAG, "BOT_DISCOVERY_INPUT local=%u original_getter_verified=%u", accepted, accepted);
+    return accepted ? JNI_TRUE : JNI_FALSE;
+}
+
 JNIEXPORT jlong JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeStart(
         JNIEnv *, jobject, jlong base, jlong uid) {
     if (!valid(base) || !g_core_ready || uid <= 0 || uid > 0xffffffffLL) return 0;
