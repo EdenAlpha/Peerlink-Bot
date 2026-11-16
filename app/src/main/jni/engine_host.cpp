@@ -33,6 +33,7 @@ long peerlink_original_preview_proceed_v271(uintptr_t);
 long peerlink_preview_drive(uintptr_t, bool);
 long peerlink_demo_drive(uintptr_t);
 long peerlink_visual_start_drive(uintptr_t);
+long peerlink_reference_intro_drive(uintptr_t, bool);
 long peerlink_preview_probe(uintptr_t);
 void peerlink_preview_stop();
 void peerlink_preview_diagnostics(char *, size_t);
@@ -553,6 +554,8 @@ JNIEXPORT jint JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeAdvanceMatc
         if (preview == 1) g_preview_proceeded = true;
     }
     if (g_match_stage == 2) {
+        long reference_intro = peerlink_reference_intro_drive(g_base, g_user_sync_complete);
+        if (reference_intro < 0) { peerlink_preview_stop(); return -213; }
         uintptr_t rhi = *reinterpret_cast<uintptr_t *>(g_base + 0xa0111f8);
         if (rhi && *reinterpret_cast<uintptr_t *>(rhi) == g_base + 0x93b6e98) {
             long demo = peerlink_demo_drive(g_base);
