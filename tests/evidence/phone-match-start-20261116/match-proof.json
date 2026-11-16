@@ -70,5 +70,11 @@
       "note": "Late wait state retained; ball movement during the input test does not establish a complete uninterrupted match."
     }
   },
-  "scope": "Hosted headless bot and rendered reference peer through production ferry and native backend with socket-pair TUN and owned TLS TURN fixture. Stock foreground game, physical Android VPN and the initial phone disconnect are not reproduced."
+  "scope": "Hosted headless bot and rendered reference peer through production ferry and native backend with socket-pair TUN and owned TLS TURN fixture. Stock foreground game, physical Android VPN and the initial phone disconnect are not reproduced.",
+  "release": {
+    "tag": "phone-engine-test-5418dfa",
+    "publish_run": 43949739040,
+    "asset_id": 756327795,
+    "digest_matches_installed_tested_apk": true
+  }
 }
