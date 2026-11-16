@@ -2,7 +2,10 @@ package com.peerlink.app.ui
 
 import android.content.Context
 import android.graphics.Bitmap
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.Surface
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.test.*
@@ -15,6 +18,8 @@ import com.peerlink.app.core.PeerSessionPhase
 import com.peerlink.app.godmode.GodModeManager
 import com.peerlink.app.bot.BotPacketCounts
 import com.peerlink.app.play.RoomState
+import com.peerlink.app.play.BotRoomBackend
+import com.peerlink.app.play.PlayRoomController
 import org.junit.After
 import org.junit.Rule
 import org.junit.Test
@@ -125,9 +130,11 @@ class PeerLinkUiTest {
     @Test fun readyBotRoomShowsCodeAndSeparateGameTraffic() {
         compose.setContent {
             PeerLinkTheme {
+                Surface(Modifier.fillMaxSize(), color = PL.bg) {
                 PlayPeerLinkContent(context, RoomState.Ready("123456789", "your game joined -- the bot is firing its half"), primeReady = false, primeActive = false,
                     botSession = true, traffic = BotPacketCounts(2765, 2774, android.os.SystemClock.elapsedRealtime()),
                     onExportLogs = {})
+                }
             }
         }
         compose.onNodeWithTag("bot-room-code").assertTextEquals("123456789")
@@ -146,14 +153,41 @@ class PeerLinkUiTest {
         var exported = 0
         compose.setContent {
             PeerLinkTheme {
+                Surface(Modifier.fillMaxSize(), color = PL.bg) {
                 PlayPeerLinkContent(context, RoomState.Failed("The room could not be reached."), false, false,
                     false, BotPacketCounts(), onExportLogs = { exported++ })
+                }
             }
         }
         compose.onNodeWithText("Couldn't open the room").assertIsDisplayed()
         compose.onNodeWithText("Export diagnostics").performClick()
         compose.runOnIdle { assertEquals(1, exported) }
         screenshot("bot-error")
+    }
+
+    @Test fun startupFailureLeavesPreparationAndShowsRetry() {
+        val previous = PlayRoomController.backend
+        PlayRoomController.attach(object : BotRoomBackend {
+            override suspend fun createRoom(ctx: Context, allowResourceDownload: Boolean): String {
+                error("The graphics-free bot could not start.")
+            }
+        }, context)
+        try {
+            show()
+            compose.onNodeWithText("Play PeerLink", useUnmergedTree = true).performClick()
+            compose.onNodeWithTag("bot-create-room").performClick()
+            compose.waitUntil(5000) { PlayRoomController.state.value is RoomState.Failed }
+            compose.onNodeWithText("Couldn't open the room").assertIsDisplayed()
+            compose.onNodeWithText("Try again").assertIsDisplayed()
+            compose.onNodeWithText("Export diagnostics").assertIsDisplayed()
+            compose.onNodeWithText("Setting things up").assertDoesNotExist()
+            screenshot("bot-startup-failure")
+        } finally {
+            PlayRoomController.backend = previous
+            // No service was started by this deliberately failing backend.
+            PlayRoomController.endSession()
+            compose.waitUntil(5000) { PlayRoomController.state.value is RoomState.Idle }
+        }
     }
 
     @Test fun primeSetupShowsPairingActions() {

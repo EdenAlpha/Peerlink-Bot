@@ -39,6 +39,7 @@ void peerlink_preview_diagnostics(char *, size_t);
 bool peerlink_install_null_client_rhi(uintptr_t, bool);
 bool peerlink_null_client_rhi_ready(uintptr_t);
 bool peerlink_null_client_rhi_failed(uintptr_t);
+const char *peerlink_null_client_rhi_diagnostics();
 }
 
 #define TAG "PeerlinkEngineHost"
@@ -751,6 +752,11 @@ JNIEXPORT jint JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeHeadlessSta
         JNIEnv *, jobject, jlong base) {
     if (!valid(base) || peerlink_null_client_rhi_failed(g_base)) return -1;
     return peerlink_null_client_rhi_ready(g_base) ? 1 : 0;
+}
+
+JNIEXPORT jstring JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeHeadlessDiagnostics(
+        JNIEnv *env, jobject, jlong) {
+    return env->NewStringUTF(peerlink_null_client_rhi_diagnostics());
 }
 
 JNIEXPORT jlong JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeStart(

@@ -241,7 +241,7 @@ object EngineBridge {
     private fun prepareWithRetries(context: Context, uid: Long): Boolean {
         var up = EngineHost.prepare(context, uid)
         var attempt = 1
-        while (!up && attempt < 3) {
+        while (!up && EngineHost.startupRetryable && attempt < 3) {
             log("the engine did not come up on try $attempt -- the app's own " +
                 "library may still be loading; trying again in five seconds")
             try {

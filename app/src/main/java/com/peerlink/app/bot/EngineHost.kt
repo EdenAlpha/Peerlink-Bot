@@ -16,6 +16,8 @@ object EngineHost {
         private set
     @Volatile var lastError = ""
         private set
+    @Volatile internal var startupRetryable = true
+        private set
     @Volatile private var ownerUid = 0L
     @Volatile private var service: Messenger? = null
     private var context: Context? = null
@@ -133,12 +135,14 @@ object EngineHost {
     fun prepare(owner: Context, uid: Long): Boolean = synchronized(preparation) {
         if (isReady) return ownerUid == uid
         try {
+            startupRetryable = true
             stopRequestedAt = 0
             engineStartedAt = System.currentTimeMillis()
             bind(owner)
             val result = request(EngineProtocol.PREPARE, Bundle().apply { putLong("uid", uid) }, 300)
             enginePid = result.getInt("pid")
             isReady = result.getBoolean("ok")
+            startupRetryable = result.getBoolean("retryable", true)
             if (isReady) ownerUid = uid
             else lastError = result.getString("reason") ?: "The bot simulation did not start"
             isReady

@@ -22,6 +22,8 @@ internal object EngineRuntime {
     private var gameHost: GameAndroidRuntime? = null
     var report: (String) -> Unit = {}
     var audit: (String) -> Unit = {}
+    @Volatile var startupRetryable = true
+        private set
     @Volatile private var runtimeThread: Thread? = null
     private val runtime = ScheduledThreadPoolExecutor(1) { action ->
         Thread(action, "engine-runtime").apply {
@@ -69,6 +71,7 @@ internal object EngineRuntime {
 
     @Synchronized
     fun prepare(context: Context, uid: Long): Boolean {
+        startupRetryable = true
         if (!nativeAvailable || uid !in 1..0xffffffffL) return false
         if (client != 0L) {
             if (ownerUid == uid) return true
@@ -82,8 +85,13 @@ internal object EngineRuntime {
             if (!engine.isFile || !onRuntime { load(engine) }) return false
             val headless = BotRendering.headless(app)
             val files = GameAssets.prepare(app, report, audit, allowMissingMatchResources = headless)
-            if (headless) check(nativeEnableHeadless(base, files.missingMatchResources > 0)) {
-                "This phone could not start the graphics-free bot"
+            if (headless) {
+                val enabled = nativeEnableHeadless(base, files.missingMatchResources > 0)
+                audit("[BOT-FILES] HEADLESS_SETUP result=${if (enabled) "PASS" else "FAIL"} ${nativeHeadlessDiagnostics(base)}")
+                if (!enabled) {
+                    startupRetryable = false
+                    error("The graphics-free bot could not start. Export diagnostics for the startup details.")
+                }
             }
             report("Starting bot simulation")
             check(nativeConfigureFiles(base, File(files.root, "assets").absolutePath)) { "Bot asset directory is unavailable" }
@@ -93,8 +101,10 @@ internal object EngineRuntime {
             val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(120)
             var nextReport = 0L
             while (!nativeApplicationReady(base)) {
-                if (headless) check(nativeHeadlessState(base) >= 0) {
-                    "This phone could not start the graphics-free bot"
+                if (headless && nativeHeadlessState(base) < 0) {
+                    startupRetryable = false
+                    audit("[BOT-FILES] HEADLESS_INITIALIZE result=FAIL ${nativeHeadlessDiagnostics(base)}")
+                    error("The graphics-free bot could not initialize. Export diagnostics for the startup details.")
                 }
                 if (System.nanoTime() >= nextReport) {
                     android.util.Log.i("PeerlinkEngineHost", nativeStartupInfo(base))
@@ -103,7 +113,14 @@ internal object EngineRuntime {
                 check(System.nanoTime() < deadline) { "Bot simulation startup timed out" }
                 Thread.sleep(200)
             }
-            if (headless) check(nativeHeadlessState(base) == 1) { "Graphics-free bot did not initialize" }
+            if (headless) {
+                val initialized = nativeHeadlessState(base) == 1
+                audit("[BOT-FILES] HEADLESS_INITIALIZE result=${if (initialized) "PASS" else "FAIL"} ${nativeHeadlessDiagnostics(base)}")
+                if (!initialized) {
+                    startupRetryable = false
+                    error("Graphics-free bot did not initialize")
+                }
+            }
             check(onRuntime { nativeLoadDatabase(base, files.database.absolutePath) }) { "Bot game database could not start" }
             // The original Java resume callback checks kernel phase == 1.
             // Framework onResume runs before our native window is attached;
@@ -251,6 +268,7 @@ internal object EngineRuntime {
     private external fun nativeLoad(path: String): Long
     private external fun nativeEnableHeadless(base: Long, missingMatchResources: Boolean): Boolean
     private external fun nativeHeadlessState(base: Long): Int
+    private external fun nativeHeadlessDiagnostics(base: Long): String
     private external fun nativeBeginIntroduction(base: Long, peer: Long, connectingStart: Long): Boolean
     private external fun nativeTransportIoReady(base: Long): Int
     private external fun nativeConfigureTurn(base: Long, input: ByteArray): Boolean

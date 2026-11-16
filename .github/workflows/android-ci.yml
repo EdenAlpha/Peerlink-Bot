@@ -66,6 +66,8 @@ jobs:
         run: |
           g++ -std=c++17 -Wall -Wextra -Werror tests/native/preview_policy_test.cpp -o "$RUNNER_TEMP/preview-policy-test"
           "$RUNNER_TEMP/preview-policy-test"
+          g++ -std=c++17 -Wall -Wextra -Werror -Iapp/src/main/jni/game tests/native/executable_patch_test.cpp tests/native/executable_patch_checks.cpp app/src/main/jni/game/executable_patch.cpp -o "$RUNNER_TEMP/executable-patch-test"
+          "$RUNNER_TEMP/executable-patch-test"
 
       - name: Verify APK
         run: |
@@ -155,7 +157,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: android-host-service-tests-api-${{ matrix.api }}
-          path: engine-host-tests/build/outputs/androidTest-results/
+          path: |
+            engine-host-tests/build/outputs/androidTest-results/
+            engine-host-tests/build/outputs/apk/androidTest/debug/*.apk
           if-no-files-found: warn
           retention-days: 14
 

@@ -46,6 +46,7 @@ class BotEngineService : Service() {
                 EngineProtocol.PREPARE -> {
                     result.putBoolean("ok", EngineRuntime.prepare(this, args.getLong("uid")))
                     result.putInt("pid", Process.myPid())
+                    result.putBoolean("retryable", EngineRuntime.startupRetryable)
                     if (!result.getBoolean("ok")) result.putString("reason", lastStatus.ifBlank { "Bot simulation could not start" })
                 }
                 EngineProtocol.PEER_RECORD -> {

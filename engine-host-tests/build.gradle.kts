@@ -3,10 +3,15 @@ plugins { id("com.android.library") }
 android {
     namespace = "com.peerlink.enginehosttests"
     compileSdk = 36
+    ndkVersion = "27.0.12077973"
     defaultConfig {
         minSdk = 26
         targetSdk = 36
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
+    }
+    externalNativeBuild {
+        cmake { path = file("src/main/cpp/CMakeLists.txt") }
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17

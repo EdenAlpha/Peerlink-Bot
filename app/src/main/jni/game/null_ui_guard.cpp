@@ -3,10 +3,15 @@
 // native packet handling, simulation state, or input handling.
 #include <android/log.h>
 #include <atomic>
+#include <cerrno>
+#include <cstdio>
 #include <cstdint>
 #include <cstring>
+#include <mutex>
+#include <string>
 #include <sys/mman.h>
 #include <unistd.h>
+#include "executable_patch.h"
 namespace {
 using Address = uintptr_t;
 using Init = void (*)(Address);
@@ -21,6 +26,12 @@ std::atomic<bool> applied{false};
 std::atomic<bool> failed{false};
 std::atomic<bool> installed{false};
 bool skip_missing_mesh_wait = false;
+std::mutex error_lock;
+std::string last_error = "none";
+void record_error(const std::string &detail) {
+    { std::lock_guard<std::mutex> lock(error_lock); last_error = detail; }
+    __android_log_print(ANDROID_LOG_ERROR, "PeerlinkEngineHost", "HEADLESS_SETUP %s", detail.c_str());
+}
 Address pointer(Address offset) { return *reinterpret_cast<Address *>(engine + offset); }
 bool protect(Address address, int flags) {
     long size = sysconf(_SC_PAGESIZE);
@@ -31,38 +42,29 @@ bool protect(Address address, int flags) {
 bool set_slot(Address value) {
     auto *slot = reinterpret_cast<Address *>(engine + kNullVtable + 16);
     Address previous = __atomic_load_n(slot, __ATOMIC_ACQUIRE);
-    if (!protect(reinterpret_cast<Address>(slot), PROT_READ | PROT_WRITE)) return false;
+    if (!protect(reinterpret_cast<Address>(slot), PROT_READ | PROT_WRITE)) {
+        record_error("operation=initializer_write errno=" + std::to_string(errno));
+        return false;
+    }
     __atomic_store_n(slot, value, __ATOMIC_RELEASE);
     if (protect(reinterpret_cast<Address>(slot), PROT_READ)) return true;
+    const int error = errno;
     __atomic_store_n(slot, previous, __ATOMIC_RELEASE);
     protect(reinterpret_cast<Address>(slot), PROT_READ);
-    return false;
-}
-bool set_factory(uint32_t instruction) {
-    auto *code = reinterpret_cast<uint32_t *>(engine + kFactoryCall);
-    uint32_t previous = __atomic_load_n(code, __ATOMIC_ACQUIRE);
-    if (!protect(reinterpret_cast<Address>(code), PROT_READ | PROT_WRITE)) return false;
-    __atomic_store_n(code, instruction, __ATOMIC_RELEASE);
-    __builtin___clear_cache(reinterpret_cast<char *>(code), reinterpret_cast<char *>(code + 1));
-    if (protect(reinterpret_cast<Address>(code), PROT_READ | PROT_EXEC)) return true;
-    __atomic_store_n(code, previous, __ATOMIC_RELEASE);
-    __builtin___clear_cache(reinterpret_cast<char *>(code), reinterpret_cast<char *>(code + 1));
-    protect(reinterpret_cast<Address>(code), PROT_READ | PROT_EXEC);
+    record_error("operation=initializer_restore errno=" + std::to_string(error));
     return false;
 }
 bool set_code(Address offset, const uint8_t *bytes, size_t length) {
-    Address address = engine + offset;
-    uint8_t previous[16];
-    if (!length || length > sizeof(previous)) return false;
-    memcpy(previous, reinterpret_cast<void *>(address), length);
-    if (!protect(address, PROT_READ | PROT_WRITE)) return false;
-    memcpy(reinterpret_cast<void *>(address), bytes, length);
-    __builtin___clear_cache(reinterpret_cast<char *>(address), reinterpret_cast<char *>(address + length));
-    if (protect(address, PROT_READ | PROT_EXEC)) return true;
-    memcpy(reinterpret_cast<void *>(address), previous, length);
-    __builtin___clear_cache(reinterpret_cast<char *>(address), reinterpret_cast<char *>(address + length));
-    protect(address, PROT_READ | PROT_EXEC);
+    peerlink::CodePatchFailure failure;
+    if (peerlink::replace_executable_bytes(engine + offset, bytes, length, &failure)) return true;
+    char detail[256];
+    snprintf(detail, sizeof(detail), "operation=%s offset=0x%lx errno=%d pageSize=%zu memory=anonymous_rx",
+             failure.operation, static_cast<unsigned long>(offset), failure.error, failure.page_size);
+    record_error(detail);
     return false;
+}
+bool set_factory(uint32_t instruction) {
+    return set_code(kFactoryCall, reinterpret_cast<const uint8_t *>(&instruction), sizeof(instruction));
 }
 bool install_graphics_guards() {
     static constexpr uint8_t factory_original[] = {
@@ -95,7 +97,10 @@ bool install_graphics_guards() {
         memcmp(reinterpret_cast<void *>(engine + 0x4965a50), visual_cave_original, sizeof(visual_cave_original)) ||
         memcmp(reinterpret_cast<void *>(engine + 0x39cebfc), visual_call_original, sizeof(visual_call_original)) ||
         memcmp(reinterpret_cast<void *>(engine + 0x39cf3dc), visual_resource_load, sizeof(visual_resource_load)) ||
-        (skip_missing_mesh_wait && memcmp(reinterpret_cast<void *>(engine + 0x39d06f4), mesh_wait_original, sizeof(mesh_wait_original)))) return false;
+        (skip_missing_mesh_wait && memcmp(reinterpret_cast<void *>(engine + 0x39d06f4), mesh_wait_original, sizeof(mesh_wait_original)))) {
+        record_error("operation=graphics_guard_verify result=unexpected_instructions");
+        return false;
+    }
     // The original factory has already returned. Its first four instructions
     // are now a trampoline: if the optional texture resource is missing, skip
     // only its graphics-dimension calls; otherwise execute the original load.
@@ -152,6 +157,9 @@ void initialize_null_for_android(Address instance) {
     bool globals_ready = platform && feature && mapping && null_flag;
     bool restored = set_slot(reinterpret_cast<Address>(call));
     if (!selected || !normal_client || !globals_ready || !restored) {
+        record_error("operation=initializer_verify selected=" + std::to_string(selected) +
+                     " client=" + std::to_string(normal_client) + " globals=" +
+                     std::to_string(globals_ready) + " restored=" + std::to_string(restored));
         __android_log_print(ANDROID_LOG_ERROR, "PeerlinkEngineHost",
             "NULL_CLIENT_PROFILE rejected selected=%d client=%d globals=%d restored=%d",
             selected, normal_client, globals_ready, restored);
@@ -174,6 +182,7 @@ void initialize_null_for_android(Address instance) {
         *reinterpret_cast<uint8_t *>(null_flag) = 0;
         applied.store(true, std::memory_order_release);
     } else {
+        if (!profile_matches) record_error("operation=android_profile_verify result=mismatch");
         *reinterpret_cast<uint8_t *>(null_flag) = 1;
         failed.store(true, std::memory_order_release);
     }
@@ -183,11 +192,17 @@ void initialize_null_for_android(Address instance) {
 }
 }
 extern "C" bool peerlink_install_null_client_rhi(uintptr_t base, bool missing_match_resources) {
-    if (!base) return false;
+    if (!base) { record_error("operation=engine_base result=missing"); return false; }
     if (engine) return engine == base && skip_missing_mesh_wait == missing_match_resources && installed.load(std::memory_order_acquire);
     auto *factory = reinterpret_cast<const uint32_t *>(base + kFactoryCall);
     auto *slot = reinterpret_cast<const Address *>(base + kNullVtable + 16);
-    if (*factory != kPlatformFactoryCall || *slot != base + kNullInit) return false;
+    if (*factory != kPlatformFactoryCall || *slot != base + kNullInit) {
+        char detail[256];
+        snprintf(detail, sizeof(detail), "operation=startup_verify factory=0x%x expectedFactory=0x%x initializerMatches=%d",
+                 *factory, kPlatformFactoryCall, *slot == base + kNullInit);
+        record_error(detail);
+        return false;
+    }
     engine = base;
     skip_missing_mesh_wait = missing_match_resources;
     original_init = reinterpret_cast<Init>(base + kNullInit);
@@ -196,6 +211,7 @@ extern "C" bool peerlink_install_null_client_rhi(uintptr_t base, bool missing_ma
     }
     if (set_factory(kOriginalNullFactoryCall)) {
         installed.store(true, std::memory_order_release);
+        __android_log_print(ANDROID_LOG_INFO, "PeerlinkEngineHost", "HEADLESS_SETUP installed=1 memory=anonymous_rx pageSize=%ld", sysconf(_SC_PAGESIZE));
         return true;
     }
     set_slot(reinterpret_cast<Address>(original_init));
@@ -216,4 +232,12 @@ extern "C" bool peerlink_null_client_rhi_ready(uintptr_t base) {
 }
 extern "C" bool peerlink_null_client_rhi_failed(uintptr_t base) {
     return base == engine && failed.load(std::memory_order_acquire);
+}
+extern "C" const char *peerlink_null_client_rhi_diagnostics() {
+    thread_local std::string snapshot;
+    std::lock_guard<std::mutex> lock(error_lock);
+    snapshot = "installed=" + std::to_string(installed.load()) + " applied=" +
+        std::to_string(applied.load()) + " failed=" + std::to_string(failed.load()) +
+        " pageSize=" + std::to_string(sysconf(_SC_PAGESIZE)) + " memory=anonymous_rx " + last_error;
+    return snapshot.c_str();
 }
