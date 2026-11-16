@@ -13,6 +13,8 @@ import com.peerlink.app.core.AppState
 import com.peerlink.app.core.PeerInfo
 import com.peerlink.app.core.PeerSessionPhase
 import com.peerlink.app.godmode.GodModeManager
+import com.peerlink.app.bot.BotPacketCounts
+import com.peerlink.app.play.RoomState
 import org.junit.After
 import org.junit.Rule
 import org.junit.Test
@@ -117,6 +119,40 @@ class PeerLinkUiTest {
         compose.onNodeWithTag("settings-list").performScrollToNode(hasText("Crash logs & advanced"))
         compose.onNodeWithText("Crash logs & advanced").performClick()
         compose.onNodeWithText("Crash Logs").assertIsDisplayed()
+    }
+
+    @Test fun readyBotRoomShowsCodeAndSeparateGameTraffic() {
+        compose.setContent {
+            PeerLinkTheme {
+                PlayPeerLinkContent(context, RoomState.Ready("123456789", "your game joined -- the bot is firing its half"), primeReady = false, primeActive = false,
+                    botSession = true, traffic = BotPacketCounts(2765, 2774, android.os.SystemClock.elapsedRealtime()),
+                    onExportLogs = {})
+            }
+        }
+        compose.onNodeWithTag("bot-room-code").assertTextEquals("123456789")
+        compose.onNodeWithText("Your game joined. The bot is getting ready.").assertIsDisplayed()
+        compose.onNodeWithTag("bot-open-game").assertIsDisplayed()
+        screenshot("bot-room-ready")
+        compose.onNodeWithTag("bot-match-page").performScrollToNode(hasTestTag("bot-traffic-card"))
+        compose.onNodeWithText("From your game").assertIsDisplayed()
+        compose.onNodeWithText("Sent to your game").assertIsDisplayed()
+        compose.onNodeWithText(java.text.NumberFormat.getIntegerInstance().format(2765)).assertIsDisplayed()
+        compose.onNodeWithText(java.text.NumberFormat.getIntegerInstance().format(2774)).assertIsDisplayed()
+        screenshot("bot-traffic")
+    }
+
+    @Test fun failedBotRoomOffersDiagnostics() {
+        var exported = 0
+        compose.setContent {
+            PeerLinkTheme {
+                PlayPeerLinkContent(context, RoomState.Failed("The room could not be reached."), false, false,
+                    false, BotPacketCounts(), onExportLogs = { exported++ })
+            }
+        }
+        compose.onNodeWithText("Couldn't open the room").assertIsDisplayed()
+        compose.onNodeWithText("Export diagnostics").performClick()
+        compose.runOnIdle { assertEquals(1, exported) }
+        screenshot("bot-error")
     }
 
     @Test fun primeSetupShowsPairingActions() {

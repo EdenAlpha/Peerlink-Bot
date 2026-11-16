@@ -6,6 +6,7 @@ import android.content.Context
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
@@ -50,7 +51,7 @@ sealed interface RoomState {
     data class Creating(val note: String) : RoomState
 
     /** The bot has a room; [number] is shown copyable to type into eFootball. */
-    data class Ready(val number: String) : RoomState
+    data class Ready(val number: String, val note: String = "") : RoomState
 
     /** Room creation failed (gate down, not logged in, …). */
     data class Failed(val reason: String) : RoomState
@@ -130,7 +131,13 @@ object PlayRoomController {
     }
 
     fun preparationNote(note: String) {
-        if (_state.value is RoomState.Creating) _state.value = RoomState.Creating(note)
+        _state.update { current ->
+            when (current) {
+                is RoomState.Creating -> current.copy(note = note)
+                is RoomState.Ready -> current.copy(note = note)
+                else -> current
+            }
+        }
     }
 
     /** End the local bot session before allowing another room to be opened. */
@@ -140,6 +147,12 @@ object PlayRoomController {
         _state.value = RoomState.Ending
         io.launch {
             try {
+                if (BotMode.active) {
+                    // This is a deliberate end, so a later service restart
+                    // must not resurrect the old VPN session.
+                    ctx.getSharedPreferences(PeerLinkVpnService.SESSION_STATE_PREFS, Context.MODE_PRIVATE)
+                        .edit().clear().commit()
+                }
                 val serviceRunning = PeerBotService.running
                 PeerBotService.stop(ctx)
                 if (!serviceRunning) {

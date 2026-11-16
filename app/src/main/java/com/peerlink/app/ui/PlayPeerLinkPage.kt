@@ -46,6 +46,20 @@ internal fun PlayPeerLinkPage(
     onExportLogs: () -> Unit,
 ) {
     val room by PlayRoomController.state.collectAsStateWithLifecycle()
+    PlayPeerLinkContent(ctx, room, primeReady, primeActive, botSession, traffic, onExportLogs)
+}
+
+/** Render the current room without starting a connection or creating a room. */
+@Composable
+internal fun PlayPeerLinkContent(
+    ctx: Context,
+    room: RoomState,
+    primeReady: Boolean,
+    primeActive: Boolean,
+    botSession: Boolean,
+    traffic: BotPacketCounts,
+    onExportLogs: () -> Unit,
+) {
     var confirmEnd by rememberSaveable { mutableStateOf(false) }
     val openGame = {
         val launch = ctx.packageManager.getLaunchIntentForPackage("jp.konami.pesam")
@@ -188,6 +202,9 @@ private fun MatchRoomCard(
                     maxLines = 1, overflow = TextOverflow.Ellipsis, letterSpacing = 1.sp,
                     modifier = Modifier.testTag("bot-room-code"))
                 Text("Enter this number in eFootball to join the bot.", color = PL.inkSoft, fontSize = 13.sp, lineHeight = 19.sp)
+                if (room.note.isNotBlank()) {
+                    Text(roomStatusText(room.note), color = PL.goldSoft, fontSize = 12.sp, lineHeight = 17.sp)
+                }
                 MatchPrimaryButton("Open eFootball", Icons.Rounded.NorthEast, Modifier.testTag("bot-open-game"), onOpenGame)
                 MatchSecondaryButton("Copy room number", Icons.Rounded.ContentCopy) {
                     PlayRoomController.copyNumber(ctx, room.number)
@@ -218,6 +235,14 @@ private fun MatchRoomCard(
             }
         }
     }
+}
+
+private fun roomStatusText(note: String): String = when {
+    note.startsWith("room ", ignoreCase = true) && note.contains("open", ignoreCase = true) -> "Waiting for you to join in eFootball."
+    note.startsWith("your game joined", ignoreCase = true) -> "Your game joined. The bot is getting ready."
+    note.startsWith("ready sent", ignoreCase = true) -> "Waiting for both sides to be ready."
+    note.startsWith("both sides ready", ignoreCase = true) -> "Both sides are ready. Connecting the match."
+    else -> note.replace(" -- ", " — ")
 }
 
 @Composable
