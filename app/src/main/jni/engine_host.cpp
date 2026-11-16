@@ -18,6 +18,7 @@
 #include <ctime>
 #include <string>
 #include <cmath>
+#include <malloc.h>
 #include <vector>
 #include <utility>
 #include <unistd.h>
@@ -59,6 +60,7 @@ bool g_user_sync_complete = false;
 uint64_t g_user_sync_started_ms = 0;
 bool g_preview_proceeded = false;
 bool g_controller_scanned = false;
+int g_eager_memory_release = 0;
 uint32_t g_channel_peer = 0;
 uint32_t g_channel_home = 0;
 uint32_t g_introduction_peer = 0;
@@ -747,6 +749,9 @@ JNIEXPORT jlong JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeLoad(
         JNIEnv *env, jobject, jstring path) {
     if (g_base) return static_cast<jlong>(g_base);
     if (!path) return 0;
+    // Bionic API 27+: return freed allocator pages immediately in this isolated
+    // engine process. Live allocations and game resource contents are retained.
+    g_eager_memory_release = mallopt(M_DECAY_TIME, 0);
     const char *text = env->GetStringUTFChars(path, nullptr);
     if (!text) return 0;
     std::string file(text);
@@ -770,6 +775,17 @@ JNIEXPORT jlong JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeLoad(
     // Loading here only pins and locates the verified binary. Its installed
     // Java class loader and framework NativeActivity perform JNI/lifecycle init.
     return static_cast<jlong>(g_base);
+}
+
+JNIEXPORT jint JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeReleaseUnusedMemory(
+        JNIEnv *, jobject) {
+    // M_PURGE_ALL is supported from API 34; API 31-33 use the normal purge.
+    // These documented allocator operations only release pages no longer used.
+    int option = M_PURGE;
+#ifdef M_PURGE_ALL
+    if (android_get_device_api_level() >= 34) option = M_PURGE_ALL;
+#endif
+    return (g_eager_memory_release ? 2 : 0) | (mallopt(option, 0) ? 1 : 0);
 }
 
 JNIEXPORT jboolean JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeEnableHeadless(

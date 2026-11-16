@@ -138,6 +138,7 @@ internal object EngineRuntime {
                 client = nativeStart(base, uid)
                 if (client == 0L) return@onRuntime false
                 ownerUid = uid
+                releaseUnusedMemory("engine_prepared")
                 // The original application's game thread owns heartbeat, message
                 // dispatch and model updates. A second manual tick races it.
                 report("Bot simulation started — waiting for your game")
@@ -271,6 +272,15 @@ internal object EngineRuntime {
     }
     fun neutral() = onRuntime { if (base != 0L) nativeNeutralInput(base) }
     fun probeController(): Boolean = onRuntime { base != 0L && nativeProbeController(base) }
+    fun releaseUnusedMemory(trigger: String) = onRuntime {
+        val before = android.os.Debug.getPss()
+        val started = android.os.SystemClock.elapsedRealtime()
+        val result = nativeReleaseUnusedMemory()
+        val elapsed = android.os.SystemClock.elapsedRealtime() - started
+        val after = android.os.Debug.getPss()
+        audit("BOT_MEMORY_RECLAIM trigger=$trigger eagerRelease=${result and 2 != 0} " +
+            "purgeAccepted=${result and 1 != 0} beforePssKiB=$before afterPssKiB=$after durationMs=$elapsed")
+    }
     fun probePreviewCallback(): Boolean = onRuntime { base != 0L && nativePreviewProbe(base) }
     fun stopPreview() = onRuntime { if (base != 0L) nativeStopPreview(base) }
     fun closeHost() {
@@ -301,6 +311,7 @@ internal object EngineRuntime {
     private external fun nativeSetupMatch(base: Long, peer: Long, squad: String, context: String): Boolean
     private external fun nativeSnapshot(base: Long, passive: Boolean): LongArray
     private external fun nativeAdvanceMatch(base: Long, controllerAllowed: Boolean): Int
+    private external fun nativeReleaseUnusedMemory(): Int
     private external fun nativeInputKey(base: Long, code: Int, action: Int): Boolean
     private external fun nativeNeutralInput(base: Long)
     private external fun nativeProbeController(base: Long): Boolean

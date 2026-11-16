@@ -23,6 +23,7 @@ class BotEngineService : Service() {
     private var nextMemorySample = 0L
     private var nextNativeSample = 0L
     private var nextNetworkSample = 0L
+    private var nextMemoryReclaim = 0L
     private var diagnosticTask: ScheduledFuture<*>? = null
     private val connectionTrace = NativeConnectionTrace()
     private val messenger = Messenger(object : Handler(Looper.getMainLooper()) {
@@ -207,6 +208,18 @@ class BotEngineService : Service() {
             val line = state.status()
             if (line != lastStatus) report(line)
             val now = SystemClock.elapsedRealtime()
+            // Loading the foreground game caused a confirmed Android LMK on
+            // the 4 GB phone. Return already-freed native pages during this
+            // loading window; never discard live match objects or game data.
+            if (advance >= 2 && !state.matchConstructed && now >= nextMemoryReclaim) {
+                nextMemoryReclaim = now + 5000
+                EngineRuntime.releaseUnusedMemory("match_loading")
+                val memory = android.app.ActivityManager.MemoryInfo()
+                getSystemService(android.app.ActivityManager::class.java).getMemoryInfo(memory)
+                diagnostic("BOT_MEMORY availableKiB=${memory.availMem / 1024} " +
+                    "thresholdKiB=${memory.threshold / 1024} lowMemory=${memory.lowMemory} " +
+                    "nativeHeapKiB=${Debug.getNativeHeapAllocatedSize() / 1024}")
+            }
             if (testing && passes < 10 && state.canTestPass && now >= nextPass) {
                 if (pressPass()) { passes++; nextPass = now + 6000 }
             }
