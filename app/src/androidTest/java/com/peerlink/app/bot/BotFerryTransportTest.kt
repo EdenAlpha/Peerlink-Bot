@@ -35,7 +35,7 @@ class BotFerryTransportTest {
                         assertTrue("The local probe must reach this room", vpn.verify())
                         PeerSlot.engineAttached = true
                         socket().use { engine ->
-                            engine.sendTo(byteArrayOf(7), PeerSlot.ENGINE_PORT)
+                            engine.sendTo(byteArrayOf(7), PeerSlot.ENGINE_REFLEXIVE_PORT, PeerSlot.REFLEXIVE_PEER_IP)
                             val first = requireNotNull(injected.poll(3, TimeUnit.SECONDS))
                             assertArrayEquals(byteArrayOf(7), first.copyOfRange(28, first.size))
                             val payload = byteArrayOf(3, round.toByte(), 5, 7)
@@ -76,9 +76,13 @@ class BotFerryTransportTest {
                 PeerSlot.arm(100, 200, "", "10.210.3.251", 47885)
                 PeerSlot.engineAttached = true
                 val bytes = byteArrayOf(2, 4, 6, 8)
+                engine.sendTo(byteArrayOf(7), PeerSlot.ENGINE_PORT)
+                val learned = System.nanoTime() + 1_000_000_000L
+                while (!PeerSlot.engineHeard && System.nanoTime() < learned) Thread.sleep(5)
+                assertTrue(PeerSlot.engineHeard)
                 game.sendTo(bytes, port, requireNotNull(source).hostAddress!!)
-                engine.sendTo(byteArrayOf(9), PeerSlot.ENGINE_PORT)
                 assertArrayEquals(bytes, engine.receiveBytes())
+                engine.sendTo(byteArrayOf(9), PeerSlot.ENGINE_PORT)
                 assertArrayEquals(byteArrayOf(9), game.receiveBytes())
                 assertEquals(1L, PeerSlot.gameTraffic().fromGame)
             } finally { PeerSlot.disarm() }
