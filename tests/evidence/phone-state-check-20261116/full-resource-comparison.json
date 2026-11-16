@@ -1,0 +1,316 @@
+{
+  "lab": "Android 15 ARM64 hosted reference; not stock foreground eFootball",
+  "mainApkSha256": "391516c150e5edb338e15c65c67da1ac5140d03ad1c1900047f70eb8aed19edf",
+  "configuration": "both rendered, both full resources, home-only automatic Pass",
+  "roles": {
+    "B": {
+      "harness_passed": true,
+      "samples": 120,
+      "max_outer": 17,
+      "max_players": 22,
+      "playable_observed": true,
+      "pass_queue_accepted": false,
+      "distinct_ball_positions": 37
+    },
+    "A": {
+      "harness_passed": true,
+      "samples": 120,
+      "max_outer": 17,
+      "max_players": 22,
+      "playable_observed": true,
+      "pass_queue_accepted": false,
+      "distinct_ball_positions": 37
+    }
+  },
+  "fullExtraPacksPerEngine": 63,
+  "extraResourceBytes": 2184159958,
+  "consecutiveStateChecksAgree": 56,
+  "lastCommandFrame": {
+    "A": 1518,
+    "B": 1518
+  },
+  "checks": [
+    {
+      "frame": 27,
+      "A": 34671,
+      "B": 34671
+    },
+    {
+      "frame": 54,
+      "A": 35063,
+      "B": 35063
+    },
+    {
+      "frame": 81,
+      "A": 32869,
+      "B": 32869
+    },
+    {
+      "frame": 108,
+      "A": 32896,
+      "B": 32896
+    },
+    {
+      "frame": 135,
+      "A": 33287,
+      "B": 33287
+    },
+    {
+      "frame": 162,
+      "A": 28060,
+      "B": 28060
+    },
+    {
+      "frame": 189,
+      "A": 23580,
+      "B": 23580
+    },
+    {
+      "frame": 216,
+      "A": 24064,
+      "B": 24064
+    },
+    {
+      "frame": 243,
+      "A": 32444,
+      "B": 32444
+    },
+    {
+      "frame": 270,
+      "A": 27438,
+      "B": 27438
+    },
+    {
+      "frame": 297,
+      "A": 33211,
+      "B": 33211
+    },
+    {
+      "frame": 324,
+      "A": 37890,
+      "B": 37890
+    },
+    {
+      "frame": 351,
+      "A": 37307,
+      "B": 37307
+    },
+    {
+      "frame": 378,
+      "A": 32654,
+      "B": 32654
+    },
+    {
+      "frame": 405,
+      "A": 25285,
+      "B": 25285
+    },
+    {
+      "frame": 432,
+      "A": 26616,
+      "B": 26616
+    },
+    {
+      "frame": 459,
+      "A": 26915,
+      "B": 26915
+    },
+    {
+      "frame": 486,
+      "A": 31415,
+      "B": 31415
+    },
+    {
+      "frame": 513,
+      "A": 30945,
+      "B": 30945
+    },
+    {
+      "frame": 540,
+      "A": 38393,
+      "B": 38393
+    },
+    {
+      "frame": 567,
+      "A": 32675,
+      "B": 32675
+    },
+    {
+      "frame": 594,
+      "A": 31364,
+      "B": 31364
+    },
+    {
+      "frame": 621,
+      "A": 32027,
+      "B": 32027
+    },
+    {
+      "frame": 648,
+      "A": 24566,
+      "B": 24566
+    },
+    {
+      "frame": 675,
+      "A": 26785,
+      "B": 26785
+    },
+    {
+      "frame": 702,
+      "A": 28892,
+      "B": 28892
+    },
+    {
+      "frame": 729,
+      "A": 28879,
+      "B": 28879
+    },
+    {
+      "frame": 756,
+      "A": 24333,
+      "B": 24333
+    },
+    {
+      "frame": 783,
+      "A": 25900,
+      "B": 25900
+    },
+    {
+      "frame": 810,
+      "A": 28556,
+      "B": 28556
+    },
+    {
+      "frame": 837,
+      "A": 30530,
+      "B": 30530
+    },
+    {
+      "frame": 864,
+      "A": 26029,
+      "B": 26029
+    },
+    {
+      "frame": 891,
+      "A": 24912,
+      "B": 24912
+    },
+    {
+      "frame": 918,
+      "A": 28262,
+      "B": 28262
+    },
+    {
+      "frame": 945,
+      "A": 23038,
+      "B": 23038
+    },
+    {
+      "frame": 972,
+      "A": 27411,
+      "B": 27411
+    },
+    {
+      "frame": 999,
+      "A": 24679,
+      "B": 24679
+    },
+    {
+      "frame": 1026,
+      "A": 27721,
+      "B": 27721
+    },
+    {
+      "frame": 1053,
+      "A": 26051,
+      "B": 26051
+    },
+    {
+      "frame": 1080,
+      "A": 30366,
+      "B": 30366
+    },
+    {
+      "frame": 1107,
+      "A": 26958,
+      "B": 26958
+    },
+    {
+      "frame": 1134,
+      "A": 22190,
+      "B": 22190
+    },
+    {
+      "frame": 1161,
+      "A": 30052,
+      "B": 30052
+    },
+    {
+      "frame": 1188,
+      "A": 25719,
+      "B": 25719
+    },
+    {
+      "frame": 1215,
+      "A": 27667,
+      "B": 27667
+    },
+    {
+      "frame": 1242,
+      "A": 26035,
+      "B": 26035
+    },
+    {
+      "frame": 1269,
+      "A": 24817,
+      "B": 24817
+    },
+    {
+      "frame": 1296,
+      "A": 28499,
+      "B": 28499
+    },
+    {
+      "frame": 1323,
+      "A": 24958,
+      "B": 24958
+    },
+    {
+      "frame": 1350,
+      "A": 25816,
+      "B": 25816
+    },
+    {
+      "frame": 1377,
+      "A": 25571,
+      "B": 25571
+    },
+    {
+      "frame": 1404,
+      "A": 26901,
+      "B": 26901
+    },
+    {
+      "frame": 1431,
+      "A": 32315,
+      "B": 32315
+    },
+    {
+      "frame": 1458,
+      "A": 32233,
+      "B": 32233
+    },
+    {
+      "frame": 1485,
+      "A": 28918,
+      "B": 28918
+    },
+    {
+      "frame": 1512,
+      "A": 27750,
+      "B": 27750
+    }
+  ],
+  "physicalPhoneCauseFixed": false,
+  "crossMatchRawChecksumsComparable": false
+}

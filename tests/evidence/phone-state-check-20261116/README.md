@@ -25,7 +25,13 @@ The full-file comparison is being tested separately. Merely restoring all 63
 files in the current headless startup did not reproduce the historical full-file
 kickoff: home remained at outer state 12 without players, while the rendered
 reference loaded 22 players. No post-kickoff state comparison was possible in
-that run. The earlier rendered full-file configuration is the next control.
+that run. The earlier rendered full-file configuration subsequently completed 120
+observations per engine: both loaded 22 players, observed 37 ball positions,
+and agreed on all 56 recorded state checks through frame 1512. This confirms
+the full-file control can play in the hosted lab. Together with the minimal
+control, it does not reproduce or explain the stock phone mismatch. Different
+server matches use different match IDs/initialization; their raw checksum
+numbers must not be compared across runs as if the matches were identical.
 
 The new observer captures the original comparison's local/peer values and frame
 numbers before the context goes out of scope. It also records the original
