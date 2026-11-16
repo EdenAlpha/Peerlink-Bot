@@ -53,5 +53,21 @@ map, handle, and checksum-state storage, verifies all 71 helper calls receive
 the real state, and confirms diagnostic recomputation leaves the invocation
 counter unchanged. `verify_match_state_checksum.py` separately executes the
 original ARM64 pointer path and checksum fold with the pinned owned library.
-The rejected build has not been published; Android match validation of the
-corrected artifact is still required.
+The rejected build has not been published. The corrected artifact
+(SHA-256 `fd19bc0ebae8dc9e932ad5c405ca8c02e5fc3238c4ed40a7573872253b653e8f`)
+subsequently passed the Android 15 ARM64 normal match test: both engines
+completed 120 observations, each observed 32 ball positions, and all 64
+recorded original state checks agreed through frame 1728. All 71 checksum
+contributors were captured and their sum/fold verified. The bot had none of
+the 63 extra packs and made zero extra resource downloads. First-live snapshots
+were observed at their labelled frames (87 and 312), so they must not be treated
+as identical frame-zero captures. The installed APK digest was checked
+directly against the retained CI artifact before the separate fault test.
+
+A separate owned-lab fault validation deliberately changed incoming checksum
+values at frames 27 and 54 after their original decoding. The original engine
+requested stop at frame 55 and both engines applied it at frame 57. The actual
+ARM64 wrapper captured local 33311 / peer 33310 at frame 54, the first mismatch
+at frame 27, the original verdict and count, and all 71 stop-state contributors.
+No native crash occurred. This validates diagnostic capture and preservation of
+the original stop; it is not a natural reproduction or fix of the phone defect.
