@@ -4,6 +4,7 @@ import com.peerlink.app.tunnel.StunFabricator
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetSocketAddress
+import java.net.NetworkInterface
 import java.net.SocketException
 import java.net.SocketTimeoutException
 import java.util.concurrent.atomic.AtomicBoolean
@@ -49,7 +50,11 @@ internal class BotDiscoveryServer(private val audit: (String) -> Unit) : AutoClo
             try {
                 val packet = DatagramPacket(ByteArray(4096), 4096)
                 socket.receive(packet)
-                if (!packet.address.isLoopbackAddress) continue
+                // The SDK binds its real physical address before discovery.
+                // A datagram addressed to our loopback listener can therefore
+                // legitimately arrive with this phone's Wi-Fi/cellular source.
+                if (!packet.address.isLoopbackAddress &&
+                    runCatching { NetworkInterface.getByInetAddress(packet.address) }.getOrNull() == null) continue
                 requests.incrementAndGet()
                 val response = StunFabricator.localBotBindingReply(
                     packet.data.copyOfRange(packet.offset, packet.offset + packet.length),

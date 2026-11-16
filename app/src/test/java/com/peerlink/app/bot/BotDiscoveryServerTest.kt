@@ -3,7 +3,10 @@ package com.peerlink.app.bot
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetSocketAddress
+import java.net.Inet4Address
+import java.net.NetworkInterface
 import org.junit.Assert.*
+import org.junit.Assume.assumeNotNull
 import org.junit.Test
 
 class BotDiscoveryServerTest {
@@ -52,5 +55,27 @@ class BotDiscoveryServerTest {
         }
         // All fixed source endpoints are released when the engine closes.
         BotDiscoveryServer { }.close()
+    }
+
+    @Test fun acceptsAnSdkSocketBoundToThePhonesPhysicalAddress() {
+        val physical = NetworkInterface.getNetworkInterfaces().toList()
+            .flatMap { it.inetAddresses.toList() }
+            .firstOrNull { it is Inet4Address && !it.isLoopbackAddress && !it.isLinkLocalAddress }
+        assumeNotNull(physical)
+        BotDiscoveryServer { }.use { server ->
+            DatagramSocket(InetSocketAddress(physical, 0)).use { client ->
+                client.soTimeout = 1500
+                val input = request()
+                client.send(DatagramPacket(input, input.size,
+                    InetSocketAddress(BotDiscoveryServer.ADDRESS, 3478)))
+                val answer = receive(client)
+                assertEquals("127.0.0.80", answer.address.hostAddress)
+                assertArrayEquals(input.copyOfRange(8, 20), answer.data.copyOfRange(8, 20))
+                val deadline = System.nanoTime() + 1_000_000_000L
+                while (!server.diagnostics().contains("localStunReplies=1") &&
+                    System.nanoTime() < deadline) Thread.sleep(1)
+                assertTrue(server.diagnostics().contains("localStunReplies=1"))
+            }
+        }
     }
 }
