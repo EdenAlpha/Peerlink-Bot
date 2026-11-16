@@ -10,6 +10,26 @@ namespace {
 uintptr_t expected_controller, expected_frame;
 unsigned request_calls, outgoing_calls, apply_calls;
 bool stop_on_outgoing, stop_on_apply;
+uintptr_t expected_checksum_root;
+unsigned checksum_helper_calls;
+uint32_t match_checksum_fixture(uintptr_t root, uint32_t *sum, uint32_t *ordinal, uint32_t *frame) {
+    assert(root == expected_checksum_root);
+    ++checksum_helper_calls;
+    *sum += 100; ++*ordinal; *frame = 1;
+    return 1;
+}
+void ball_checksum_fixture(uintptr_t root, uint32_t *sum, uint32_t *ordinal) {
+    assert(root == expected_checksum_root);
+    ++checksum_helper_calls; *sum += 2; ++*ordinal;
+}
+void object_checksum_fixture(uintptr_t root, uint32_t *sum, uint32_t *ordinal, uint32_t index) {
+    assert(root == expected_checksum_root && index < 3);
+    ++checksum_helper_calls; *sum += 10 + index; ++*ordinal;
+}
+void player_checksum_fixture(uintptr_t root, uint32_t *sum, uint32_t *ordinal, uint32_t side, uint32_t slot) {
+    assert(root == expected_checksum_root && side < 2 && slot < 11);
+    ++checksum_helper_calls; *sum += 100 * side + slot; ++*ordinal;
+}
 void request_fixture(uintptr_t controller) {
     assert(controller == expected_controller);
     assert(errno == ENOTTY);
@@ -158,6 +178,62 @@ int main() {
         int status = 0;
         assert(waitpid(child, &status, 0) == child && WIFEXITED(status) && WEXITSTATUS(status) == 0);
     }
+#if defined(__x86_64__)
+    // Callable fixture helpers at the pinned entry offsets exercise the real
+    // capture function. In particular the original API receives **map, while
+    // player entries are fields of map itself: those are different objects.
+    const pid_t snapshot_child = fork();
+    assert(snapshot_child >= 0);
+    if (snapshot_child == 0) {
+        auto set_pointer = [](unsigned char *at, uintptr_t value) { std::memcpy(at, &value, sizeof(value)); };
+        auto set_word = [](unsigned char *at, uint32_t value) { std::memcpy(at, &value, sizeof(value)); };
+        auto install_helper = [base](uintptr_t offset, uintptr_t target) {
+            unsigned char trampoline[] = {0x48,0xb8,0,0,0,0,0,0,0,0,0xff,0xe0};
+            std::memcpy(trampoline + 2, &target, sizeof(target));
+            std::memcpy(reinterpret_cast<void *>(base + offset), trampoline, sizeof(trampoline));
+        };
+        install_helper(0x6b00048, reinterpret_cast<uintptr_t>(match_checksum_fixture));
+        install_helper(0x6b00474, reinterpret_cast<uintptr_t>(ball_checksum_fixture));
+        install_helper(0x6b0050c, reinterpret_cast<uintptr_t>(object_checksum_fixture));
+        for (uintptr_t offset : {0x6b00650U,0x6b00794U,0x6b00908U})
+            install_helper(offset, reinterpret_cast<uintptr_t>(player_checksum_fixture));
+        const long page = sysconf(_SC_PAGESIZE);
+        const uintptr_t page_start = (base + 0x6b00000) & ~(static_cast<uintptr_t>(page) - 1);
+        assert(mprotect(reinterpret_cast<void *>(page_start), page, PROT_READ | PROT_EXEC) == 0);
+        alignas(uintptr_t) unsigned char service[0x20]{}, inner[0xe0]{}, match[0x300]{}, core[0x3ca0]{};
+        alignas(uintptr_t) unsigned char actors[22][0x650]{};
+        uint32_t checksum_root[4]{55};
+        uintptr_t checksum_handle = reinterpret_cast<uintptr_t>(checksum_root);
+        expected_checksum_root = checksum_handle;
+        *reinterpret_cast<uintptr_t *>(base + 0xa5909a0) = reinterpret_cast<uintptr_t>(&checksum_handle);
+        *reinterpret_cast<uintptr_t *>(base + 0x9a6a020) = reinterpret_cast<uintptr_t>(service);
+        *reinterpret_cast<uintptr_t *>(base + 0xa533ec0) = reinterpret_cast<uintptr_t>(match);
+        set_pointer(service, base + 0x98ae9e0); set_pointer(service + 8, reinterpret_cast<uintptr_t>(inner));
+        set_pointer(inner + 0xa0, expected_controller);
+        set_pointer(match + 0x2f8, reinterpret_cast<uintptr_t>(core));
+        set_pointer(core, base + 0x9899d50); set_word(core + 8, 54);
+        set_word(controller + 0x30, 3);
+        for (unsigned i = 0; i < 22; ++i) {
+            *reinterpret_cast<uintptr_t *>(base + 0xa5909a0 + 0x170 + i * 8) = reinterpret_cast<uintptr_t>(actors[i]);
+            set_word(actors[i] + 0x5dc, 100 + i);
+        }
+        peerlink_match_state_sample_initial();
+        assert(checksum_helper_calls == 0); // Not yet in live play.
+        match[0x138] = 17;
+        peerlink_match_state_sample_initial();
+        assert(checksum_helper_calls == 71 && checksum_root[0] == 55);
+        const std::string details = peerlink_match_state_diagnostics();
+        assert(details.find("MATCH_STATE_INITIAL present=1 commandFrame=3 stateFrame=1") != std::string::npos);
+        assert(details.find("terms=71 parts=[100,2,10,11,12,") != std::string::npos);
+        assert(details.find("players=22 playerPositionBits=[100,0,0,101,0,0,") != std::string::npos);
+        peerlink_match_state_sample_initial();
+        assert(checksum_helper_calls == 71 && checksum_root[0] == 55);
+        _exit(0);
+    }
+    int snapshot_status = 0;
+    assert(waitpid(snapshot_child, &snapshot_status, 0) == snapshot_child &&
+        WIFEXITED(snapshot_status) && WEXITSTATUS(snapshot_status) == 0);
+#endif
     munmap(mapping, mapping_size);
     puts("MATCH_STOP_OBSERVER_ABI_AND_ORIGINAL_CHECKSUM_CONTEXT_PRESERVATION_PASS");
 }

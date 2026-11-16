@@ -43,7 +43,10 @@ uintptr_t command_controller(uintptr_t *checker = nullptr) {
 
 void capture(Snapshot &output, uintptr_t controller) {
     if (output.published.load(std::memory_order_acquire) || !engine) return;
-    uintptr_t state = ptr(engine + 0xa5909a0);
+    // 7053d8c loads the map's service handle; 6affecc dereferences that
+    // handle once more before 6afff10/6afff20 receive the checksum state.
+    uintptr_t handle = ptr(engine + 0xa5909a0);
+    uintptr_t state = handle ? ptr(handle) : 0;
     if (!state) return;
     // These are the same read-only checksum contributors called by 6afff20.
     // Avoid 6afff10: it increments the checksum service's invocation counter.
