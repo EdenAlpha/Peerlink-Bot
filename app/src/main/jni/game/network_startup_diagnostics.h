@@ -6,3 +6,5 @@
 // observer must never prevent startup or change the networking inputs.
 void peerlink_observe_network_startup(uintptr_t base);
 void peerlink_network_startup_diagnostics(uintptr_t client, char *text, size_t size);
+void peerlink_observe_network_sockets(uintptr_t base);
+void peerlink_network_socket_diagnostics(char *text, size_t size);

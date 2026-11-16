@@ -378,7 +378,7 @@ JNIEXPORT jstring JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeDatabase
 JNIEXPORT jstring JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeNetworkStartupDiagnostics(
         JNIEnv *env, jobject, jlong base) {
     if (!valid(base)) return env->NewStringUTF("NETWORK_STARTUP unavailable=engine_not_loaded");
-    char networking[640];
+    char networking[1536];
     peerlink_network_startup_diagnostics(g_client, networking, sizeof(networking));
     const std::string text = std::string("NETWORK_STARTUP ") + networking;
     return env->NewStringUTF(text.c_str());
@@ -395,7 +395,7 @@ JNIEXPORT jstring JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeLoadingD
     char preview[768];
     peerlink_preview_diagnostics(preview, sizeof(preview));
     text += " "; text += preview;
-    char networking[640];
+    char networking[1536];
     peerlink_network_startup_diagnostics(g_client, networking, sizeof(networking));
     text += " "; text += networking;
     uintptr_t user_sync = attached_task(lock.manager, g_user_sync_task, g_base + 0x990d9c8);
@@ -788,6 +788,7 @@ JNIEXPORT jlong JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeStart(
     uintptr_t services = *reinterpret_cast<uintptr_t *>(g_base + 0xa5d9cd0);
     uintptr_t clock = services ? *reinterpret_cast<uintptr_t *>(services + 8) : 0;
     if (!clock) return 0;
+    peerlink_observe_network_sockets(g_base);
     peerlink_observe_network_startup(g_base);
     entry<void (*)(uintptr_t, uint32_t)>(0x7e14a38)(clock, static_cast<uint32_t>(time(nullptr)));
     // Five real arguments; the old four-argument trampoline left the last

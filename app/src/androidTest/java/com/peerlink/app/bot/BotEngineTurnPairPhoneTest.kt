@@ -59,6 +59,8 @@ class BotEngineTurnPairPhoneTest {
                 startupAudit.contains("NETWORK_STARTUP networkSdkPhase="))
             assertTrue("The original resolver observer was not installed",
                 startupAudit.contains("networkResolverObserver=1"))
+            assertTrue("The original socket observers were not installed",
+                startupAudit.contains("socketObservers=127"))
             Log.i("PeerlinkTurnTest", "NETWORK_STARTUP_${role}_EXPORTED_BEFORE_MATCH_SETUP")
             val revisionCheck = MatchServerSettings.revisionCheck(mapOf("result" to "NOERR",
                 "is_revision_check" to args.getString("revisionCheck", "YES")))

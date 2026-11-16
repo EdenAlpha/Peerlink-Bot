@@ -3,6 +3,7 @@
 #include <atomic>
 #include <cerrno>
 #include <cstdio>
+#include <string>
 #include <sys/mman.h>
 #include <time.h>
 #include <unistd.h>
@@ -120,13 +121,14 @@ void peerlink_network_startup_diagnostics(uintptr_t client, char *text, size_t s
     auto present = [client](uintptr_t offset) {
         return __atomic_load_n(reinterpret_cast<const uintptr_t *>(client + offset), __ATOMIC_RELAXED) != 0;
     };
-    char v4[160], v6[160];
+    char v4[160], v6[160], socket_details[768];
     resolution_text(ipv4, "V4", v4, sizeof(v4));
     resolution_text(ipv6, "V6", v6, sizeof(v6));
+    peerlink_network_socket_diagnostics(socket_details, sizeof(socket_details));
     snprintf(text, size,
         "networkSdkPhase=%u networkSdkError=%u networkThreadStop=%u networkAutoPort=%u "
         "networkWifi=%u networkEthernet=%u networkV4Holder=%u networkV6Holder=%u "
-        "networkResolverObserver=%d%s%s",
+        "networkResolverObserver=%d%s%s%s",
         word(0x89c), word(0x8b0), byte(0x8b8), byte(0x8b9), byte(0xb70), byte(0xe28),
-        present(0x8f8), present(0x900), observer_state.load(std::memory_order_acquire), v4, v6);
+        present(0x8f8), present(0x900), observer_state.load(std::memory_order_acquire), v4, v6, socket_details);
 }
