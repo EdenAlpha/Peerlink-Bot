@@ -1,0 +1,17 @@
+{
+  "versionName": "5.0.20",
+  "versionCode": 24,
+  "sourceCommit": "195f86975d630a4d4d688a487e0ba2c001d914b2",
+  "ciBuildRun": 43981217591,
+  "artifactId": 14282364682,
+  "publishRun": 43983482603,
+  "releaseId": 447782208,
+  "assetId": 756924396,
+  "bytes": 36171491,
+  "sha256": "fd19bc0ebae8dc9e932ad5c405ca8c02e5fc3238c4ed40a7573872253b653e8f",
+  "sameDigestAsInstalledAndTested": true,
+  "artifactRebuiltForPublication": false,
+  "releaseUrl": "https://github.com/EdenAlpha/Peerlink-Bot/releases/tag/phone-engine-test-195f869",
+  "apkUrl": "https://github.com/EdenAlpha/Peerlink-Bot/releases/download/phone-engine-test-195f869/peerlink-debug.apk",
+  "phoneMismatchUnderlyingCauseFixed": false
+}

@@ -71,3 +71,9 @@ ARM64 wrapper captured local 33311 / peer 33310 at frame 54, the first mismatch
 at frame 27, the original verdict and count, and all 71 stop-state contributors.
 No native crash occurred. This validates diagnostic capture and preservation of
 the original stop; it is not a natural reproduction or fix of the phone defect.
+
+Release `phone-engine-test-195f869` publishes the exact tested 5.0.20 APK from
+CI run `43981217591`, artifact `14282364682`, without rebuilding it. The GitHub
+asset digest matches the installed APK digest above. See `release-proof.json`.
+The phone's underlying mismatch and separately observed low-memory exit remain
+unresolved; this release is diagnostic.
