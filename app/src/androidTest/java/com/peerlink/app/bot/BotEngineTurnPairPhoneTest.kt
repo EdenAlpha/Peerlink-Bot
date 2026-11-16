@@ -178,7 +178,12 @@ class BotEngineTurnPairPhoneTest {
                 require(!verifyAutomaticPass || !manualPassProbe)
                 // Exercise the production controller path without a test-only
                 // controller enumeration or any inputs from the away peer.
-                assertTrue(EngineHost.startInputTest(true, automatic = !manualPassProbe && role == "A"))
+                // A stock touch-controlled reference peer does not receive the
+                // host's explicit controller configuration. Allow that
+                // asymmetry when comparing the real phone's state-check stop.
+                val controllerConfiguration = args.getString("controllerConfiguration", "true").toBooleanStrict()
+                assertTrue(EngineHost.startInputTest(controllerConfiguration,
+                    automatic = !manualPassProbe && role == "A"))
                 var synchronizedBeforePrematch = false
                 var passAccepted = false
                 var playableSamples = 0
