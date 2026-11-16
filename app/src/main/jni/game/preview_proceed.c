@@ -42,9 +42,10 @@ long peerlink_original_preview_finish(uptr base){
   if(!*(unsigned char*)(leaf+0x50))return 0;
   uptr root=((uptr(*)(void))(base+0x7a87db8))(),info=root?*(uptr*)(root+0x20):0;
   uptr context=info?((uptr(*)(uptr))(base+0x7a58998))(info):0;
-  if(!context||*(unsigned*)(context+0x2c)!=0)return 0;
-  // This is the next original HOME flow observed after the preview in the
-  // working match. Its own tasks finalize settings and synchronize readiness.
+  if(!context||*(unsigned*)(context+0x2c)>1)return 0;
+  // The original settings-finalization flow performs the actual ready/data
+  // exchange for either side. Hosted reference peers need the same complete
+  // Next action; merely closing their loaded menu leaves them waiting too.
   // Request it through the same routing API used to enter the pre-match flow.
   ((void(*)(uptr,const char*))(base+0x6aa70a8))(flow+0x118,"Online/Match/MatchProcessMatchSettingsEnd");
   return 2;

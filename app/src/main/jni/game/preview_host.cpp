@@ -34,8 +34,8 @@ std::atomic<uint64_t> graphics_wait_since{0};
 std::atomic<int> inputs_synchronized{0}, last_headless_ready{0}, headless_continue{0}, proceed_result{0};
 std::atomic<int> preview_finished{0}, preview_finish_result{0};
 
-bool headless_preview_inputs_ready(uptr base) {
-    if (!inputs_synchronized.load(std::memory_order_acquire) || !peerlink_null_client_rhi_ready(base)) return false;
+bool preview_inputs_ready(uptr base) {
+    if (!inputs_synchronized.load(std::memory_order_acquire)) return false;
     uptr model = *reinterpret_cast<uptr *>(base + 0xa5bb188);
     if (!model || *reinterpret_cast<unsigned *>(model + 0x7b8) != 5 ||
         !*reinterpret_cast<unsigned char *>(model + 0x7f1) ||
@@ -43,6 +43,9 @@ bool headless_preview_inputs_ready(uptr base) {
     uptr handler = *reinterpret_cast<uptr *>(model + 0x848);
     uptr first = *reinterpret_cast<uptr *>(model + 8), end = *reinterpret_cast<uptr *>(model + 16);
     return handler && *reinterpret_cast<uptr *>(handler) && first && end >= first && end - first == 2 * 0x510;
+}
+bool headless_preview_inputs_ready(uptr base) {
+    return peerlink_null_client_rhi_ready(base) && preview_inputs_ready(base);
 }
 
 uint64_t now_ms() {
@@ -138,7 +141,8 @@ void menu_tick(uptr actor, float delta) {
     callback_tid.store(gettid(), std::memory_order_relaxed);
     unsigned flow_state = 0;
     if (mode.load() == 5) {
-        if (headless_continue.load() && headless_preview_inputs_ready(base_address)) {
+        if (sent.load() && preview_inputs_ready(base_address) &&
+            (!headless_continue.load() || peerlink_null_client_rhi_ready(base_address))) {
             const long result = peerlink_original_preview_finish(base_address);
             preview_finish_result.store(static_cast<int>(result));
             if (result == 2) preview_finished.store(1, std::memory_order_release);
@@ -227,7 +231,7 @@ void menu_tick(uptr actor, float delta) {
             const bool headless = action == peerlink_preview::Action::ContinueHeadless;
             headless_continue.store(headless ? 1 : 0, std::memory_order_release);
             sent.store(1, std::memory_order_release);
-            if (headless) {
+            if (preview_inputs_ready(base_address)) {
                 const long finished = peerlink_original_preview_finish(base_address);
                 preview_finish_result.store(static_cast<int>(finished));
                 if (finished == 2) preview_finished.store(1, std::memory_order_release);
@@ -260,7 +264,7 @@ int arm(uptr base, int requested_mode, bool user_data_synchronized = false) {
 extern "C" long peerlink_preview_drive(uintptr_t base, bool user_data_synchronized) {
     if (!base) return -1;
     if (sent.load(std::memory_order_acquire)) {
-        if (!headless_continue.load(std::memory_order_acquire) || preview_finished.load(std::memory_order_acquire)) return 1;
+        if (preview_finished.load(std::memory_order_acquire)) return 1;
         return arm(base, 5, user_data_synchronized);
     }
     unsigned flow = 0;
