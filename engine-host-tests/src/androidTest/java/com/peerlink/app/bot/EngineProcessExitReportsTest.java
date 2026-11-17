@@ -40,7 +40,8 @@ public class EngineProcessExitReportsTest {
             @Override public void onServiceDisconnected(ComponentName name) {
                 context.unbindService(this);
                 EngineProcessExitReports.observe(context, childPid.get(), startedAt, line -> {
-                    if (!line.contains("reason=not_available")) {
+                    if (!line.contains("reason=not_available") &&
+                            (command != 3 || line.contains("reason=native_crash "))) {
                         recorded.set(line);
                         observed.countDown();
                     }

@@ -63,21 +63,29 @@ public final class EngineProcessExitReports {
         }
         WORKER.execute(new Runnable() {
             int attempt = 0;
+            String lastRecord = null;
             @Override public void run() {
                 String failure = null;
+                boolean known = false;
                 try {
                     for (ApplicationExitInfo exit : read(owner)) {
                         // A record from an older process or a reused PID must not explain this exit.
                         if (exit.getPid() == pid && exit.getTimestamp() >= startedAt &&
-                                exit.getTimestamp() <= lostAt + 5000) {
-                            log.accept(format(exit) + " lookup=after_disconnect attempt=" + (attempt + 1));
-                            return;
+                                exit.getTimestamp() <= lostAt + 5000 &&
+                                exit.getReason() != ApplicationExitInfo.REASON_UNKNOWN) {
+                            known = true;
+                            String record = format(exit);
+                            if (!record.equals(lastRecord)) {
+                                log.accept(record + " lookup=after_disconnect attempt=" + (attempt + 1));
+                                lastRecord = record;
+                            }
+                            break;
                         }
                     }
                 } catch (RuntimeException error) {
                     failure = error.getClass().getSimpleName();
                 }
-                if (attempt == 0 || attempt == DELAYS_MS.length - 1) {
+                if (!known && (attempt == 0 || attempt == DELAYS_MS.length - 1)) {
                     log.accept("ANDROID_ENGINE_EXIT pid=" + pid + " reason=not_available lookup=" +
                             (attempt == 0 ? "pending" : "retry_window_finished") +
                             " attempt=" + (attempt + 1) + (failure == null ? "" : " queryError=" + failure) +
