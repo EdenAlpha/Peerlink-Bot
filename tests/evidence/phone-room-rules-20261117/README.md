@@ -94,3 +94,12 @@ Publish run [44081833022](https://github.com/EdenAlpha/Peerlink-Bot/actions/runs
 reused CI artifact `14325464334` without a rebuild. GitHub's published asset
 digest and size match the APK independently hashed in both test Android users.
 See [published-release.json](published-release.json).
+
+## Physical follow-up: room rules alone did not resolve the disconnect
+
+Report1794918503352 from the physical Infinix running5.0.21/source8754989
+confirmed requested/input/active match time1, but still recorded first
+disagreement27, confirmation54 (local28620,peer28948), stop requested56 and
+applied58. The bot stayed alive and packets continued. This invalidates any
+interpretation of the previous lab result as a complete physical-phone fix.
+See [the subsequent setup exchange investigation](../phone-setup-sync-20261117/README.md).

@@ -28,9 +28,22 @@ have distinct errors. It does not assign native progress, network verdict,
 settings values or checksum decisions. MATCH_SETUP_SYNC records completion
 and active venue/time in physical exports.
 
-Status: implementation/build and direct native factory probe pending.
-This is a concrete omitted path, not a confirmed explanation of the physical
-phone's remaining mismatch. A lab pass alone must not be described as resolving the physical issue.
+The final source `64fbbcb397edeba35642684e4b81d5dab1e02c47` passed CI
+[44093009025](https://github.com/EdenAlpha/Peerlink-Bot/actions/runs/44093009025),
+including JVM/native checks and Android API34/35 host tests. Its exact artifact
+`14332562932` was installed on ARM64 Android15 and both actual installed APK
+hashes were verified. Both original setup tasks reached state4 and were
+released by their original owner. Both120-sample integration tests passed,
+with22players, kickoff, automatic home Pass, ball motion and no mismatch
+callbacks or stop commands. The away lineup differs from the home lineup.
+See [packaged-match.json](packaged-match.json).
+
+The main APK is36,177,507bytes, SHA-256
+`41950ae035f6b8ed5dc5d80d089359a73a1a67a6f06b0125b53a06a4b15ad415`.
+The headless bot has no extra match packs; only the rendered reference peer
+has63. The lab peers are both hosted original engines, not a foreground stock
+game. The cause of the remaining physical-phone mismatch and its resolution
+are still unconfirmed. A lab pass alone must not be described as resolving it.
 
 The direct original-factory probe created the task on both roles before
 PreMenu. The task was subsequently released by its owner, so polling its
@@ -43,3 +56,9 @@ Preview Continue remains available while setup synchronization is pending: a
 normal peer may reach its exchange after the preview action. Host-driven
 visual start and controller input require the recorded native completion.
 The integration test checks completion when the original simulation gate opens.
+
+An unreleased earlier candidate gated preview Continue on setup completion.
+That integration test failed with state2 while the preview waited. The final
+version keeps Continue available and gates host-driven visual start/input;
+its native exchange then completed successfully. The failed candidate was
+retained privately and was not published.

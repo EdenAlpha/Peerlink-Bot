@@ -1,0 +1,63 @@
+{
+  "sourceCommit": "64fbbcb397edeba35642684e4b81d5dab1e02c47",
+  "ciRun": 44093009025,
+  "artifactId": 14332562932,
+  "apkSha256": "41950ae035f6b8ed5dc5d80d089359a73a1a67a6f06b0125b53a06a4b15ad415",
+  "apkBytes": 36177507,
+  "testApkSha256": "e5c55fde92cda0543b5028313ee323359dd929ffce7b11e89d390f76a629bc06",
+  "ciAllJobsPassed": true,
+  "labApi": 35,
+  "labArchitecture": "arm64",
+  "bothActuallyInstalledApkDigestsVerified": true,
+  "botExtraPacks": 0,
+  "renderedReferenceExtraPacks": 63,
+  "awayLineupVariation": {
+    "localStarterSlot": 1,
+    "localBenchSlot": 20,
+    "usesRealOwnedPlayers": true,
+    "playerListAndParametersUnchanged": true
+  },
+  "originalSetupSync": {
+    "bothStarted": true,
+    "bothCompleted": true,
+    "bothTerminalState": 4,
+    "bothTaskReleasedByOriginalOwner": true,
+    "bothActiveTime": 1,
+    "bothActiveStadium": 100
+  },
+  "matchResult": {
+    "roles": {
+      "B": {
+        "harness_passed": true,
+        "samples": 120,
+        "max_outer": 21,
+        "max_players": 22,
+        "playable_observed": true,
+        "pass_queue_accepted": false,
+        "distinct_ball_positions": 23
+      },
+      "A": {
+        "harness_passed": true,
+        "samples": 120,
+        "max_outer": 21,
+        "max_players": 22,
+        "playable_observed": true,
+        "pass_queue_accepted": false,
+        "distinct_ball_positions": 23
+      }
+    },
+    "files": 63,
+    "source": "candidate_64fbbcb_original_setup_sync_exact_ci_apk",
+    "kickoff_verified": true
+  },
+  "originalChecker": {
+    "matchingExchangedEntries": 43,
+    "firstFrame": 27,
+    "lastFrame": 1161,
+    "mismatchStops": 0,
+    "note": "Ring entries alone may select peer-origin streams; sustained original checker acceptance/no mismatch callback is the compatibility evidence."
+  },
+  "automaticHomePassAndBallMotionVerified": true,
+  "awayAutomaticInputAbsent": true,
+  "physicalStockGameMatchVerified": false
+}
