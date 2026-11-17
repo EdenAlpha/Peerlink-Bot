@@ -5,6 +5,8 @@
 #include <dlfcn.h>
 #include <android/asset_manager_jni.h>
 #include <android/log.h>
+#include <array>
+#include <atomic>
 #include <android/native_activity.h>
 #include <android/native_window_jni.h>
 #include <android/input.h>
@@ -65,8 +67,34 @@ bool g_user_sync_complete = false;
 uint64_t g_user_sync_started_ms = 0;
 uintptr_t g_settings_sync_task = 0;
 bool g_settings_sync_complete = false;
-uint32_t g_settings_sync_state = 0;
+std::atomic<uint32_t> g_settings_sync_state{0};
 uint64_t g_settings_sync_started_ms = 0;
+std::array<uintptr_t, 10> g_settings_sync_vtable{};
+
+void settings_sync_tick(uintptr_t task) {
+    // Preserve the original update. Its owner can delete a completed child
+    // before the host's next poll, so retain the result before returning to
+    // that owner. No native state or completion decision is changed.
+    reinterpret_cast<void (*)(uintptr_t)>(g_base + 0x7b3f0f8)(task);
+    const uint32_t state = *reinterpret_cast<uint32_t *>(task + 0x70);
+    g_settings_sync_state.store(state, std::memory_order_release);
+    if (state >= 4)
+        __atomic_store_n(reinterpret_cast<uintptr_t *>(task), g_base + 0x990c778, __ATOMIC_RELEASE);
+}
+
+bool observe_settings_sync(uintptr_t task) {
+    const uintptr_t table = g_base + 0x990c778;
+    if (!task || *reinterpret_cast<uintptr_t *>(task) != table ||
+        *reinterpret_cast<uintptr_t *>(table) != g_base + 0x7b3f0f8) return false;
+    // The pinned task has eight dispatch slots. Preserve its two ABI prefix
+    // words and every original dispatch address except Update, slot zero.
+    std::memcpy(g_settings_sync_vtable.data(),
+        reinterpret_cast<void *>(table - 2 * sizeof(uintptr_t)), sizeof(g_settings_sync_vtable));
+    g_settings_sync_vtable[2] = reinterpret_cast<uintptr_t>(&settings_sync_tick);
+    __atomic_store_n(reinterpret_cast<uintptr_t *>(task),
+        reinterpret_cast<uintptr_t>(g_settings_sync_vtable.data() + 2), __ATOMIC_RELEASE);
+    return true;
+}
 bool g_preview_proceeded = false;
 bool g_controller_scanned = false;
 int g_eager_memory_release = 0;
@@ -478,7 +506,7 @@ JNIEXPORT jstring JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeLoadingD
     for (unsigned i = 0; i < 4; ++i) walk(walk, *reinterpret_cast<uintptr_t *>(lock.manager + 0x118 + i * 8), 0);
     text += "\nMATCH_SETUP_SYNC started=" + std::to_string(g_settings_sync_task != 0) +
         " complete=" + std::to_string(g_settings_sync_complete) +
-        " state=" + std::to_string(g_settings_sync_state);
+        " state=" + std::to_string(g_settings_sync_state.load(std::memory_order_acquire));
     uintptr_t settings_task = *reinterpret_cast<uintptr_t *>(g_base + 0xa5c8310);
     text += " taskPresent=" + std::to_string(settings_task != 0);
     uintptr_t owner = *reinterpret_cast<uintptr_t *>(g_base + 0xa5fb348);
@@ -612,8 +640,7 @@ JNIEXPORT jint JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeAdvanceMatc
         // applies the result in 7b3ee8c. Two hosts omitting it can agree with
         // each other while never exercising the normal peer's setup path.
         g_settings_sync_task = entry<uintptr_t (*)()>(0x7b3e278)();
-        if (!g_settings_sync_task ||
-            *reinterpret_cast<uintptr_t *>(g_settings_sync_task) != g_base + 0x990c778) return -216;
+        if (!observe_settings_sync(g_settings_sync_task)) return -216;
         g_settings_sync_started_ms = monotonic_ms();
         uintptr_t online = entry<uintptr_t (*)()>(0x7a1d8d4)();
         if (!online) return -203;
@@ -624,17 +651,22 @@ JNIEXPORT jint JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeAdvanceMatc
         g_match_stage = 2;
     }
     if (g_match_stage == 2 && !g_settings_sync_complete) {
-        // The original live global is cleared by its owner on destruction.
-        // Never dereference a saved task after the original owner releases it.
-        uintptr_t task = *reinterpret_cast<uintptr_t *>(g_base + 0xa5c8310);
-        if (task != g_settings_sync_task ||
-            *reinterpret_cast<uintptr_t *>(task) != g_base + 0x990c778) return -216;
-        g_settings_sync_state = *reinterpret_cast<uint32_t *>(task + 0x70);
-        if (g_settings_sync_state > 4) return -217;
-        if (g_settings_sync_state == 4) {
+        const uint32_t state = g_settings_sync_state.load(std::memory_order_acquire);
+        if (state > 4) return -217;
+        if (state == 4) {
             g_settings_sync_complete = true;
             __android_log_print(ANDROID_LOG_INFO, TAG, "ORIGINAL_MATCH_SETUP_SYNC_COMPLETED state=4");
-        } else if (monotonic_ms() - g_settings_sync_started_ms >= 90000) return -218;
+        } else {
+            // The live global is cleared by the original task's destructor.
+            // A terminal result is retained above; otherwise require a live
+            // owned task without dereferencing a released saved pointer.
+            uintptr_t task = *reinterpret_cast<uintptr_t *>(g_base + 0xa5c8310);
+            if (task != g_settings_sync_task) return -216;
+            const uintptr_t table = *reinterpret_cast<uintptr_t *>(task);
+            if (table != g_base + 0x990c778 &&
+                table != reinterpret_cast<uintptr_t>(g_settings_sync_vtable.data() + 2)) return -216;
+            if (monotonic_ms() - g_settings_sync_started_ms >= 90000) return -218;
+        }
     }
     const bool setup_synchronized = g_user_sync_complete && g_settings_sync_complete;
     if (g_match_stage == 2 && !g_preview_proceeded) {

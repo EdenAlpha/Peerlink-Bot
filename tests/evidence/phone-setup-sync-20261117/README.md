@@ -30,5 +30,11 @@ and active venue/time in physical exports.
 
 Status: implementation/build and direct native factory probe pending.
 This is a concrete omitted path, not a confirmed explanation of the physical
-phone's remaining mismatch. No APK release is authorized by a lab pass alone
-as a claim that the physical issue is resolved.
+phone's remaining mismatch. A lab pass alone must not be described as resolving the physical issue.
+
+The direct original-factory probe created the task on both roles before
+PreMenu. The task was subsequently released by its owner, so polling its
+address cannot establish the outcome. The candidate retains the state after
+the original Update returns, using a private copy of this task's dispatch
+table. It restores the original table at a terminal result and never changes
+that result. Packaged native validation is still required.
