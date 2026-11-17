@@ -171,8 +171,11 @@ class BotEngineTurnPairPhoneTest {
                 require(sidSize in 1..512 && categorySize in 1..64 && keywordSize == 8)
                 require(contextInput.remaining() == sidSize + categorySize + keywordSize)
                 val sid = ByteArray(sidSize).also { contextInput.get(it) }.toString(Charsets.UTF_8)
+                val roomRules = File(root, "room-rules.dto").readBytes()
+                val expectedMatchTime = java.nio.ByteBuffer.wrap(roomRules)
+                    .order(java.nio.ByteOrder.LITTLE_ENDIAN).getInt(12)
                 assertTrue("Production match setup rejected the private fixture",
-                    EngineHost.setupMatch(peer, gameId, sid, squad))
+                    EngineHost.setupMatch(peer, gameId, sid, squad, roomRules))
                 val manualPassProbe = args.getString("manualPassProbe") == "true"
                 val verifyAutomaticPass = args.getString("verifyAutomaticPass") == "true"
                 require(!verifyAutomaticPass || !manualPassProbe)
@@ -207,6 +210,11 @@ class BotEngineTurnPairPhoneTest {
                     if (loading.matchConstructed && loading.ballOnPitch) playableSamples++
                     Log.i("PeerlinkTurnTest", "MATCH_LOADING_PROBE_$role state=${loading.values.contentToString()}")
                     val details = EngineHost.loadingDiagnostics()
+                    if (loading.matchConstructed && loading.ballOnPitch) {
+                        assertTrue("The original engine did not apply the actual server room rules: $details",
+                            details.contains("ROOM_MATCH_RULES present=1 applied=1 lobbyKey=lobby " +
+                                "requestedTime=$expectedMatchTime inputTime=$expectedMatchTime activeTime=$expectedMatchTime "))
+                    }
                     if (loading.canTestPass && loading.ballSpeedMmPerSecond > 0) ballMotionObserved = true
                     if (details.contains("simulationWait=0 ") && details.contains("simulationTickGate=1")) simulationGateObserved = true
                     // Each scalar snapshot fits logcat's per-message limit.

@@ -33,6 +33,8 @@ int peerlink_player_cache_import(uintptr_t, uint32_t, const char *);
 uint32_t peerlink_lab_uid_participants(uintptr_t, uint32_t, uint32_t, uint32_t);
 uintptr_t peerlink_original_online_inputs_v224(uintptr_t, uint32_t, uint32_t);
 long peerlink_live_match_context_input(uintptr_t, const char *);
+long peerlink_room_rules_input(uintptr_t, const char *);
+const char *peerlink_room_rules_diagnostics();
 long peerlink_original_preview_proceed_v271(uintptr_t);
 long peerlink_preview_drive(uintptr_t, bool);
 long peerlink_demo_drive(uintptr_t);
@@ -56,6 +58,7 @@ uint32_t g_uid = 0;
 bool g_core_ready = false;
 std::string g_squad_path;
 std::string g_match_context_path;
+std::string g_room_rules_path;
 int g_match_stage = 0;
 uintptr_t g_user_sync_task = 0;
 bool g_user_sync_complete = false;
@@ -469,6 +472,7 @@ JNIEXPORT jstring JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeLoadingD
         } while (child && child != first && ++count < 150 && visited <= 800);
     };
     for (unsigned i = 0; i < 4; ++i) walk(walk, *reinterpret_cast<uintptr_t *>(lock.manager + 0x118 + i * 8), 0);
+    text += "\n"; text += peerlink_room_rules_diagnostics();
     text += "\n"; text += peerlink_match_state_diagnostics();
     return env->NewStringUTF(text.c_str());
 }
@@ -501,13 +505,19 @@ JNIEXPORT jboolean JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativePrepare
 }
 
 JNIEXPORT jboolean JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeSetupMatch(
-        JNIEnv *env, jobject, jlong base, jlong peer, jstring squad, jstring context) {
+        JNIEnv *env, jobject, jlong base, jlong peer, jstring squad, jstring context, jstring room_rules) {
     if (!valid(base) || !g_client || peer <= 0 || peer > 0xffffffffLL || peer == g_uid ||
-        !squad || !context || g_match_stage) return JNI_FALSE;
+        !squad || !context || !room_rules || g_match_stage) return JNI_FALSE;
     const char *squad_path = env->GetStringUTFChars(squad, nullptr);
     if (!squad_path) return JNI_FALSE;
     const char *context_path = env->GetStringUTFChars(context, nullptr);
     if (!context_path) { env->ReleaseStringUTFChars(squad, squad_path); return JNI_FALSE; }
+    const char *rules_path = env->GetStringUTFChars(room_rules, nullptr);
+    if (!rules_path) {
+        env->ReleaseStringUTFChars(squad, squad_path);
+        env->ReleaseStringUTFChars(context, context_path);
+        return JNI_FALSE;
+    }
     int result = -100;
     {
         TaskLock lock;
@@ -529,10 +539,12 @@ JNIEXPORT jboolean JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeSetupMa
             g_match_stage = 1;
             g_squad_path = squad_path;
             g_match_context_path = context_path;
+            g_room_rules_path = rules_path;
         }
     }
     env->ReleaseStringUTFChars(squad, squad_path);
     env->ReleaseStringUTFChars(context, context_path);
+    env->ReleaseStringUTFChars(room_rules, rules_path);
     __android_log_print(ANDROID_LOG_INFO, TAG, "match input result=%d", result);
     return result > 0 ? JNI_TRUE : JNI_FALSE;
 }
@@ -573,6 +585,11 @@ JNIEXPORT jint JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeAdvanceMatc
         }
         entry<void (*)()>(0x7b2a060)();
         entry<uintptr_t (*)()>(0x7b2a3a8)();
+        // The commissioner constructor resets CommonWork's match settings.
+        // The normal lobby builder supplies its key/rules, then 7a589a0
+        // applies them before the pre-match flow. Merely copying GameInfo
+        // parameters leaves the running simulation on its native defaults.
+        if (peerlink_room_rules_input(g_base, g_room_rules_path.c_str()) <= 0) return -215;
         if (peerlink_squad_import(g_base, 0, g_uid, g_squad_path.c_str()) <= 0) return -202;
         uintptr_t online = entry<uintptr_t (*)()>(0x7a1d8d4)();
         if (!online) return -203;

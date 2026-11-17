@@ -243,7 +243,7 @@ internal object EngineRuntime {
     }
 
     fun setupMatch(peerUid: Long, gameId: Long, sid: String, category: String,
-                   keyword: String, squad: ByteArray): Boolean = onRuntime {
+                   keyword: String, squad: ByteArray, roomRules: ByteArray): Boolean = onRuntime {
         if (client == 0L || peerUid == ownerUid || gameId <= 0) return@onRuntime false
         val squadFile = storeSquad(squad)
         val root = squadFile.parentFile!!
@@ -258,7 +258,9 @@ internal object EngineRuntime {
             .putInt(teamId).putInt(sidBytes.size).putInt(categoryBytes.size).putInt(8)
             .put(sidBytes).put(categoryBytes).put(keywordBytes)
         val contextFile = File(root, "context.dto").apply { writeBytes(input.array()) }
-        nativeSetupMatch(base, peerUid, squadFile.absolutePath, contextFile.absolutePath)
+        require(roomRules.size in 72..776) { "The room's native match rules are missing or invalid" }
+        val rulesFile = File(root, "room-rules.dto").apply { writeBytes(roomRules) }
+        nativeSetupMatch(base, peerUid, squadFile.absolutePath, contextFile.absolutePath, rulesFile.absolutePath)
     }
 
     fun snapshot(passive: Boolean = false): LongArray = onRuntime {
@@ -308,7 +310,7 @@ internal object EngineRuntime {
     private external fun nativeStartupInfo(base: Long): String
     private external fun nativeLoadDatabase(base: Long, path: String): Boolean
     private external fun nativePrepareChannels(base: Long, peer: Long, home: Long, squad: String): Boolean
-    private external fun nativeSetupMatch(base: Long, peer: Long, squad: String, context: String): Boolean
+    private external fun nativeSetupMatch(base: Long, peer: Long, squad: String, context: String, roomRules: String): Boolean
     private external fun nativeSnapshot(base: Long, passive: Boolean): LongArray
     private external fun nativeAdvanceMatch(base: Long, controllerAllowed: Boolean): Int
     private external fun nativeReleaseUnusedMemory(): Int

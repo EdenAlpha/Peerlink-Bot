@@ -46,6 +46,7 @@ add_library(peerlinkbackend SHARED
         game/database_input.c
         game/online_inputs.c
         game/match_context.c
+        game/room_rules.c
         game/participants.c
         game/preview_proceed.c
         game/preview_host.cpp

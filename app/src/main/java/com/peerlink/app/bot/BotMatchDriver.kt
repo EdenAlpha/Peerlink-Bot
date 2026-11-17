@@ -373,11 +373,16 @@ object BotMatchDriver {
             }
             if (!running) return
             status("Connected — setting up the bot's match")
-            check(EngineHost.setupMatch(opp, gameId!!, gate.sid, squadInput)) { "The bot's native match setup was rejected" }
             val room = flow.roomState(gate, rid)
             val matchSettings = room["room_match_settings"] as? Map<*, *>
             val environment = matchSettings?.get("match_env") as? Map<*, *>
-            val controllersAllowed = environment?.get("can_use_mobile_controller") == "YES"
+                ?: error("The server did not provide this room's match rules")
+            val roomRules = RoomMatchRules.encode(environment)
+            check(EngineHost.setupMatch(opp, gameId!!, gate.sid, squadInput, roomRules)) { "The bot's native match setup was rejected" }
+            log("ROOM_MATCH_RULES source=CMD_GET_ROOM_INFO match_time=${environment["match_time"]} " +
+                "cpu_level=${environment["cpu_level"]} injury=${environment["injury"]} " +
+                "ball_type=${environment["ball_type"]} nativeInputSupplied=true")
+            val controllersAllowed = environment["can_use_mobile_controller"] == "YES"
             check(EngineHost.startInputTest(controllersAllowed)) { "Enable mobile controllers in the room settings for the bot control test" }
 
             turnExchange.pump()

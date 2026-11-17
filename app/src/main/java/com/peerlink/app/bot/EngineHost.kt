@@ -178,10 +178,11 @@ object EngineHost {
     internal fun peerTurnAddress(address: ByteArray): Boolean = request(EngineProtocol.PEER_TURN_ADDRESS,
         Bundle().apply { putByteArray("address", address) }).getBoolean("ok")
     fun check(): Long = if (!isReady) 0 else runCatching { request(EngineProtocol.CHECK).getLong("verdict") }.getOrDefault(0)
-    fun setupMatch(peer: Long, gameId: Long, sid: String, squad: ByteArray): Boolean =
+    fun setupMatch(peer: Long, gameId: Long, sid: String, squad: ByteArray, roomRules: ByteArray): Boolean =
         request(EngineProtocol.SETUP_MATCH, Bundle().apply {
             putLong("peer", peer); putLong("gameId", gameId); putString("sid", sid)
             putString("keyword", GateCodec.sKeyword()); putByteArray("squad", squad)
+            putByteArray("roomRules", roomRules)
         }, 60).getBoolean("ok")
     fun prepareChannels(peer: Long, squad: ByteArray, homeUid: Long = ownerUid): Boolean = request(EngineProtocol.PREPARE_CHANNELS,
         Bundle().apply { putLong("peer", peer); putLong("homeUid", homeUid); putByteArray("squad", squad) }, 60).getBoolean("ok")

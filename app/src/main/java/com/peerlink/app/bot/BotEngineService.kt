@@ -82,7 +82,8 @@ class BotEngineService : Service() {
                 EngineProtocol.SETUP_MATCH -> {
                     val ok = EngineRuntime.setupMatch(args.getLong("peer"), args.getLong("gameId"),
                         requireNotNull(args.getString("sid")), "MYCLUB_LOBBY_ROOM_MATCH_1VS1",
-                        requireNotNull(args.getString("keyword")), requireNotNull(args.getByteArray("squad")))
+                        requireNotNull(args.getString("keyword")), requireNotNull(args.getByteArray("squad")),
+                        requireNotNull(args.getByteArray("roomRules")))
                     result.putBoolean("ok", ok)
                     if (ok && !pollStarted) {
                         pollStarted = true
@@ -200,6 +201,7 @@ class BotEngineService : Service() {
                     -210 -> "The bot could not queue its match-preview step on the game thread"
                     -211 -> "The bot could not skip the match introduction"
                     -214 -> "The bot and eFootball produced different match states"
+                    -215 -> "The bot could not apply this room's match rules"
                     else -> "Bot match setup failed"
                 }
                 "$reason (native stage $advance)"
