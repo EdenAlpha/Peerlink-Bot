@@ -100,7 +100,17 @@ public final class EngineProcessExitReports {
         try {
             List<ApplicationExitInfo> exits = read(context);
             text.append("records=").append(exits.size()).append('\n');
-            for (ApplicationExitInfo exit : exits) text.append(format(exit)).append(" lookup=export\n");
+            int nativeTraces = 0;
+            for (ApplicationExitInfo exit : exits) {
+                text.append(format(exit)).append(" lookup=export\n");
+                if (Build.VERSION.SDK_INT >= 31 && exit.getReason() == ApplicationExitInfo.REASON_CRASH_NATIVE && nativeTraces++ < 8) {
+                    try (java.io.InputStream trace = exit.getTraceInputStream()) {
+                        text.append(EngineNativeCrashTrace.read(trace));
+                    } catch (java.io.IOException | RuntimeException error) {
+                        text.append("nativeTraceError=").append(error.getClass().getSimpleName()).append('\n');
+                    }
+                }
+            }
         } catch (RuntimeException error) {
             text.append("queryError=").append(error.getClass().getSimpleName()).append('\n');
         }

@@ -14,6 +14,12 @@ import static org.junit.Assert.*;
 @RunWith(AndroidJUnit4.class)
 public class EngineProcessExitReportsTest {
     @Test public void actualChildProcessExitIsRecoveredAndStillAvailableAtLaterExport() throws Exception {
+        checkExit(2);
+    }
+    @Test public void nativeCrashExportIncludesTheActualCrashingFunction() throws Exception {
+        checkExit(3);
+    }
+    private void checkExit(int command) throws Exception {
         Context context = InstrumentationRegistry.getInstrumentation().getContext();
         long startedAt = System.currentTimeMillis();
         AtomicInteger childPid = new AtomicInteger();
@@ -50,7 +56,7 @@ public class EngineProcessExitReportsTest {
             remote.get().send(identify);
             assertTrue("Child process did not identify itself", identified.await(10, TimeUnit.SECONDS));
             assertNotEquals(android.os.Process.myPid(), childPid.get());
-            remote.get().send(Message.obtain(null, 2));
+            remote.get().send(Message.obtain(null, command));
             assertTrue("Android exit reason never arrived", observed.await(40, TimeUnit.SECONDS));
             assertTrue(recorded.get(), recorded.get().contains("pid=" + childPid.get() + " "));
             ApplicationExitInfo exit = EngineProcessExitReports.read(context).stream()
@@ -62,6 +68,13 @@ public class EngineProcessExitReportsTest {
             String laterExport = EngineProcessExitReports.export(context);
             assertTrue(laterExport, laterExport.contains(EngineProcessExitReports.format(exit) + " lookup=export"));
             assertFalse(laterExport, laterExport.contains("queryError="));
+            if (command == 3) {
+                assertEquals(laterExport, ApplicationExitInfo.REASON_CRASH_NATIVE, exit.getReason());
+                assertTrue(laterExport, laterExport.contains("signal=SIGABRT"));
+                assertTrue(laterExport, laterExport.contains("module=libpeerlinkpatchtests.so"));
+                assertTrue(laterExport, laterExport.contains("EngineExitProbeService_nativeCrash"));
+                assertFalse(laterExport, laterExport.contains("nativeTraceError="));
+            }
         } finally {
             try { context.unbindService(connection); } catch (IllegalArgumentException ignored) {}
         }

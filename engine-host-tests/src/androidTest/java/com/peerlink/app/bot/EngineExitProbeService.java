@@ -9,6 +9,11 @@ import android.os.Process;
 public class EngineExitProbeService extends Service {
     private final Messenger endpoint = new Messenger(new Handler(Looper.getMainLooper()) {
         @Override public void handleMessage(Message message) {
+            if (message.what == 3) {
+                System.loadLibrary("peerlinkpatchtests");
+                nativeCrash();
+                return;
+            }
             if (message.what == 2) {
                 Process.killProcess(Process.myPid());
                 return;
@@ -21,4 +26,5 @@ public class EngineExitProbeService extends Service {
         }
     });
     @Override public IBinder onBind(Intent intent) { return endpoint.getBinder(); }
+    private static native void nativeCrash();
 }

@@ -1,4 +1,5 @@
 #include <jni.h>
+#include <cstdlib>
 #include "executable_patch_checks.h"
 
 extern "C" JNIEXPORT jstring JNICALL
@@ -8,4 +9,10 @@ Java_com_peerlink_app_bot_ExecutablePatchTest_check(JNIEnv *env, jclass, jstring
     const std::string result = executable_patch_checks(text, enforcing == JNI_TRUE);
     env->ReleaseStringUTFChars(path, text);
     return env->NewStringUTF(result.c_str());
+}
+
+// Deliberate crash in a test-only child process, never part of the production APK.
+extern "C" JNIEXPORT void JNICALL
+Java_com_peerlink_app_bot_EngineExitProbeService_nativeCrash(JNIEnv *, jclass) {
+    abort();
 }

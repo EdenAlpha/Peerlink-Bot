@@ -25,6 +25,7 @@ android {
         include("com/peerlink/app/bot/BotRenderSurface.java")
         include("com/peerlink/app/bot/GameResourceImportProvider.java")
         include("com/peerlink/app/bot/EngineProcessExitReports.java")
+        include("com/peerlink/app/bot/EngineNativeCrashTrace.java")
     }
 }
 
