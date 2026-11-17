@@ -1,0 +1,18 @@
+{
+  "version": "5.0.22-bot-test",
+  "versionCode": 26,
+  "sourceCommit": "64fbbcb397edeba35642684e4b81d5dab1e02c47",
+  "ciRun": 44093009025,
+  "artifactId": 14332562932,
+  "publishRun": 44097851466,
+  "releaseUrl": "https://github.com/EdenAlpha/Peerlink-Bot/releases/tag/phone-engine-test-64fbbcb",
+  "apkUrl": "https://github.com/EdenAlpha/Peerlink-Bot/releases/download/phone-engine-test-64fbbcb/peerlink-debug.apk",
+  "publishedAt": "2026-11-17T13:57:11Z",
+  "apkSha256": "41950ae035f6b8ed5dc5d80d089359a73a1a67a6f06b0125b53a06a4b15ad415",
+  "apkBytes": 36177507,
+  "publishedAssetDigestMatchesBothActuallyInstalledApks": true,
+  "publishedWithoutRebuilding": true,
+  "bothNativeSetupTasksCompletedState4": true,
+  "both120SampleMatchHarnessesPassed": true,
+  "physicalStockGameMatchVerified": false
+}

@@ -62,3 +62,10 @@ That integration test failed with state2 while the preview waited. The final
 version keeps Continue available and gates host-driven visual start/input;
 its native exchange then completed successfully. The failed candidate was
 retained privately and was not published.
+
+## Published test package
+
+[Download5.0.22](https://github.com/EdenAlpha/Peerlink-Bot/releases/download/phone-engine-test-64fbbcb/peerlink-debug.apk) · [Release page](https://github.com/EdenAlpha/Peerlink-Bot/releases/tag/phone-engine-test-64fbbcb).
+Publish run44097851466 reused the verified artifact without rebuilding.
+GitHub's asset digest and size match the file hashed in both test Android
+users. See [published-release.json](published-release.json).
