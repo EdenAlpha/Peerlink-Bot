@@ -670,7 +670,9 @@ JNIEXPORT jint JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeAdvanceMatc
     }
     const bool setup_synchronized = g_user_sync_complete && g_settings_sync_complete;
     if (g_match_stage == 2 && !g_preview_proceeded) {
-        long preview = peerlink_preview_drive(g_base, setup_synchronized);
+        // The normal peer can enter its setup exchange after its preview
+        // action. Keep that UI action available while the exchange waits.
+        long preview = peerlink_preview_drive(g_base, g_user_sync_complete);
         if (preview == -2) { peerlink_preview_stop(); return -209; }
         if (preview < 0) { peerlink_preview_stop(); return -210; }
         if (preview == 1) g_preview_proceeded = true;
@@ -806,7 +808,7 @@ JNIEXPORT jlongArray JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeSnaps
 
 JNIEXPORT jboolean JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeInputKey(
         JNIEnv *env, jobject, jlong base, jint code, jint action) {
-    if (!valid(base) || !g_match_stage) return JNI_FALSE;
+    if (!valid(base) || !g_match_stage || !g_settings_sync_complete) return JNI_FALSE;
     jclass factory = env->FindClass("com/peerlink/app/bot/SoftwareGamepadEvents");
     jmethodID method = factory ? env->GetStaticMethodID(factory, "key", "(II)Landroid/view/KeyEvent;") : nullptr;
     jobject event = method ? env->CallStaticObjectMethod(factory, method, code, action) : nullptr;

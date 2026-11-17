@@ -23,7 +23,7 @@ availability. No particular stadium constant is proposed as a fix.
 
 The candidate requests this original task after commissioner/rule/roster
 setup, lets the original application update it, and requires its native
-state4 before queuing preview Continue. Failure, disappearance and timeout
+state4 before visual start and controller input. Failure, disappearance and timeout
 have distinct errors. It does not assign native progress, network verdict,
 settings values or checksum decisions. MATCH_SETUP_SYNC records completion
 and active venue/time in physical exports.
@@ -38,3 +38,8 @@ address cannot establish the outcome. The candidate retains the state after
 the original Update returns, using a private copy of this task's dispatch
 table. It restores the original table at a terminal result and never changes
 that result. Packaged native validation is still required.
+
+Preview Continue remains available while setup synchronization is pending: a
+normal peer may reach its exchange after the preview action. Host-driven
+visual start and controller input require the recorded native completion.
+The integration test checks completion when the original simulation gate opens.

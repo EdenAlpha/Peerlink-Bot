@@ -211,8 +211,9 @@ class BotEngineTurnPairPhoneTest {
                     Log.i("PeerlinkTurnTest", "MATCH_LOADING_PROBE_$role state=${loading.values.contentToString()}")
                     val details = EngineHost.loadingDiagnostics()
                     if (loading.matchConstructed && loading.ballOnPitch) {
-                        assertTrue("The original peer setup exchange did not complete: $details",
-                            details.contains("MATCH_SETUP_SYNC started=1 complete=1 state=4 "))
+                        if (details.contains("simulationTickGate=1"))
+                            assertTrue("The original peer setup exchange did not complete: $details",
+                                details.contains("MATCH_SETUP_SYNC started=1 complete=1 state=4 "))
                         assertTrue("The original engine did not apply the actual server room rules: $details",
                             details.contains("ROOM_MATCH_RULES present=1 applied=1 lobbyKey=lobby " +
                                 "requestedTime=$expectedMatchTime inputTime=$expectedMatchTime activeTime=$expectedMatchTime "))
