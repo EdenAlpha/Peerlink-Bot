@@ -1,5 +1,6 @@
 #include "match_stop_diagnostics.h"
 #include "match_state_diagnostics.h"
+#include "diagnostic_journal.h"
 #include <atomic>
 #include <cerrno>
 #include <cstdio>
@@ -61,6 +62,8 @@ void record(Event &event, const char *kind, uintptr_t controller, uintptr_t call
     event.missing = word(controller, 0x28);
     event.ahead = word(controller, 0x2c);
     event.state.store(2, std::memory_order_release);
+    peerlink_journal("MATCH_STOP_EVENT path=%s callerOffset=0x%llx frame=%u missingMask=%u aheadMask=%u",
+        kind, static_cast<unsigned long long>(event.caller), event.frame, event.missing, event.ahead);
 #ifdef __ANDROID__
     __android_log_print(ANDROID_LOG_WARN, "PeerlinkEngineHost",
         "MATCH_STOP_EVENT path=%s atMs=%llu callerOffset=0x%llx frame=%u missingMask=%u aheadMask=%u",

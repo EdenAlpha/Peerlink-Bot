@@ -148,6 +148,9 @@ class BotEngineService : Service() {
         return EngineSnapshot(EngineRuntime.snapshot(passive).copyOf(29).also { it[18] = pss })
     }
     private fun diagnostic(line: String, firstFailure: Boolean = false) {
+        if (firstFailure || line.startsWith("MATCH_LOADING") || line.startsWith("NATIVE_STATE") ||
+            line.startsWith("PEERLINK_STOP") || line.startsWith("BOT_INPUT") || line.startsWith("BOT_MEMORY"))
+            EngineRuntime.journal(line)
         runCatching { observer?.send(Message.obtain(null, EngineProtocol.DIAGNOSTIC).apply {
             data = Bundle().apply {
                 putString("line", line)

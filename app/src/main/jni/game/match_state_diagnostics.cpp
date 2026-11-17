@@ -1,4 +1,5 @@
 #include "match_state_diagnostics.h"
+#include "diagnostic_journal.h"
 #include <array>
 #include <atomic>
 #include <cstring>
@@ -58,6 +59,8 @@ void capture(Snapshot &output, uintptr_t controller) {
     if (!(fn<Match>(0x6b00048)(state, &sum, &ordinal, &frame) & 1)) return;
     int expected = 0;
     if (!output.published.compare_exchange_strong(expected, 1, std::memory_order_acq_rel)) return;
+    peerlink_journal("MATCH_STATE_CAPTURE_BEGIN kind=%s commandFrame=%u stateFrame=%u",
+        &output == &initial ? "initial" : "at_stop", word(controller + 0x30), frame);
     output.command_frame = word(controller + 0x30);
     output.state_frame = frame;
     size_t index = 0;
@@ -110,6 +113,8 @@ void capture(Snapshot &output, uintptr_t controller) {
         }
     }
     output.published.store(2, std::memory_order_release);
+    peerlink_journal("MATCH_STATE_CAPTURE_COMPLETE kind=%s commandFrame=%u stateFrame=%u checksum=%u",
+        &output == &initial ? "initial" : "at_stop", output.command_frame, output.state_frame, output.checksum);
 }
 
 template<class T, size_t N> void append_array(std::string &text, const std::array<T, N> &values) {
@@ -145,6 +150,8 @@ void peerlink_match_state_sample_initial() {
     for (unsigned player = 0; player < 22; ++player)
         if (!ptr(engine + 0xa5909a0 + 0x170 + player * 8)) return;
     capture(initial, controller);
+    if (initial.published.load(std::memory_order_acquire) == 2)
+        peerlink_journal("%s", peerlink_match_state_diagnostics().c_str());
 }
 
 void peerlink_match_check_request(uintptr_t controller, uintptr_t checker,
@@ -165,8 +172,14 @@ void peerlink_match_check_request(uintptr_t controller, uintptr_t checker,
     difference.count = word(checker + 8);
     difference.first_frame = word(checker + 12);
     difference.command_frame = word(controller + 0x30);
+    // Persist the actual comparison before gathering the larger diagnostic
+    // snapshot: even a failure in that snapshot cannot erase the cause.
+    peerlink_journal("MATCH_CHECK_MISMATCH present=1 compareFrame=%u storedFrame=%u localValue=%u peerValue=%u originUser=%u verdict=%u mismatchCount=%u firstMismatchFrame=%u stopCommandFrame=%u",
+        difference.frame, difference.stored_frame, difference.local, difference.peer,
+        difference.origin, difference.verdict, difference.count, difference.first_frame, difference.command_frame);
     capture(at_stop, controller);
     difference.published.store(2, std::memory_order_release);
+    peerlink_journal("%s", peerlink_match_state_diagnostics().c_str());
 }
 
 bool peerlink_match_check_failed() { return difference.published.load(std::memory_order_acquire) == 2; }

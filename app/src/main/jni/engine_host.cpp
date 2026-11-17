@@ -27,6 +27,7 @@
 #include "game/network_startup_diagnostics.h"
 #include "game/match_stop_diagnostics.h"
 #include "game/match_state_diagnostics.h"
+#include "game/diagnostic_journal.h"
 
 extern "C" {
 long peerlink_game_database_input(uintptr_t, const char *);
@@ -275,6 +276,25 @@ JNIEXPORT jboolean JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeConfigu
     int result = chdir(directory);
     env->ReleaseStringUTFChars(assets, directory);
     return result == 0 ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT jboolean JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeOpenJournal(
+        JNIEnv *env, jobject, jstring path) {
+    if (!path) return JNI_FALSE;
+    const char *value = env->GetStringUTFChars(path, nullptr);
+    if (!value) return JNI_FALSE;
+    bool opened = peerlink_open_diagnostic_journal(value);
+    env->ReleaseStringUTFChars(path, value);
+    return opened ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT void JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeJournal(
+        JNIEnv *env, jobject, jstring line) {
+    if (!line) return;
+    const char *value = env->GetStringUTFChars(line, nullptr);
+    if (!value) return;
+    peerlink_journal("%s", value);
+    env->ReleaseStringUTFChars(line, value);
 }
 
 JNIEXPORT void JNICALL Java_com_peerlink_app_bot_FrameworkActivityCalls_create(
@@ -800,6 +820,22 @@ JNIEXPORT jlongArray JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeSnaps
         // object (also observed in the retained QEMU host). Preserve absence
         // separately from an existing settings object disabling controllers.
         state[17] = settings ? *reinterpret_cast<unsigned char *>(settings + 0xd3) : -1;
+        static uint64_t next_journal_sample = 0; // Runtime thread, under TaskLock.
+        const uint64_t now = monotonic_ms();
+        if (now >= next_journal_sample) {
+            next_journal_sample = now + 1000;
+            uintptr_t service = *reinterpret_cast<uintptr_t *>(g_base + 0x9a6a020);
+            uintptr_t inner = service && *reinterpret_cast<uintptr_t *>(service) == g_base + 0x98ae9e0
+                ? *reinterpret_cast<uintptr_t *>(service + 8) : 0;
+            char stop[1024];
+            peerlink_match_stop_diagnostics(inner ? *reinterpret_cast<uintptr_t *>(inner + 0xa0) : 0, stop, sizeof(stop));
+            peerlink_journal("SIMULATION_OBSERVATION engineFrame=%lld outer=%lld core=%lld players=%lld ballX=%lld ballY=%lld ballZ=%lld channel14=%lld channel15=%lld modelPhase=%lld modelError=%lld reasonCode=%lld setupComplete=%u %s",
+                static_cast<long long>(state[20]), static_cast<long long>(state[8]), static_cast<long long>(state[9]),
+                static_cast<long long>(state[10]), static_cast<long long>(state[12]), static_cast<long long>(state[13]),
+                static_cast<long long>(state[14]), static_cast<long long>(state[3]), static_cast<long long>(state[4]),
+                static_cast<long long>(state[5]), static_cast<long long>(state[7]), static_cast<long long>(state[23]),
+                g_settings_sync_complete ? 1U : 0U, stop);
+        }
     }
     jlongArray result = env->NewLongArray(kStateSize);
     if (result) env->SetLongArrayRegion(result, 0, kStateSize, state);

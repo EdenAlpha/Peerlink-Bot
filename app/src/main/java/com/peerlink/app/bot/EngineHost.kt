@@ -1,8 +1,6 @@
 package com.peerlink.app.bot
 
 import android.content.*
-import android.app.ActivityManager
-import android.app.ApplicationExitInfo
 import android.os.*
 import com.peerlink.app.core.AppState
 import com.peerlink.app.service.PeerBotService
@@ -70,27 +68,11 @@ object EngineHost {
         PeerSlot.logFlow("engine_service_lost")
         val lostPid = enginePid
         val since = engineStartedAt
-        Thread({
-            runCatching {
-                val manager = context?.getSystemService(ActivityManager::class.java)
-                val exit = if (lostPid > 0 && Build.VERSION.SDK_INT >= 30)
-                    manager?.getHistoricalProcessExitReasons(context!!.packageName, lostPid, 4)
-                        ?.firstOrNull { it.timestamp >= since } else null
-                val reason = when (exit?.reason) {
-                    ApplicationExitInfo.REASON_CRASH_NATIVE -> "native_crash"
-                    ApplicationExitInfo.REASON_CRASH -> "java_crash"
-                    ApplicationExitInfo.REASON_LOW_MEMORY -> "low_memory"
-                    ApplicationExitInfo.REASON_ANR -> "not_responding"
-                    ApplicationExitInfo.REASON_USER_REQUESTED -> "user_or_system_stop"
-                    ApplicationExitInfo.REASON_EXIT_SELF -> "process_exited_itself"
-                    ApplicationExitInfo.REASON_SIGNALED -> "signal"
-                    null -> "not_available"
-                    else -> "android_reason_${exit.reason}"
-                }
-                AppState.appendLog("[BOT-DIAG] ANDROID_ENGINE_EXIT pid=$lostPid reason=$reason " +
-                    "status=${exit?.status} timeMs=${exit?.timestamp} pssKiB=${exit?.pss}; unavailable does not prove absence of a crash")
-            }.onFailure { AppState.appendLog("[BOT-DIAG] ANDROID_ENGINE_EXIT unavailable=${it.javaClass.simpleName}") }
-        }, "bot-exit-report").start()
+        context?.let { owner ->
+            EngineProcessExitReports.observe(owner, lostPid, since) { line ->
+                AppState.appendLog("[BOT-DIAG] $line")
+            }
+        }
         service = null
         isReady = false
         PeerSlot.engineAttached = false

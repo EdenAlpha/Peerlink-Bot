@@ -54,6 +54,7 @@ add_library(peerlinkbackend SHARED
         game/network_startup_diagnostics.cpp
         game/match_stop_diagnostics.cpp
         game/match_state_diagnostics.cpp
+        game/diagnostic_journal.cpp
         game/network_socket_diagnostics.cpp
         game/null_ui_guard.cpp)
 

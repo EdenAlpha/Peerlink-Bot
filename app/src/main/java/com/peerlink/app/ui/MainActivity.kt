@@ -384,6 +384,13 @@ class MainActivity : AppCompatActivity(), NsdDiscovery.NsdCallback {
                                 // Bundle EVERYTHING into a single zip file.
                                 val entries = mutableListOf<ZipEntryData>()
                                 entries.add(ZipEntryData(name = "match_log.txt", text = fullLog))
+                                entries.add(ZipEntryData(name = "engine_exit_report.txt", text =
+                                    com.peerlink.app.bot.EngineProcessExitReports.export(this@MainActivity)))
+                                java.io.File(filesDir, "engine-events").listFiles()
+                                    ?.filter { it.isFile && it.name.matches(Regex("[0-9]+-[0-9]+\\.log")) }
+                                    ?.sortedBy { it.name }?.takeLast(8)?.forEach { eventLog ->
+                                        entries.add(ZipEntryData(name = "engine_events/${eventLog.name}", file = eventLog))
+                                    }
                                 val fileAudit = com.peerlink.app.bot.GameAssets.auditReportFile(this@MainActivity)
                                 entries.add(ZipEntryData(name = "game_file_audit.txt", text =
                                     runCatching { fileAudit.readText() }.getOrDefault("No completed startup file audit is available.\n")))
@@ -432,6 +439,8 @@ class MainActivity : AppCompatActivity(), NsdDiscovery.NsdCallback {
                                             )
                                             appendLine("Contents:")
                                             appendLine("- match_log.txt : full session log")
+                                            appendLine("- engine_exit_report.txt : Android bot-process exit history queried at export, including retained earlier attempts")
+                                            appendLine("- engine_events/ : native mismatch and stop events written directly before process exit, plus recorded match states")
                                             appendLine("- game_file_audit.txt : last startup file audit, retained across session-log resets")
                                             if (!javaCrash.isNullOrBlank()) appendLine("- java_crash_report.txt : latest Java exception report")
                                             if (udpTrace.isNotBlank()) {

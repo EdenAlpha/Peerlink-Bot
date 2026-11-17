@@ -81,6 +81,15 @@ internal object EngineRuntime {
         }
         return try {
             val app = context.applicationContext ?: context
+            val journalDirectory = File(app.filesDir, "engine-events").apply { mkdirs() }
+            val journalFile = File(journalDirectory, "${System.currentTimeMillis()}-${android.os.Process.myPid()}.log")
+            val journalOpened = nativeOpenJournal(journalFile.absolutePath)
+            audit("ENGINE_EVENT_JOURNAL opened=$journalOpened pid=${android.os.Process.myPid()}")
+            if (journalOpened) {
+                journal("APP_BUILD version=${com.peerlink.app.BuildConfig.VERSION_NAME} source=${com.peerlink.app.BuildConfig.SOURCE_COMMIT}")
+                journalDirectory.listFiles()?.filter { it.isFile && it.name.matches(Regex("[0-9]+-[0-9]+\\.log")) }
+                    ?.sortedByDescending { it.name }?.drop(8)?.forEach { it.delete() }
+            }
             val engine = File(app.filesDir, "engine/libUE4.so")
             check(android.os.Build.VERSION.SDK_INT >= 31) { "Bot engine requires Android 12 or later" }
             if (!engine.isFile || !onRuntime { load(engine) }) return false
@@ -274,6 +283,7 @@ internal object EngineRuntime {
     }
     fun neutral() = onRuntime { if (base != 0L) nativeNeutralInput(base) }
     fun probeController(): Boolean = onRuntime { base != 0L && nativeProbeController(base) }
+    fun journal(line: String) { if (nativeAvailable) nativeJournal(line) }
     fun releaseUnusedMemory(trigger: String) = onRuntime {
         val before = android.os.Debug.getPss()
         val started = android.os.SystemClock.elapsedRealtime()
@@ -291,6 +301,8 @@ internal object EngineRuntime {
     }
 
     private external fun nativeLoad(path: String): Long
+    private external fun nativeOpenJournal(path: String): Boolean
+    private external fun nativeJournal(line: String)
     private external fun nativeEnableHeadless(base: Long, missingMatchResources: Boolean): Boolean
     private external fun nativeHeadlessState(base: Long): Int
     private external fun nativeHeadlessDiagnostics(base: Long): String
