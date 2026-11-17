@@ -195,13 +195,15 @@ jobs:
           TEST_COMMIT=$(gh api "repos/$TEST_REPOSITORY/actions/runs/$TEST_BUILD_RUN" --jq '.head_sha')
           test -f phone-test/peerlink-debug.apk
           cat > phone-test-notes.md <<'NOTES'
-          Experimental ARM64 PeerLink Test for the verified eFootball 11.1.1 engine.
+          PeerLink Test 5.0.23 — diagnostic update for eFootball 11.1.1.
 
-          Android engine startup, all 44 database tables, own-controller detection and a 15-second startup hold were verified before publication.
+          Records native mismatch values, original stop paths and recent simulation progress directly to private files so bot-process death cannot erase them. Export now queries Android's retained process-exit history, including available native crash stacks, and keeps checking exit reasons that Android publishes late.
 
-          Phone-game P2P connection, kickoff and visible Pass response still require a real match test. This is a simple control test, not a complete autonomous player.
+          Install as an update to PeerLink Test, keep app data, then export logs before starting another match. Android may still retain the previous attempt's exit reason or crash stack. The ZIP adds engine_exit_report.txt and engine-events/.
 
-          Installs separately as PeerLink Test. The original game must already be installed; game binaries and assets are not bundled.
+          Verified: native journal survives a forced process kill; Android 14 and 15 tests recover actual child-process exits and export the native crashing function. The APK is the unchanged artifact from the linked successful CI run.
+
+          This release improves diagnosis; it does not claim to fix the physical-phone match disconnect. It makes no gameplay or routing changes and adds no game-asset download. Game binaries and assets are not bundled.
           NOTES
           gh release create "phone-engine-test-${TEST_COMMIT:0:7}" phone-test/peerlink-debug.apk \
             --repo "$TEST_REPOSITORY" --target "$TEST_COMMIT" --prerelease \

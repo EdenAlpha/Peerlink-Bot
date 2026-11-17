@@ -72,7 +72,8 @@ public class EngineProcessExitReportsTest {
             if (command == 3) {
                 assertEquals(laterExport, ApplicationExitInfo.REASON_CRASH_NATIVE, exit.getReason());
                 assertTrue(laterExport, laterExport.contains("signal=SIGABRT"));
-                assertTrue(laterExport, laterExport.contains("module=libpeerlinkpatchtests.so"));
+                // Android may load the native library directly from base.apk.
+                assertTrue(laterExport, laterExport.contains("libpeerlinkpatchtests.so relPc="));
                 assertTrue(laterExport, laterExport.contains("EngineExitProbeService_nativeCrash"));
                 assertFalse(laterExport, laterExport.contains("nativeTraceError="));
             }
