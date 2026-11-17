@@ -1,5 +1,8 @@
 name: Read Android diagnostic test evidence
 on:
+  push:
+    branches: [feat/phone-match-test]
+    paths: [.github/workflows/android-diagnostic-evidence.yml]
   workflow_dispatch:
     inputs:
       run_id:
@@ -15,7 +18,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           github-token: ${{ github.token }}
-          run-id: ${{ inputs.run_id }}
+          run-id: ${{ inputs.run_id || '44110891864' }}
           pattern: android-host-service-tests-api-*
           path: evidence
       - name: Print the complete assertion evidence
