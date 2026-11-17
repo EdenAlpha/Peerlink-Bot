@@ -202,6 +202,9 @@ class BotEngineService : Service() {
                     -211 -> "The bot could not skip the match introduction"
                     -214 -> "The bot and eFootball produced different match states"
                     -215 -> "The bot could not apply this room's match rules"
+                    -216 -> "The bot's original match-setup task is unavailable"
+                    -217 -> "The bot's match-setup synchronization failed"
+                    -218 -> "The bot's match-setup synchronization timed out"
                     else -> "Bot match setup failed"
                 }
                 "$reason (native stage $advance)"

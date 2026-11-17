@@ -63,6 +63,10 @@ int g_match_stage = 0;
 uintptr_t g_user_sync_task = 0;
 bool g_user_sync_complete = false;
 uint64_t g_user_sync_started_ms = 0;
+uintptr_t g_settings_sync_task = 0;
+bool g_settings_sync_complete = false;
+uint32_t g_settings_sync_state = 0;
+uint64_t g_settings_sync_started_ms = 0;
 bool g_preview_proceeded = false;
 bool g_controller_scanned = false;
 int g_eager_memory_release = 0;
@@ -472,6 +476,18 @@ JNIEXPORT jstring JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeLoadingD
         } while (child && child != first && ++count < 150 && visited <= 800);
     };
     for (unsigned i = 0; i < 4; ++i) walk(walk, *reinterpret_cast<uintptr_t *>(lock.manager + 0x118 + i * 8), 0);
+    text += "\nMATCH_SETUP_SYNC started=" + std::to_string(g_settings_sync_task != 0) +
+        " complete=" + std::to_string(g_settings_sync_complete) +
+        " state=" + std::to_string(g_settings_sync_state);
+    uintptr_t settings_task = *reinterpret_cast<uintptr_t *>(g_base + 0xa5c8310);
+    text += " taskPresent=" + std::to_string(settings_task != 0);
+    uintptr_t owner = *reinterpret_cast<uintptr_t *>(g_base + 0xa5fb348);
+    uintptr_t work = owner ? *reinterpret_cast<uintptr_t *>(owner + 0x48) : 0;
+    if (work) {
+        uintptr_t source = work + 0x6c4c0;
+        text += " activeTime=" + std::to_string(*reinterpret_cast<unsigned char *>(source + 0xb8)) +
+            " activeStadium=" + std::to_string(*reinterpret_cast<uint16_t *>(source + 0x158));
+    }
     text += "\n"; text += peerlink_room_rules_diagnostics();
     text += "\n"; text += peerlink_match_state_diagnostics();
     return env->NewStringUTF(text.c_str());
@@ -591,6 +607,14 @@ JNIEXPORT jint JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeAdvanceMatc
         // parameters leaves the running simulation on its native defaults.
         if (peerlink_room_rules_input(g_base, g_room_rules_path.c_str()) <= 0) return -215;
         if (peerlink_squad_import(g_base, 0, g_uid, g_squad_path.c_str()) <= 0) return -202;
+        // Normal SyncData (8137434) creates this original commissioner child.
+        // It exchanges/normalizes match setup through the native channel and
+        // applies the result in 7b3ee8c. Two hosts omitting it can agree with
+        // each other while never exercising the normal peer's setup path.
+        g_settings_sync_task = entry<uintptr_t (*)()>(0x7b3e278)();
+        if (!g_settings_sync_task ||
+            *reinterpret_cast<uintptr_t *>(g_settings_sync_task) != g_base + 0x990c778) return -216;
+        g_settings_sync_started_ms = monotonic_ms();
         uintptr_t online = entry<uintptr_t (*)()>(0x7a1d8d4)();
         if (!online) return -203;
         entry<void (*)(uintptr_t)>(0x7a2469c)(online);
@@ -599,20 +623,34 @@ JNIEXPORT jint JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeAdvanceMatc
         entry<void (*)(uintptr_t, const char *)>(0x6aa70a8)(flow + 0x118, "Online/Match/MatchProcessPreMenu");
         g_match_stage = 2;
     }
+    if (g_match_stage == 2 && !g_settings_sync_complete) {
+        // The original live global is cleared by its owner on destruction.
+        // Never dereference a saved task after the original owner releases it.
+        uintptr_t task = *reinterpret_cast<uintptr_t *>(g_base + 0xa5c8310);
+        if (task != g_settings_sync_task ||
+            *reinterpret_cast<uintptr_t *>(task) != g_base + 0x990c778) return -216;
+        g_settings_sync_state = *reinterpret_cast<uint32_t *>(task + 0x70);
+        if (g_settings_sync_state > 4) return -217;
+        if (g_settings_sync_state == 4) {
+            g_settings_sync_complete = true;
+            __android_log_print(ANDROID_LOG_INFO, TAG, "ORIGINAL_MATCH_SETUP_SYNC_COMPLETED state=4");
+        } else if (monotonic_ms() - g_settings_sync_started_ms >= 90000) return -218;
+    }
+    const bool setup_synchronized = g_user_sync_complete && g_settings_sync_complete;
     if (g_match_stage == 2 && !g_preview_proceeded) {
-        long preview = peerlink_preview_drive(g_base, g_user_sync_complete);
+        long preview = peerlink_preview_drive(g_base, setup_synchronized);
         if (preview == -2) { peerlink_preview_stop(); return -209; }
         if (preview < 0) { peerlink_preview_stop(); return -210; }
         if (preview == 1) g_preview_proceeded = true;
     }
     if (g_match_stage == 2) {
-        long reference_intro = peerlink_reference_intro_drive(g_base, g_user_sync_complete);
+        long reference_intro = peerlink_reference_intro_drive(g_base, setup_synchronized);
         if (reference_intro < 0) { peerlink_preview_stop(); return -213; }
         uintptr_t rhi = *reinterpret_cast<uintptr_t *>(g_base + 0xa0111f8);
         if (rhi && *reinterpret_cast<uintptr_t *>(rhi) == g_base + 0x93b6e98) {
             long demo = peerlink_demo_drive(g_base);
             if (demo < 0) { peerlink_preview_stop(); return -211; }
-            if (g_user_sync_complete && peerlink_null_client_rhi_ready(g_base)) {
+            if (setup_synchronized && peerlink_null_client_rhi_ready(g_base)) {
                 long visual = peerlink_visual_start_drive(g_base);
                 if (visual < 0) { peerlink_preview_stop(); return -212; }
             }
