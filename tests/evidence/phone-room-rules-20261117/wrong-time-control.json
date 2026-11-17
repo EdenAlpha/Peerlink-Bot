@@ -1,0 +1,77 @@
+{
+  "deliberateInvalidInputControl": true,
+  "serverRoomMatchTime": 1,
+  "deliveredRuleTime": {
+    "A": 1,
+    "B": 10
+  },
+  "sourceCommit": "8754989f032ae38767ae1f0deaf7474526b5a982",
+  "installedMainApkSha256": "518b9757af1aae8cf39a62c661ca076d535107ca4df0f4ba3d1ea66fe5b2f29a",
+  "bothActualInstalledHashesVerified": true,
+  "debuggerAttached": false,
+  "checksumDecisionUnchanged": true,
+  "roles": {
+    "A": {
+      "activeTime": 1,
+      "stopped": true,
+      "originalMismatchCallback": {
+        "compareFrame": 54,
+        "storedFrame": 54,
+        "localValue": 32117,
+        "peerValue": 33457,
+        "verdict": 5,
+        "mismatchCount": 2,
+        "firstMismatchFrame": 27,
+        "stopCommandFrame": 55
+      }
+    },
+    "B": {
+      "activeTime": 10,
+      "stopped": true,
+      "originalMismatchCallback": {
+        "compareFrame": 54,
+        "storedFrame": 54,
+        "localValue": 33457,
+        "peerValue": 32117,
+        "verdict": 5,
+        "mismatchCount": 2,
+        "firstMismatchFrame": 27,
+        "stopCommandFrame": 55
+      }
+    }
+  },
+  "firstMismatchFrame": 27,
+  "confirmationFrame": 54,
+  "stopRequestedFrame": 55,
+  "stopAppliedFrame": 56,
+  "physicalReportPattern": {
+    "firstMismatchFrame": 27,
+    "confirmationFrame": 54,
+    "stopRequestedFrame": 56,
+    "stopAppliedFrame": 57
+  },
+  "monitorCaveat": "Ring-monitor streams can select exchanged peer-origin entries; the native comparison callback above is the authority for local/peer disagreement.",
+  "physicalStockGameMatchVerified": false,
+  "originalStopEvents": [
+    {
+      "path": "local_request",
+      "callerOffset": "0x70539e4",
+      "frame": 55
+    },
+    {
+      "path": "local_request",
+      "callerOffset": "0x70539e4",
+      "frame": 55
+    },
+    {
+      "path": "applied_input_command",
+      "callerOffset": "0x7012fd0",
+      "frame": 56
+    },
+    {
+      "path": "applied_input_command",
+      "callerOffset": "0x7012fd0",
+      "frame": 56
+    }
+  ]
+}

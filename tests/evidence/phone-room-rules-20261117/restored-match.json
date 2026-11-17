@@ -1,0 +1,44 @@
+{
+  "ciRun": 44078332691,
+  "ciAllJobsPassed": true,
+  "sourceCommit": "8754989f032ae38767ae1f0deaf7474526b5a982",
+  "installedMainApkSha256": "518b9757af1aae8cf39a62c661ca076d535107ca4df0f4ba3d1ea66fe5b2f29a",
+  "testApkSha256": "0d481d6a4b7310c96bef0ceb3d024816604dfe156126b8b0c664346dda31ba43",
+  "labAndroidApi": 35,
+  "labArchitecture": "arm64",
+  "botExtraPackCount": 0,
+  "referenceExtraPackCount": 63,
+  "bothHave22Players": true,
+  "testSamplesPerRole": 120,
+  "distinctBallPositionsPerRole": {
+    "B": 28,
+    "A": 28
+  },
+  "automaticHomePassVerified": true,
+  "awayAutomaticInputAbsent": true,
+  "actualRulesApplied": {
+    "A": {
+      "requestedTime": 1,
+      "inputTime": 1,
+      "activeTime": 1
+    },
+    "B": {
+      "requestedTime": 1,
+      "inputTime": 1,
+      "activeTime": 1
+    }
+  },
+  "originalChecks": {
+    "matching": 42,
+    "firstFrame": 27,
+    "lastFrame": 1134,
+    "differences": [],
+    "source": "read-only monitor of exchanged original checker entries",
+    "qualification": "Local compatibility is supported by sustained original checker acceptance/no mismatch callback. Ring entries alone can select the same peer-origin stream."
+  },
+  "originalMismatchStops": 0,
+  "bothHarnessesPassed": true,
+  "peerDescription": "Two PeerLink-hosted original11.1.1 engines; A headless and B rendered with full assets",
+  "physicalStockGameMatchVerified": false,
+  "testPhase": "correct-rules-restored-after-wrong-time-control"
+}
