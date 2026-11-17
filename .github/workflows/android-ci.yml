@@ -74,6 +74,8 @@ jobs:
           "$RUNNER_TEMP/match-stop-diagnostics-test"
           g++ -std=c++17 -Wall -Wextra -Werror -Iapp/src/main/jni/game tests/native/diagnostic_journal_test.cpp app/src/main/jni/game/diagnostic_journal.cpp -o "$RUNNER_TEMP/diagnostic-journal-test"
           "$RUNNER_TEMP/diagnostic-journal-test"
+          g++ -std=c++17 -Wall -Wextra -Werror -Iapp/src/main/jni/game tests/native/input_readiness_test.cpp -o "$RUNNER_TEMP/input-readiness-test"
+          "$RUNNER_TEMP/input-readiness-test"
 
       - name: Verify APK
         run: |
@@ -195,15 +197,15 @@ jobs:
           TEST_COMMIT=$(gh api "repos/$TEST_REPOSITORY/actions/runs/$TEST_BUILD_RUN" --jq '.head_sha')
           test -f phone-test/peerlink-debug.apk
           cat > phone-test-notes.md <<'NOTES'
-          PeerLink Test 5.0.23 — diagnostic update for eFootball 11.1.1.
+          PeerLink Test 5.0.24 — wait for native simulation readiness before button presses.
 
-          Records native mismatch values, original stop paths and recent simulation progress directly to private files so bot-process death cannot erase them. Export now queries Android's retained process-exit history, including available native crash stacks, and keeps checking exit reasons that Android publishes late.
+          The previous input gate allowed Pass while a constructed match still waited at command frame zero. Automatic and manual button presses now require the original engine's simulation wait to clear, its tick gate to open, and a live command frame with no pending or applied stop. Button releases remain available when play pauses.
 
-          Install as an update to PeerLink Test, keep app data, then export logs before starting another match. Android may still retain the previous attempt's exit reason or crash stack. The ZIP adds engine_exit_report.txt and engine-events/.
+          The app reports that it is waiting for the match to be ready. Native journals include the actual readiness and command frame at input submission. Persistent mismatch/stop events and Android exit-history/crash exports from 5.0.23 remain available.
 
-          Verified: native journal survives a forced process kill; Android 14 and 15 tests recover actual child-process exits and export the native crashing function. The APK is the unchanged artifact from the linked successful CI run.
+          The input policy rejects the recorded phone frame-zero wait and stopped states in native and JVM regression checks. The APK is published directly from the linked successful CI artifact.
 
-          This release improves diagnosis; it does not claim to fix the physical-phone match disconnect. It makes no gameplay or routing changes and adds no game-asset download. Game binaries and assets are not bundled.
+          Early-input timing is a hypothesis for the physical-phone mismatch, not an established cause. A hosted control with the unchanged 5.0.23 APK sent two Pass presses at frame zero and continued past frame 1100 without a mismatch. This update corrects premature input submission; physical-phone disconnect resolution still requires verification. It adds no game-asset download. Game binaries and assets are not bundled.
           NOTES
           gh release create "phone-engine-test-${TEST_COMMIT:0:7}" phone-test/peerlink-debug.apk \
             --repo "$TEST_REPOSITORY" --target "$TEST_COMMIT" --prerelease \

@@ -145,7 +145,7 @@ class BotEngineService : Service() {
     private fun snapshot(passive: Boolean = false): EngineSnapshot {
         val now = SystemClock.elapsedRealtime()
         if (now >= nextMemorySample) { pss = Debug.getPss().toLong(); nextMemorySample = now + 5000 }
-        return EngineSnapshot(EngineRuntime.snapshot(passive).copyOf(29).also { it[18] = pss })
+        return EngineSnapshot(EngineRuntime.snapshot(passive).copyOf(30).also { it[18] = pss })
     }
     private fun diagnostic(line: String, firstFailure: Boolean = false) {
         if (firstFailure || line.startsWith("MATCH_LOADING") || line.startsWith("NATIVE_STATE") ||

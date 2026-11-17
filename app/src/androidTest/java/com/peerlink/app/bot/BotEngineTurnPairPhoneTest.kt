@@ -140,7 +140,7 @@ class BotEngineTurnPairPhoneTest {
             Thread.sleep(3000)
             val connected = EngineHost.snapshot()
             assertTrue(connected.connected)
-            assertEquals(29, connected.values.size)
+            assertEquals(30, connected.values.size)
             assertEquals(0L, connected.values[23])
             assertEquals(1L, connected.values[26])
             assertEquals(2L, connected.values[28])

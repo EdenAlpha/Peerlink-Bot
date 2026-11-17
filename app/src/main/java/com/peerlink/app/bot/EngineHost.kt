@@ -228,7 +228,8 @@ data class EngineSnapshot(val values: LongArray) {
     val metadataReady get() = field(5) == 5L && field(6) == 1L && field(7) == 0L
     val matchConstructed get() = field(8) == 17L && field(9) == 54L && field(10) == 22L
     val ballOnPitch get() = field(11) == 1L
-    val canTestPass get() = connected && matchConstructed && ballOnPitch && field(16) == 1L &&
+    val simulationInputReady get() = field(29) == 1L
+    val canTestPass get() = connected && matchConstructed && ballOnPitch && simulationInputReady && field(16) == 1L &&
         (field(17) == 1L || field(17) == -1L)
     val memoryMiB get() = field(18) / 1024
     val matchDataHandlerPresent get() = field(19) == 1L
@@ -240,6 +241,7 @@ data class EngineSnapshot(val values: LongArray) {
         !metadataReady -> "Connected — exchanging teams"
         !matchConstructed -> "Loading the match — continue in eFootball when ready"
         !ballOnPitch -> "Match loaded — waiting for play to resume"
+        !simulationInputReady -> "Waiting for the match to be ready"
         else -> "Match simulation ready — bot control test available"
     }
 }

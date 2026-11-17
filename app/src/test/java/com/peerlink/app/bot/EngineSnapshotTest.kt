@@ -4,11 +4,12 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class EngineSnapshotTest {
-    private fun state() = LongArray(19).apply {
+    private fun state() = LongArray(30).apply {
         this[2] = 4; this[3] = 4; this[4] = 4
         this[5] = 5; this[6] = 1
         this[8] = 17; this[9] = 54; this[10] = 22
         this[11] = 1; this[16] = 1; this[17] = 1
+        this[29] = 1
     }
     @Test fun connectionAndTeamsAloneDoNotAuthorizeGameplayInputs() {
         val values = state().apply { this[8] = 0; this[9] = 0; this[10] = 0; this[11] = 0 }
@@ -36,5 +37,17 @@ class EngineSnapshotTest {
         val snapshot = EngineSnapshot(state().apply { this[11] = 0; this[14] = 100000 })
         assertTrue(snapshot.matchConstructed)
         assertFalse(snapshot.canTestPass)
+    }
+    @Test fun recordedLoadedPitchStillWaitingAtFrameZeroCannotAuthorizePass() {
+        // Physical 5.0.23: outer17/core54, 22 players, ball at centre and
+        // controllers enabled, but commandFrame0/missingMask2/tickGate0.
+        val snapshot = EngineSnapshot(state().apply { this[29] = 0 })
+        assertTrue(snapshot.matchConstructed)
+        assertTrue(snapshot.ballOnPitch)
+        assertFalse(snapshot.canTestPass)
+        assertEquals("Waiting for the match to be ready", snapshot.status())
+    }
+    @Test fun missingReadinessFromAnOlderOrIncompleteSnapshotCannotAuthorizePass() {
+        assertFalse(EngineSnapshot(state().copyOf(29)).canTestPass)
     }
 }

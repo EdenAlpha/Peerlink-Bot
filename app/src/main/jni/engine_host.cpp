@@ -28,6 +28,7 @@
 #include "game/match_stop_diagnostics.h"
 #include "game/match_state_diagnostics.h"
 #include "game/diagnostic_journal.h"
+#include "game/input_readiness.h"
 
 extern "C" {
 long peerlink_game_database_input(uintptr_t, const char *);
@@ -201,6 +202,25 @@ struct TaskLock {
     }
     ~TaskLock() { if (manager) entry<void (*)(uintptr_t)>(0x82298d0)(manager); }
 };
+
+// Called under the original TaskLock. A constructed pitch can still be at
+// command frame zero waiting for its peer, so construction is not input-ready.
+peerlink::InputReadiness input_readiness() {
+    peerlink::InputReadiness state;
+    uintptr_t service = *reinterpret_cast<uintptr_t *>(g_base + 0x9a6a020);
+    if (!service || *reinterpret_cast<uintptr_t *>(service) != g_base + 0x98ae9e0) return state;
+    uintptr_t inner = *reinterpret_cast<uintptr_t *>(service + 8);
+    uintptr_t controller = inner ? *reinterpret_cast<uintptr_t *>(inner + 0xa0) : 0;
+    if (!controller || *reinterpret_cast<uintptr_t *>(controller) != g_base + 0x98aedd0) return state;
+    uint32_t reason = 0;
+    state.valid = true;
+    state.frame = *reinterpret_cast<uint32_t *>(controller + 0x30);
+    state.waiting = entry<uint32_t (*)(uintptr_t, uint32_t *)>(0x701289c)(service, &reason);
+    state.tick_gate = *reinterpret_cast<unsigned char *>(g_base + 0xa541870);
+    state.pending_stop = *reinterpret_cast<unsigned char *>(controller + 0x45);
+    state.stopped = *reinterpret_cast<unsigned char *>(controller + 0x49);
+    return state;
+}
 uint64_t monotonic_ms() {
     timespec now{};
     clock_gettime(CLOCK_MONOTONIC, &now);
@@ -736,7 +756,7 @@ JNIEXPORT jlongArray JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeSnaps
         JNIEnv *env, jobject, jlong base, jboolean passive) {
     // Append-only IPC layout. Diagnostic fields are reads under the same
     // original task lock; they never change the engine's connection verdict.
-    constexpr unsigned kStateSize = 29;
+    constexpr unsigned kStateSize = 30;
     jlong state[kStateSize]{};
     if (valid(base)) {
         TaskLock lock;
@@ -820,6 +840,7 @@ JNIEXPORT jlongArray JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeSnaps
         // object (also observed in the retained QEMU host). Preserve absence
         // separately from an existing settings object disabling controllers.
         state[17] = settings ? *reinterpret_cast<unsigned char *>(settings + 0xd3) : -1;
+        state[29] = lock.manager && input_readiness().ready() ? 1 : 0;
         static uint64_t next_journal_sample = 0; // Runtime thread, under TaskLock.
         const uint64_t now = monotonic_ms();
         if (now >= next_journal_sample) {
@@ -829,12 +850,12 @@ JNIEXPORT jlongArray JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeSnaps
                 ? *reinterpret_cast<uintptr_t *>(service + 8) : 0;
             char stop[1024];
             peerlink_match_stop_diagnostics(inner ? *reinterpret_cast<uintptr_t *>(inner + 0xa0) : 0, stop, sizeof(stop));
-            peerlink_journal("SIMULATION_OBSERVATION engineFrame=%lld outer=%lld core=%lld players=%lld ballX=%lld ballY=%lld ballZ=%lld channel14=%lld channel15=%lld modelPhase=%lld modelError=%lld reasonCode=%lld setupComplete=%u %s",
+            peerlink_journal("SIMULATION_OBSERVATION engineFrame=%lld outer=%lld core=%lld players=%lld ballX=%lld ballY=%lld ballZ=%lld channel14=%lld channel15=%lld modelPhase=%lld modelError=%lld reasonCode=%lld setupComplete=%u inputReady=%u %s",
                 static_cast<long long>(state[20]), static_cast<long long>(state[8]), static_cast<long long>(state[9]),
                 static_cast<long long>(state[10]), static_cast<long long>(state[12]), static_cast<long long>(state[13]),
                 static_cast<long long>(state[14]), static_cast<long long>(state[3]), static_cast<long long>(state[4]),
                 static_cast<long long>(state[5]), static_cast<long long>(state[7]), static_cast<long long>(state[23]),
-                g_settings_sync_complete ? 1U : 0U, stop);
+                g_settings_sync_complete ? 1U : 0U, state[29] == 1 ? 1U : 0U, stop);
         }
     }
     jlongArray result = env->NewLongArray(kStateSize);
@@ -845,11 +866,25 @@ JNIEXPORT jlongArray JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeSnaps
 JNIEXPORT jboolean JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeInputKey(
         JNIEnv *env, jobject, jlong base, jint code, jint action) {
     if (!valid(base) || !g_match_stage || !g_settings_sync_complete) return JNI_FALSE;
+    peerlink::InputReadiness readiness;
+    if (action == 0) {
+        {
+            TaskLock lock;
+            if (lock.manager) readiness = input_readiness();
+        }
+        if (!readiness.ready()) {
+            peerlink_journal("BOT_INPUT_NATIVE key=%d action=down accepted=0 commandFrame=%u waitMask=%u tickGate=%u pendingStop=%u stopped=%u",
+                code, readiness.frame, readiness.waiting, readiness.tick_gate, readiness.pending_stop, readiness.stopped);
+            return JNI_FALSE;
+        }
+    }
     jclass factory = env->FindClass("com/peerlink/app/bot/SoftwareGamepadEvents");
     jmethodID method = factory ? env->GetStaticMethodID(factory, "key", "(II)Landroid/view/KeyEvent;") : nullptr;
     jobject event = method ? env->CallStaticObjectMethod(factory, method, code, action) : nullptr;
     bool result = input_event(env, event, false);
     if (factory) env->DeleteLocalRef(factory);
+    if (action == 0) peerlink_journal("BOT_INPUT_NATIVE key=%d action=down accepted=%u commandFrame=%u waitMask=%u tickGate=%u pendingStop=%u stopped=%u",
+        code, result ? 1U : 0U, readiness.frame, readiness.waiting, readiness.tick_gate, readiness.pending_stop, readiness.stopped);
     return result ? JNI_TRUE : JNI_FALSE;
 }
 JNIEXPORT void JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeNeutralInput(

@@ -273,7 +273,7 @@ internal object EngineRuntime {
     }
 
     fun snapshot(passive: Boolean = false): LongArray = onRuntime {
-        if (base == 0L) LongArray(29) else nativeSnapshot(base, passive)
+        if (base == 0L) LongArray(30) else nativeSnapshot(base, passive)
     }
     fun advanceMatch(controllerAllowed: Boolean): Int = onRuntime {
         if (base == 0L) -1 else nativeAdvanceMatch(base, controllerAllowed)
