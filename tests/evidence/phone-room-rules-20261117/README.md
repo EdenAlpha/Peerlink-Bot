@@ -86,3 +86,11 @@ This demonstrates that the omitted room rule application can produce the
 observed failure mechanism. Compatibility with the user's foreground stock
 game still requires a physical-phone match. Android low-memory process kills
 are a separate failure mode and are not claimed fixed by this rule change.
+
+## Published test APK
+
+[Download the exact tested APK](https://github.com/EdenAlpha/Peerlink-Bot/releases/download/phone-engine-test-8754989/peerlink-debug.apk) · [Release page](https://github.com/EdenAlpha/Peerlink-Bot/releases/tag/phone-engine-test-8754989).
+Publish run [44081833022](https://github.com/EdenAlpha/Peerlink-Bot/actions/runs/44081833022)
+reused CI artifact `14325464334` without a rebuild. GitHub's published asset
+digest and size match the APK independently hashed in both test Android users.
+See [published-release.json](published-release.json).
