@@ -54,7 +54,10 @@ internal object EngineRuntime {
         try {
             val digest = MessageDigest.getInstance("SHA-256")
             var size = 0L
-            GZIPInputStream(context.assets.open("game-host/editwork-supplement-11.1.1.bin.gz")).use { input ->
+            // AAPT expands assets with a .gz suffix and removes that suffix while
+            // packaging. Keep the gzip bytes under a neutral extension so the
+            // runtime sees the exact filename and compressed data it expects.
+            GZIPInputStream(context.assets.open("game-host/editwork-supplement-11.1.1.dat")).use { input ->
                 staged.outputStream().buffered().use { output ->
                     val buffer = ByteArray(64 * 1024)
                     while (true) {

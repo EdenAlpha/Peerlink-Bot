@@ -81,7 +81,13 @@ jobs:
 
       - name: Verify APK
         run: |
+          set -euo pipefail
           test -f app/build/outputs/apk/debug/app-debug.apk
+          # Check the asset in the built APK itself. AAPT transforms .gz assets,
+          # so checking only the source tree would miss a runtime file failure.
+          SUPPLEMENT_SHA="$(unzip -p app/build/outputs/apk/debug/app-debug.apk \
+            assets/game-host/editwork-supplement-11.1.1.dat | gzip -dc | sha256sum | cut -d' ' -f1)"
+          test "$SUPPLEMENT_SHA" = "da2bd7c92c3417cf47d4916a52e8dee111fc3e5cab6a724bd427d6b0276cd29a"
           ls -lh app/build/outputs/apk/debug/app-debug.apk
           cp app/build/outputs/apk/debug/app-debug.apk peerlink-debug.apk
 
