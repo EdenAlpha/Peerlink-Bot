@@ -25,6 +25,11 @@ class RoomMatchRulesTest {
         assertFalse(input.hasRemaining())
     }
 
+    @Test fun preservesSixMinuteRoomTime() {
+        val input = RoomMatchRules.encode(room().apply { put("match_time", 6L) })
+        assertEquals(6, ByteBuffer.wrap(input).order(ByteOrder.LITTLE_ENDIAN).getInt(12))
+    }
+
     @Test fun refusesMissingRulesInsteadOfSelectingNativeDefaults() {
         for (key in room().keys) {
             assertThrows("missing $key", IllegalStateException::class.java) {
