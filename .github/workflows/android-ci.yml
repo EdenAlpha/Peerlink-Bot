@@ -199,16 +199,10 @@ jobs:
           TEST_COMMIT=$(gh api "repos/$TEST_REPOSITORY/actions/runs/$TEST_BUILD_RUN" --jq '.head_sha')
           test -f phone-test/peerlink-debug.apk
           cat > phone-test-notes.md <<'NOTES'
-          PeerLink Test 5.0.24 — wait for native simulation readiness before button presses.
+          Experimental player-data test build. The app fills missing records in the supported 11.1.1 engine from a small dataset bundled in the APK; it does not start a separate game-data download.
 
-          The previous input gate allowed Pass while a constructed match still waited at command frame zero. Automatic and manual button presses now require the original engine's simulation wait to clear, its tick gate to open, and a live command frame with no pending or applied stop. Button releases remain available when play pauses.
-
-          The app reports that it is waiting for the match to be ready. Native journals include the actual readiness and command frame at input submission. Persistent mismatch/stop events and Android exit-history/crash exports from 5.0.23 remain available.
-
-          The input policy rejects the recorded phone frame-zero wait and stopped states in native and JVM regression checks. The APK is published directly from the linked successful CI artifact.
-
-          Early-input timing is a hypothesis for the physical-phone mismatch, not an established cause. A hosted control with the unchanged 5.0.23 APK sent two Pass presses at frame zero and continued past frame 1100 without a mismatch. This update corrects premature input submission; physical-phone disconnect resolution still requires verification. It adds no game-asset download. Game binaries and assets are not bundled.
+          In a same-phone lab match, adding these records restored the missing player values and both simulations continued beyond frame 800. The real game later abandoned that match for an unknown reason. This exact APK has passed its build and Android host checks but has not yet passed an end-to-end phone match.
           NOTES
           gh release create "phone-engine-test-${TEST_COMMIT:0:7}" phone-test/peerlink-debug.apk \
-            --repo "$TEST_REPOSITORY" --target "$TEST_COMMIT" --prerelease \
+            --repo "$TEST_REPOSITORY" --target "$TEST_COMMIT" --draft --prerelease \
             --title 'PeerLink phone engine and controller test' --notes-file phone-test-notes.md
