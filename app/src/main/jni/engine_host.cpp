@@ -57,6 +57,8 @@ const char *peerlink_null_client_rhi_diagnostics();
 #define TAG "PeerlinkEngineHost"
 namespace {
 constexpr uint64_t kEngineSize = 161937720ULL;
+constexpr uint64_t kMatchReadyWindowMs = 150000;
+constexpr uint64_t kMatchSetupSyncBudgetMs = 90000;
 uintptr_t g_base = 0;
 uintptr_t g_client = 0;
 uint32_t g_uid = 0;
@@ -582,6 +584,8 @@ JNIEXPORT jstring JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeLoadingD
     text += "\nMATCH_SETUP_SYNC started=" + std::to_string(g_settings_sync_task != 0) +
         " complete=" + std::to_string(g_settings_sync_complete) +
         " state=" + std::to_string(g_settings_sync_state.load(std::memory_order_acquire));
+    if (g_settings_sync_started_ms && !g_settings_sync_complete)
+        text += " elapsedMs=" + std::to_string(monotonic_ms() - g_settings_sync_started_ms);
     uintptr_t settings_task = *reinterpret_cast<uintptr_t *>(g_base + 0xa5c8310);
     text += " taskPresent=" + std::to_string(settings_task != 0);
     uintptr_t owner = *reinterpret_cast<uintptr_t *>(g_base + 0xa5fb348);
@@ -740,7 +744,10 @@ JNIEXPORT jint JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeAdvanceMatc
             const uintptr_t table = *reinterpret_cast<uintptr_t *>(task);
             if (table != g_base + 0x990c778 &&
                 table != reinterpret_cast<uintptr_t>(g_settings_sync_vtable.data() + 2)) return -216;
-            if (monotonic_ms() - g_settings_sync_started_ms >= 90000) return -218;
+            // The other player can remain in preview and lineup for the full
+            // ready window before the game starts its setup exchange.
+            if (monotonic_ms() - g_settings_sync_started_ms >= kMatchReadyWindowMs + kMatchSetupSyncBudgetMs)
+                return -218;
         }
     }
     const bool setup_synchronized = g_user_sync_complete && g_settings_sync_complete;
