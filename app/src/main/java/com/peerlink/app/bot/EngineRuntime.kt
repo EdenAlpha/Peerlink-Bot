@@ -7,6 +7,7 @@ import java.security.MessageDigest
 import java.util.concurrent.Callable
 import java.util.concurrent.ScheduledThreadPoolExecutor
 import java.util.concurrent.TimeUnit
+import java.util.zip.GZIPInputStream
 
 /** Original game runtime, confined to the private :botengine process. */
 internal object EngineRuntime {
@@ -45,6 +46,36 @@ internal object EngineRuntime {
     private fun <T> onRuntime(action: () -> T): T {
         if (Thread.currentThread() === runtimeThread) return action()
         return runtime.submit(Callable { action() }).get(60, TimeUnit.SECONDS)
+    }
+
+    /** A small, version-pinned set of player edit records bundled with the app. */
+    private fun stageEditSupplement(context: Context): File {
+        val staged = File.createTempFile("peerlink-edit-work-", ".bin", context.cacheDir)
+        try {
+            val digest = MessageDigest.getInstance("SHA-256")
+            var size = 0L
+            GZIPInputStream(context.assets.open("game-host/editwork-supplement-11.1.1.bin.gz")).use { input ->
+                staged.outputStream().buffered().use { output ->
+                    val buffer = ByteArray(64 * 1024)
+                    while (true) {
+                        val count = input.read(buffer)
+                        if (count < 0) break
+                        size += count
+                        check(size <= 1_842_080L) { "Player data supplement is too large" }
+                        digest.update(buffer, 0, count)
+                        output.write(buffer, 0, count)
+                    }
+                }
+            }
+            val hash = digest.digest().joinToString("") { "%02x".format(it) }
+            check(size == 1_842_080L && hash == "da2bd7c92c3417cf47d4916a52e8dee111fc3e5cab6a724bd427d6b0276cd29a") {
+                "Player data supplement could not be verified"
+            }
+            return staged
+        } catch (error: Exception) {
+            staged.delete()
+            throw error
+        }
     }
 
     /** Refuse unknown builds before executing any absolute-offset calls. */
@@ -132,6 +163,14 @@ internal object EngineRuntime {
                 }
             }
             check(onRuntime { nativeLoadDatabase(base, files.database.absolutePath) }) { "Bot game database could not start" }
+            val editSupplement = stageEditSupplement(app)
+            try {
+                check(onRuntime { nativeMergeEditRecords(base, editSupplement.absolutePath) }) {
+                    "Bot player data could not be prepared"
+                }
+            } finally {
+                editSupplement.delete()
+            }
             // The original Java resume callback checks kernel phase == 1.
             // Framework onResume runs before our native window is attached;
             // deliver its game-side notification once after the kernel/data
@@ -318,6 +357,7 @@ internal object EngineRuntime {
     private external fun nativeTurnAddress(base: Long): ByteArray?
     private external fun nativePeerTurnAddress(base: Long, input: ByteArray): Boolean
     private external fun nativeConfigureFiles(base: Long, assets: String): Boolean
+    private external fun nativeMergeEditRecords(base: Long, path: String): Boolean
     private external fun nativeApplicationReady(base: Long): Boolean
     private external fun nativeStartupInfo(base: Long): String
     private external fun nativeLoadDatabase(base: Long, path: String): Boolean

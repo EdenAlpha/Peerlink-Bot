@@ -76,6 +76,8 @@ jobs:
           "$RUNNER_TEMP/diagnostic-journal-test"
           g++ -std=c++17 -Wall -Wextra -Werror -Iapp/src/main/jni/game tests/native/input_readiness_test.cpp -o "$RUNNER_TEMP/input-readiness-test"
           "$RUNNER_TEMP/input-readiness-test"
+          g++ -std=c++17 -Wall -Wextra -Werror tests/native/edit_work_merge_test.cpp -o "$RUNNER_TEMP/edit-work-merge-test"
+          "$RUNNER_TEMP/edit-work-merge-test"
 
       - name: Verify APK
         run: |

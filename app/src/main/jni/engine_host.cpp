@@ -29,6 +29,7 @@
 #include "game/match_state_diagnostics.h"
 #include "game/diagnostic_journal.h"
 #include "game/input_readiness.h"
+#include "game/edit_work_merge.h"
 
 extern "C" {
 long peerlink_game_database_input(uintptr_t, const char *);
@@ -385,6 +386,40 @@ JNIEXPORT jboolean JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeLoadDat
     env->ReleaseStringUTFChars(path, directory);
     __android_log_print(ANDROID_LOG_INFO, TAG, "database startup result=%ld", result);
     return result == 44 ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT jboolean JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeMergeEditRecords(
+        JNIEnv *env, jobject, jlong base, jstring path) {
+    if (!valid(base) || !g_core_ready || g_client || g_match_stage || !path) return JNI_FALSE;
+    const char *filename = env->GetStringUTFChars(path, nullptr);
+    if (!filename) return JNI_FALSE;
+    FILE *file = fopen(filename, "rb");
+    env->ReleaseStringUTFChars(path, filename);
+    if (!file) return JNI_FALSE;
+    constexpr size_t kSupplementSize = 23026 * peerlink::kEditRecordSize;
+    std::vector<uint8_t> supplement(kSupplementSize);
+    const bool read_ok = fread(supplement.data(), 1, supplement.size(), file) == supplement.size() &&
+                         fgetc(file) == EOF && !ferror(file);
+    fclose(file);
+    if (!read_ok) return JNI_FALSE;
+    TaskLock lock;
+    if (!lock.manager) return JNI_FALSE;
+    uintptr_t owner = *reinterpret_cast<uintptr_t *>(g_base + 0xa5fb348);
+    if (!owner || *reinterpret_cast<uint32_t *>(owner + 0x30) != 4) return JNI_FALSE;
+    uintptr_t work = *reinterpret_cast<uintptr_t *>(owner + 0x50);
+    if (!work) return JNI_FALSE;
+    auto *count = reinterpret_cast<uint32_t *>(work + 0x66b0c4);
+    auto *records = reinterpret_cast<uint8_t *>(work + 0x80e80);
+    if (!*count || *count > peerlink::kEditRecordCapacity) return JNI_FALSE;
+    const size_t original_count = *count;
+    std::vector<uint8_t> merged;
+    const auto result = peerlink::mergeEditRecords(records, original_count * peerlink::kEditRecordSize,
+                                                    supplement.data(), supplement.size(), merged);
+    if (!result.ok) return JNI_FALSE;
+    std::memcpy(records, merged.data(), merged.size());
+    *count = static_cast<uint32_t>(merged.size() / peerlink::kEditRecordSize);
+    peerlink_journal("EDIT_WORK_SUPPLEMENT before=%zu added=%zu after=%u", original_count, result.added, *count);
+    return JNI_TRUE;
 }
 
 JNIEXPORT jstring JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeStartupInfo(
