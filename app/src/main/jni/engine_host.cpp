@@ -57,6 +57,8 @@ const char *peerlink_null_client_rhi_diagnostics();
 #define TAG "PeerlinkEngineHost"
 namespace {
 constexpr uint64_t kEngineSize = 161937720ULL;
+constexpr uint64_t kMatchReadyWindowMs = 150'000;
+constexpr uint64_t kMatchSetupSyncBudgetMs = 90'000;
 uintptr_t g_base = 0;
 uintptr_t g_client = 0;
 uint32_t g_uid = 0;
@@ -72,6 +74,7 @@ uintptr_t g_settings_sync_task = 0;
 bool g_settings_sync_complete = false;
 std::atomic<uint32_t> g_settings_sync_state{0};
 uint64_t g_settings_sync_started_ms = 0;
+bool g_lineup_deadline_extended = false;
 std::array<uintptr_t, 10> g_settings_sync_vtable{};
 
 void settings_sync_tick(uintptr_t task) {
@@ -227,14 +230,14 @@ uint64_t monotonic_ms() {
     clock_gettime(CLOCK_MONOTONIC, &now);
     return static_cast<uint64_t>(now.tv_sec) * 1000 + now.tv_nsec / 1000000;
 }
-// Task roots own their children. Find the task again under TaskLock before
-// reading it, rather than dereferencing a pointer that may have been detached.
-uintptr_t attached_task(uintptr_t manager, uintptr_t target, uintptr_t vtable) {
-    if (!manager || !target) return 0;
+// Task roots own their children. Search the live tree under TaskLock, using
+// the task's address when the host has retained it.
+uintptr_t attached_task(uintptr_t manager, uintptr_t vtable, uintptr_t target = 0) {
+    if (!manager) return 0;
     unsigned visited = 0;
     auto walk = [&](auto &&self, uintptr_t node, unsigned depth) -> uintptr_t {
         if (!node || depth > 16 || ++visited > 800) return 0;
-        if (node == target && *reinterpret_cast<uintptr_t *>(node) == vtable) return node;
+        if ((!target || node == target) && *reinterpret_cast<uintptr_t *>(node) == vtable) return node;
         uintptr_t first = *reinterpret_cast<uintptr_t *>(node + 0x40), child = first;
         if (!first) return 0;
         unsigned count = 0;
@@ -248,6 +251,21 @@ uintptr_t attached_task(uintptr_t manager, uintptr_t target, uintptr_t vtable) {
     for (unsigned i = 0; i < 4; ++i)
         if (uintptr_t found = walk(walk, *reinterpret_cast<uintptr_t *>(manager + 0x118 + i * 8), 0)) return found;
     return 0;
+}
+void allow_lineup_ready_window(uintptr_t manager) {
+    if (g_lineup_deadline_extended) return;
+    // The pinned build's MatchSettingsEnd task starts its 30-second deadline
+    // on construction, while the other player can still be choosing a lineup.
+    const uintptr_t task = attached_task(manager, g_base + 0x9972240);
+    if (!task || *reinterpret_cast<const uint32_t *>(task + 0x90) > 1 ||
+        !*reinterpret_cast<const uintptr_t *>(task + 0xa0) ||
+        *reinterpret_cast<const uintptr_t *>(task + 0xa8) != g_settings_sync_task) return;
+
+    auto &deadline = *reinterpret_cast<uint64_t *>(task + 0x98);
+    deadline += kMatchReadyWindowMs;
+    g_lineup_deadline_extended = true;
+    __android_log_print(ANDROID_LOG_INFO, TAG, "MATCH_LINEUP_WAIT extendedByMs=%llu",
+                        static_cast<unsigned long long>(kMatchReadyWindowMs));
 }
 bool input_event(JNIEnv *env, jobject event, bool motion) {
     if (!event || env->ExceptionCheck()) return false;
@@ -529,7 +547,7 @@ JNIEXPORT jstring JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeLoadingD
                                         stop, sizeof(stop));
         text += " "; text += stop;
     } else text += " simulationWait=unavailable";
-    uintptr_t user_sync = attached_task(lock.manager, g_user_sync_task, g_base + 0x990d9c8);
+    uintptr_t user_sync = g_user_sync_task ? attached_task(lock.manager, g_base + 0x990d9c8, g_user_sync_task) : 0;
     if (user_sync) text += " userDataSyncState=" + std::to_string(*reinterpret_cast<uint32_t *>(user_sync + 0x70));
     uintptr_t root = entry<uintptr_t (*)()>(0x7a87db8)();
     uintptr_t info = root ? *reinterpret_cast<uintptr_t *>(root + 0x20) : 0;
@@ -581,7 +599,8 @@ JNIEXPORT jstring JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeLoadingD
     for (unsigned i = 0; i < 4; ++i) walk(walk, *reinterpret_cast<uintptr_t *>(lock.manager + 0x118 + i * 8), 0);
     text += "\nMATCH_SETUP_SYNC started=" + std::to_string(g_settings_sync_task != 0) +
         " complete=" + std::to_string(g_settings_sync_complete) +
-        " state=" + std::to_string(g_settings_sync_state.load(std::memory_order_acquire));
+        " state=" + std::to_string(g_settings_sync_state.load(std::memory_order_acquire)) +
+        " lineupWindowExtended=" + std::to_string(g_lineup_deadline_extended);
     uintptr_t settings_task = *reinterpret_cast<uintptr_t *>(g_base + 0xa5c8310);
     text += " taskPresent=" + std::to_string(settings_task != 0);
     uintptr_t owner = *reinterpret_cast<uintptr_t *>(g_base + 0xa5fb348);
@@ -678,7 +697,7 @@ JNIEXPORT jint JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeAdvanceMatc
     if (g_match_stage == 1 && model && *reinterpret_cast<uint32_t *>(model + 0x7b8) == 5 &&
         *reinterpret_cast<unsigned char *>(model + 0x7f1)) {
         if (!g_user_sync_complete) {
-            uintptr_t task = attached_task(lock.manager, g_user_sync_task, g_base + 0x990d9c8);
+            uintptr_t task = attached_task(lock.manager, g_base + 0x990d9c8, g_user_sync_task);
             if (!task) return -205;
             uint32_t state = *reinterpret_cast<uint32_t *>(task + 0x70);
             // Original 7b48d08 writes 4 only after both native synchronization
@@ -740,7 +759,9 @@ JNIEXPORT jint JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeAdvanceMatc
             const uintptr_t table = *reinterpret_cast<uintptr_t *>(task);
             if (table != g_base + 0x990c778 &&
                 table != reinterpret_cast<uintptr_t>(g_settings_sync_vtable.data() + 2)) return -216;
-            if (monotonic_ms() - g_settings_sync_started_ms >= 90000) return -218;
+            allow_lineup_ready_window(lock.manager);
+            if (monotonic_ms() - g_settings_sync_started_ms >= kMatchReadyWindowMs + kMatchSetupSyncBudgetMs)
+                return -218;
         }
     }
     const bool setup_synchronized = g_user_sync_complete && g_settings_sync_complete;
