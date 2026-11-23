@@ -12,6 +12,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import com.peerlink.app.bot.BotMatchDriver
 import com.peerlink.app.bot.BotHeapRecording
+import com.peerlink.app.bot.BotMatchDiagnostics
 import com.peerlink.app.bot.BotMode
 import com.peerlink.app.bot.EngineHost
 import com.peerlink.app.bot.PeerSlot
@@ -114,13 +115,25 @@ object PlayRoomController {
                 val verify: ((Int) -> Unit)? = if (recordMemory) {
                     val id = BotHeapRecording.prepare(ctx)
                     recording = id
-                    { pid: Int ->
+                    preparationNote("Freeing RAM before loading the bot…")
+                    val cleaned = BotMatchDiagnostics.reclaimBeforeRoom(ctx, id)
+                    preparationNote(if (cleaned) "Opening the bot’s room…" else
+                        "Opening the room. RAM cleanup results are in diagnostics.")
+                    val verifyRecording: (Int) -> Unit = { pid ->
                         preparationNote("Checking that Android recorded a bot allocation…")
                         BotHeapRecording.startAndVerify(ctx, id, pid) { EngineHost.probeHeapRecording(pid) }
                     }
+                    verifyRecording
                 } else null
-                onRoomCreated(be.createRoom(ctx, allowResourceDownload, verify))
+                val number = be.createRoom(ctx, allowResourceDownload, verify)
                 opened = true
+                val schedulerStarted = recording?.takeIf { number.any(Char::isLetterOrDigit) }?.let { id ->
+                    preparationNote("Starting the scheduler recording…")
+                    BotMatchDiagnostics.startScheduler(ctx, id, EngineHost.enginePid)
+                }
+                onRoomCreated(number)
+                if (schedulerStarted == false)
+                    preparationNote("Scheduler recording failed. Export diagnostics for details.")
             } catch (missing: com.peerlink.app.bot.GameResourcePacks.MissingResources) {
                 _state.value = RoomState.FilesNeeded(missing.missingFiles, missing.missingBytes, missing.totalFiles, recordMemory)
             } catch (t: Throwable) {

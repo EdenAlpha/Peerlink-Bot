@@ -1,0 +1,44 @@
+buffers { size_kb: 4096 fill_policy: RING_BUFFER }
+duration_ms: 900000
+write_into_file: true
+flush_period_ms: 2000
+file_write_period_ms: 2000
+max_file_size_bytes: 50331648
+compression_type: COMPRESSION_TYPE_DEFLATE
+unique_session_name: "peerlink-scheduler"
+builtin_data_sources { primary_trace_clock: BUILTIN_CLOCK_MONOTONIC }
+
+data_sources { config {
+  name: "linux.ftrace"
+  ftrace_config {
+    compact_sched { enabled: true }
+    buffer_size_kb: 256
+    drain_period_ms: 250
+    ftrace_events: "sched/sched_switch"
+    ftrace_events: "sched/sched_waking"
+    ftrace_events: "sched/sched_blocked_reason"
+    ftrace_events: "task/task_newtask"
+    ftrace_events: "task/task_rename"
+    ftrace_events: "power/cpu_frequency"
+    ftrace_events: "vmscan/mm_vmscan_direct_reclaim_begin"
+    ftrace_events: "vmscan/mm_vmscan_direct_reclaim_end"
+    atrace_categories: "dalvik"
+  }
+} }
+data_sources { config {
+  name: "linux.process_stats"
+  process_stats_config {
+    scan_all_processes_on_start: true
+    record_thread_names: true
+  }
+} }
+data_sources { config {
+  name: "linux.sys_stats"
+  sys_stats_config {
+    meminfo_period_ms: 1000
+    meminfo_counters: MEMINFO_MEM_AVAILABLE
+    vmstat_period_ms: 1000
+    vmstat_counters: VMSTAT_PSWPIN
+    vmstat_counters: VMSTAT_PGMAJFAULT
+  }
+} }

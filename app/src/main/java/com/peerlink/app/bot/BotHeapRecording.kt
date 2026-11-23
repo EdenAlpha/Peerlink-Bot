@@ -1,10 +1,8 @@
 package com.peerlink.app.bot
 
 import android.content.Context
-import android.os.Process
 import android.os.SystemClock
 import com.peerlink.app.core.AppState
-import com.peerlink.app.godmode.GodModeManager
 import java.io.File
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
@@ -47,11 +45,9 @@ internal object BotHeapRecording {
         """.trimIndent()
     }
 
-    private fun remote(id: String) = "/data/misc/perfetto-traces/peerlink-bot-$id.pftrace"
     private fun key(id: String) = "peerlink-bot-$id"
+    private fun remote(id: String) = BotPerfetto.tracePath(key(id))
     private fun directory(ctx: Context) = File(ctx.filesDir, DIRECTORY)
-    private fun asApp(ctx: Context) = "run-as ${ctx.packageName} --user ${Process.myUid() / 100000}"
-    private fun shell(command: String) = GodModeManager.runUserShell(command, 15_000)
     private fun status(ctx: Context, id: String, message: String) {
         File(directory(ctx), "$id.txt").appendText("${System.currentTimeMillis()} $message\n")
         AppState.appendLog("[BOT-MEMORY] $message")
@@ -60,8 +56,8 @@ internal object BotHeapRecording {
     @Synchronized fun prepare(ctx: Context): String {
         val dir = directory(ctx)
         check(dir.isDirectory || dir.mkdirs()) { "PeerLink could not open its recording folder." }
-        val ready = shell("command -v perfetto >/dev/null || { echo 'Perfetto is unavailable'; exit 1; }\n" +
-            "${asApp(ctx)} sh -c 'test -d files/$DIRECTORY'")
+        val ready = BotPerfetto.shell("command -v perfetto >/dev/null || { echo 'Perfetto is unavailable'; exit 1; }\n" +
+            "${BotPerfetto.asApp(ctx)} sh -c 'test -d files/$DIRECTORY'")
         if (!ready.ok) {
             val detail = ready.output.trim().take(300).ifBlank {
                 if (ready.exitCode == -1) "Prime did not respond." else "Android could not open the private recording folder."
@@ -90,7 +86,7 @@ internal object BotHeapRecording {
         val traceConfig = config(ctx.packageName)
         File(directory(ctx), "$id.pending").writeText(pid.toString())
         status(ctx, id, "attaching_to_prepared_bot pid=$pid")
-        val run = shell("printf '%s\\n' '$traceConfig' | perfetto --txt -c - --detach=${key(id)} -o ${remote(id)}")
+        val run = BotPerfetto.start(key(id), traceConfig)
         if (!run.ok) {
             status(ctx, id, "recorder_start_failed exit=${run.exitCode} ${run.output.take(300)}")
             error("Android could not start the memory recording. Open Export diagnostics for the reason.")
@@ -150,19 +146,8 @@ internal object BotHeapRecording {
         error("Android started the recorder but supplied no live allocation stack for this bot. Export diagnostics now.")
     }
 
-    // Copy a fixed prefix through a pipe so that Prime never receives the trace as JSON.
-    private fun copyPrefix(ctx: Context, id: String, output: File): Boolean {
-        val source = remote(id)
-        val command = """
-            n=$(wc -c < $source) || exit 1
-            [ "${'$'}n" -gt 0 ] && [ "${'$'}n" -le $MAX_BYTES ] || exit 1
-            head -c "${'$'}n" $source | ${asApp(ctx)} sh -c 'umask 077; cat > files/$DIRECTORY/${output.name}' || exit 1
-            printf '%s' "${'$'}n"
-        """.trimIndent()
-        val result = shell(command)
-        val expected = result.output.trim().toLongOrNull() ?: return false
-        return result.ok && expected in 1..MAX_BYTES && output.isFile && output.length() == expected
-    }
+    private fun copyPrefix(ctx: Context, id: String, output: File) =
+        BotPerfetto.copyPrefix(ctx, key(id), DIRECTORY, output, MAX_BYTES)
 
     fun observing(pid: Int) = pid > 0 && pid == recordingPid.get()
 
@@ -177,9 +162,7 @@ internal object BotHeapRecording {
         val marker = File(dir, "$id.pending")
         if (!marker.exists()) return true
         if (activeId == id) { recordingPid.set(0); activeId = null }
-        // Exit 2 specifically means there is no detached session, including a natural timeout.
-        val stop = shell("perfetto --attach=${key(id)} --stop >/dev/null 2>&1; rc=\$?; [ \"\$rc\" = 0 ] || [ \"\$rc\" = 2 ]")
-        if (!stop.ok) return false
+        if (!BotPerfetto.stop(key(id))) return false
         val part = File(dir, "$id.part")
         try {
             if (copyPrefix(ctx, id, part)) {
@@ -187,10 +170,10 @@ internal object BotHeapRecording {
                     StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
                 status(ctx, id, "saved pid=${marker.readText().ifBlank { "unknown" }} reason=$reason")
             } else {
-                if (!shell("[ ! -s ${remote(id)} ]").ok) return false
+                if (!BotPerfetto.shell("[ ! -s ${remote(id)} ]").ok) return false
                 if (!File(dir, "$id.pftrace").isFile) status(ctx, id, "empty_recording reason=$reason")
             }
-            if (!shell("rm -f ${remote(id)}").ok) return false
+            if (!BotPerfetto.shell("rm -f ${remote(id)}").ok) return false
             marker.delete()
             return !marker.exists()
         } finally { part.delete() }

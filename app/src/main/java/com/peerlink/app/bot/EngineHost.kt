@@ -58,6 +58,7 @@ object EngineHost {
                     nextFlowReportAt = observedAt + 5000
                     PeerSlot.logFlow(if (firstFailure) "first_native_failure" else "native_monitor")
                 }
+                if (firstFailure) context?.let { BotMatchDiagnostics.completed(it, enginePid, "match_disconnected") }
             } else pending.remove(message.arg1)?.complete(data)
         }
     })
@@ -81,6 +82,7 @@ object EngineHost {
         val since = engineStartedAt
         context?.let { owner ->
             if (BotHeapRecording.observing(lostPid)) BotHeapRecording.completed(owner, lostPid, "bot_process_ended")
+            BotMatchDiagnostics.completed(owner, lostPid, "bot_process_ended")
             EngineProcessExitReports.observe(owner, lostPid, since) { line ->
                 AppState.appendLog("[BOT-DIAG] $line")
             }
@@ -224,8 +226,10 @@ object EngineHost {
             Bundle().apply { putInt("pid", pid) }, timeout = 3).getBoolean("ok")
     internal fun probePreviewCallback(): Boolean = request(EngineProtocol.PROBE_PREVIEW).getBoolean("ok")
     fun stop(reason: String = "engine_host_stop") {
-        if (BotHeapRecording.observing(enginePid))
-            context?.let { BotHeapRecording.completed(it, enginePid, "bot_stopped") }
+        context?.let { owner ->
+            if (BotHeapRecording.observing(enginePid)) BotHeapRecording.completed(owner, enginePid, "bot_stopped")
+            BotMatchDiagnostics.completed(owner, enginePid, "bot_stopped")
+        }
         stopRequestedAt = SystemClock.elapsedRealtime()
         AppState.appendLog("[BOT-DIAG] PEERLINK_STOP component=engine_host reason=$reason observedAtMs=$stopRequestedAt")
         PeerSlot.logFlow("engine_host_stop")

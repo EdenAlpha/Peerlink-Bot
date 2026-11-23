@@ -392,6 +392,12 @@ class MainActivity : AppCompatActivity(), NsdDiscovery.NsdCallback {
                                 if (heap.pending) entries.add(ZipEntryData(name = "bot_memory/pending.txt", text =
                                     if (heap.starting) "The bot is still preparing. Export again after the bot reaches team setup or stops.\n"
                                     else "A bot recording is still on this phone. Turn on Prime and export again to retrieve it.\n"))
+                                val matchDiagnostics = com.peerlink.app.bot.BotMatchDiagnostics.export(this@MainActivity)
+                                for (file in matchDiagnostics.files)
+                                    entries.add(ZipEntryData(name = "scheduler_trace/${file.name}", file = file))
+                                if (matchDiagnostics.pending)
+                                    entries.add(ZipEntryData(name = "scheduler_trace/pending.txt", text =
+                                        "A scheduler recording is still on this phone. Turn on Prime and export again to retrieve it.\n"))
                                 java.io.File(filesDir, "engine-events").listFiles()
                                     ?.filter { it.isFile && it.name.matches(Regex("[0-9]+-[0-9]+\\.log")) }
                                     ?.sortedBy { it.name }?.takeLast(8)?.forEach { eventLog ->
@@ -448,6 +454,8 @@ class MainActivity : AppCompatActivity(), NsdDiscovery.NsdCallback {
                                             appendLine("- engine_exit_report.txt : Android bot-process exit history queried at export, including retained earlier attempts")
                                             appendLine("- engine_events/ : native frame checks, ball transitions, match states, and process stop events")
                                             if (heap.files.isNotEmpty() || heap.pending) appendLine("- bot_memory/ : requested bot allocation profiles and recording status")
+                                            if (matchDiagnostics.files.isNotEmpty() || matchDiagnostics.pending)
+                                                appendLine("- scheduler_trace/ : pre-match RAM cleanup reports and latest scheduler trace")
                                             appendLine("- game_file_audit.txt : last startup file audit, retained across session-log resets")
                                             if (!javaCrash.isNullOrBlank()) appendLine("- java_crash_report.txt : latest Java exception report")
                                             if (udpTrace.isNotBlank()) {

@@ -243,6 +243,8 @@ private fun MatchRoomCard(
                 MatchSecondaryButton("Create room without recording", Icons.Rounded.ArrowForward) { PlayRoomController.createRoom() }
             } else {
                 MatchSecondaryButton("Record memory and create room", Icons.Rounded.Memory) { PlayRoomController.createRoom(recordMemory = true) }
+                Text("Closes background apps before play and records match diagnostics.",
+                    color = PL.inkSoft, fontSize = 11.5.sp, lineHeight = 17.sp)
             }
         }
     }
