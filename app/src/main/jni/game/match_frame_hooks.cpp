@@ -1,6 +1,7 @@
 #include "match_state_diagnostics.h"
 #include "diagnostic_journal.h"
 #include "executable_patch.h"
+#include "fallback_cut_clock.h"
 
 #include <array>
 #include <cerrno>
@@ -95,6 +96,83 @@ uint32_t branch_link(uintptr_t from, uintptr_t to) {
     return 0x94000000 | (static_cast<uint32_t>(distance / 4) & 0x03ffffff);
 }
 
+template<class T> T &cut_field(uintptr_t cut, uintptr_t offset) {
+    return *reinterpret_cast<T *>(cut + offset);
+}
+
+extern "C" __attribute__((used, noinline, visibility("hidden")))
+void peerlink_apply_fallback_cut_clock(uintptr_t cut, uint32_t ready, float elapsed, float relative) {
+    static thread_local peerlink::FallbackCutClock clock;
+    float &position = cut_field<float>(cut, 0xb4);
+    float &relative_position = cut_field<float>(cut, 0xd8);
+    float &seek = cut_field<float>(cut, 0xc4);
+    if (ready && cut_field<uint32_t>(cut, 0xa8) == 5 && !cut_field<uintptr_t>(cut, 0x18)) {
+        const peerlink::CutClockSample sample{cut, position, relative_position, seek,
+            cut_field<float>(cut, 0xb8), cut_field<float>(cut, 0xb08), cut_field<float>(cut, 0xb14)};
+        float corrected;
+        if (clock.advance(sample, corrected)) {
+            if (sample.elapsed < sample.duration && corrected == sample.duration) {
+                peerlink_journal("MATCH_FALLBACK_CLOCK_LIMIT ticks=%u tickRate=%.9g speed=%.9g original=%.9g corrected=%.9g duration=%.9g",
+                    clock.ticks(), double(sample.tick_rate), double(sample.speed), double(elapsed),
+                    double(corrected), double(sample.duration));
+            }
+            elapsed = relative = corrected;
+        }
+    } else {
+        clock = {};
+    }
+    position = elapsed;
+    relative_position = relative;
+    seek = 0;
+}
+
+// The pinned update block holds the cut in x19, the playback flag in w8,
+// and the two original store values in s2 and s0 respectively.
+__attribute__((naked)) void apply_fallback_cut_clock() {
+    __asm__ volatile("mov x0, x19\nmov w1, w8\nfmov s1, s0\nfmov s0, s2\nb peerlink_apply_fallback_cut_clock");
+}
+
+bool patch_fallback_cut_clock(uintptr_t base, peerlink::CodePatchFailure &failure) {
+    constexpr uintptr_t start = 0x69f4930;
+    constexpr uintptr_t stores = 0x69f493c;
+    constexpr std::array<uint32_t, 8> original{
+        0xbd40da60, 0x1e212902, 0x1e202820, 0xbd00b662, 0xbd00da60, 0xb900c67f, 0x35fff6c8, 0x1400001f
+    };
+    if (std::memcmp(reinterpret_cast<const void *>(base + start), original.data(), sizeof(original))) {
+        failure = {"instruction_check", 0, 0};
+        return false;
+    }
+    const long page_size = sysconf(_SC_PAGESIZE);
+    if (page_size < 4096 || page_size > 65536 || (page_size & (page_size - 1))) {
+        failure = {"page_size", EINVAL, 0};
+        return false;
+    }
+    constexpr uintptr_t range = 1 << 27;
+    const uintptr_t site = base + stores;
+    void *page = peerlink::reserve_writable_page(site >= range ? site - range : 0x10000,
+                                                site + range, page_size);
+    if (page == MAP_FAILED) {
+        failure = {"clock_mapping", errno, static_cast<size_t>(page_size)};
+        return false;
+    }
+    const Thunk thunk{0x58000050, 0xd61f0200, reinterpret_cast<uintptr_t>(&apply_fallback_cut_clock)};
+    std::memcpy(page, &thunk, sizeof(thunk));
+    const uint32_t call = branch_link(site, reinterpret_cast<uintptr_t>(page));
+    if (!call) {
+        failure = {"clock_branch_range", 0, static_cast<size_t>(page_size)};
+    } else if (mprotect(page, page_size, PROT_READ | PROT_EXEC) != 0) {
+        failure = {"clock_execute", errno, static_cast<size_t>(page_size)};
+    } else {
+        __builtin___clear_cache(static_cast<char *>(page), static_cast<char *>(page) + sizeof(thunk));
+        // The helper replaces the three stores. Reload the sole live volatile
+        // register before the original branch and subsequent native calls.
+        const std::array<uint32_t, 3> patch{call, 0xd503201f, 0x396cfa68}; // nop; ldrb w8, [x19, #0xb3e]
+        if (peerlink::replace_executable_bytes(site, patch.data(), sizeof(patch), &failure)) return true;
+    }
+    munmap(page, page_size);
+    return false;
+}
+
 bool original_call(uintptr_t at, uintptr_t target) {
     return *reinterpret_cast<const uint32_t *>(image_base + at) == branch_link(at, target);
 }
@@ -155,6 +233,19 @@ void install_scene_observers(uintptr_t base, long page_size) {
 }
 } // namespace
 #endif
+
+void peerlink::install_fallback_cut_clock(uintptr_t base) {
+#if defined(__aarch64__)
+    const int saved_errno = errno;
+    CodePatchFailure failure;
+    const bool installed = patch_fallback_cut_clock(base, failure);
+    peerlink_journal("MATCH_FALLBACK_CLOCK installed=%u operation=%s errno=%d",
+        unsigned(installed), failure.operation, failure.error);
+    errno = saved_errno;
+#else
+    (void)base;
+#endif
+}
 
 void peerlink_observe_match_frames(uintptr_t base) {
 #if defined(__aarch64__)

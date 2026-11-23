@@ -2,6 +2,7 @@
 // only Android/JNI adapters are shimmed by tests/shim.
 #include "../app/src/main/jni/peerlink_backend.cpp"
 #include "../app/src/main/jni/process_memory.h"
+#include "../app/src/main/jni/game/fallback_cut_clock.h"
 #include "../app/src/main/jni/game/match_pool_memory.h"
 #include <chrono>
 #include <future>
@@ -61,6 +62,39 @@ static std::array<uint8_t,16> v6(unsigned last) {
 }
 
 int main() {
+    {
+        const auto duration = [](int ticks) { return static_cast<float>(ticks / 27.0) * 60.0f; };
+        for (const int length : {9, 11}) {
+            peerlink::FallbackCutClock clock;
+            peerlink::CutClockSample sample{1, 0, 0, 0, duration(length), 1, 27};
+            float elapsed = 0;
+            int tick = 0;
+            while (tick < length && clock.advance(sample, elapsed)) {
+                ++tick;
+                if (elapsed >= sample.duration) break;
+                sample.elapsed = sample.relative = elapsed;
+            }
+            check("fallback clock reaches the normalized clip limit on the loaded timeline's tick",
+                  tick == length && elapsed == sample.duration);
+        }
+        peerlink::FallbackCutClock clock;
+        peerlink::CutClockSample sample{1, 0, 0, 0, duration(11), 1, 27};
+        float elapsed = 0;
+        check("fallback clock starts at zero", clock.advance(sample, elapsed) && clock.ticks() == 1);
+        sample.elapsed = sample.relative = elapsed;
+        sample.speed = 2;
+        check("a speed change keeps the native clock", !clock.advance(sample, elapsed));
+        sample.speed = 1;
+        check("a nonzero clock cannot resume a discarded count", !clock.advance(sample, elapsed));
+        sample.elapsed = sample.relative = 0;
+        sample.seek = 10;
+        check("an explicit seek keeps the native clock", !clock.advance(sample, elapsed));
+        sample.seek = 0;
+        check("a fresh clip resumes correction", clock.advance(sample, elapsed) && clock.ticks() == 1);
+        sample.elapsed = sample.relative = elapsed;
+        sample.timer = 2;
+        check("a different timer cannot inherit the prior count", !clock.advance(sample, elapsed));
+    }
     {
         using namespace peerlink_match_pool;
         const size_t bytes = capacity + 4096;

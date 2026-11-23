@@ -12,6 +12,7 @@
 #include <sys/mman.h>
 #include <unistd.h>
 #include "executable_patch.h"
+#include "fallback_cut_clock.h"
 namespace {
 using Address = uintptr_t;
 using Init = void (*)(Address);
@@ -204,6 +205,7 @@ void initialize_null_for_android(Address instance) {
         // Keep normal client/UI logic enabled. Actual rendering still uses
         // the verified original NullDrv vtable.
         *reinterpret_cast<uint8_t *>(null_flag) = 0;
+        if (skip_missing_mesh_wait) peerlink::install_fallback_cut_clock(engine);
         applied.store(true, std::memory_order_release);
     } else {
         if (!profile_matches) record_error("operation=android_profile_verify result=mismatch");
