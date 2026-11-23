@@ -36,7 +36,8 @@ import android.content.Intent
 interface BotRoomBackend {
     /** Create a room as the bot; returns the room number to show the user. */
     suspend fun createRoom(ctx: Context, allowResourceDownload: Boolean = false,
-                           verifyEngine: ((Int) -> Unit)? = null): String
+                           verifyEngine: ((Int) -> Unit)? = null,
+                           onMatchStarting: (() -> Unit)? = null): String
 }
 
 /**
@@ -125,15 +126,19 @@ object PlayRoomController {
                     }
                     verifyRecording
                 } else null
-                val number = be.createRoom(ctx, allowResourceDownload, verify)
-                opened = true
-                val schedulerStarted = recording?.takeIf { number.any(Char::isLetterOrDigit) }?.let { id ->
-                    preparationNote("Starting the scheduler recording…")
-                    BotMatchDiagnostics.startScheduler(ctx, id, EngineHost.enginePid)
+                val startScheduler = recording?.let { id ->
+                    val start: () -> Unit = {
+                        val pid = EngineHost.enginePid
+                        io.launch {
+                            if (EngineHost.isReady && pid == EngineHost.enginePid &&
+                                !BotMatchDiagnostics.startScheduler(ctx, id, pid))
+                                preparationNote("Scheduler recording failed. Export diagnostics for details.")
+                        }
+                    }
+                    start
                 }
-                onRoomCreated(number)
-                if (schedulerStarted == false)
-                    preparationNote("Scheduler recording failed. Export diagnostics for details.")
+                onRoomCreated(be.createRoom(ctx, allowResourceDownload, verify, startScheduler))
+                opened = true
             } catch (missing: com.peerlink.app.bot.GameResourcePacks.MissingResources) {
                 _state.value = RoomState.FilesNeeded(missing.missingFiles, missing.missingBytes, missing.totalFiles, recordMemory)
             } catch (t: Throwable) {

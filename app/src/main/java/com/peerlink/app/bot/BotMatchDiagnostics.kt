@@ -34,10 +34,12 @@ internal object BotMatchDiagnostics {
             return false
         }
         return runCatching {
+            val dir = directory(ctx)
+            for (previous in pendingIds(dir)) runCatching { finish(ctx, previous, "next_room") }
             val script = ctx.assets.open("prime-room-cleanup.sh").bufferedReader().use { it.readText() }
             val result = BotPerfetto.shell(script, 30_000)
             record(ctx, id, "RAM cleanup exit=${result.exitCode}\n${result.output}")
-            prune(directory(ctx))
+            prune(dir)
             result.ok
         }.getOrElse {
             record(ctx, id, "RAM cleanup failed: ${it.message ?: it.javaClass.simpleName}")
@@ -50,11 +52,11 @@ internal object BotMatchDiagnostics {
         return runCatching {
             val dir = directory(ctx)
             check(dir.isDirectory || dir.mkdirs()) { "Could not open the scheduler recording folder" }
-            for (previous in pendingIds(dir)) runCatching { finish(ctx, previous, "next_room") }
             check(BotPerfetto.shell("perfetto --query | grep -q 'linux.ftrace'").ok) {
                 "Android scheduler tracing is unavailable"
             }
-            val config = ctx.assets.open("bot-scheduler.pbtxt").bufferedReader().use { it.readText() }
+            val config = ctx.assets.open("bot-scheduler.pbtxt").bufferedReader().use { it.readText() } +
+                "\nunique_session_name: \"${key(id)}\"\n"
             val marker = File(dir, "$id.pending")
             check(marker.createNewFile()) { "Scheduler recording already exists" }
             val started = BotPerfetto.start(key(id), config)
@@ -83,7 +85,10 @@ internal object BotMatchDiagnostics {
         if (active?.id == id) active = null
         val key = key(id)
         val source = BotPerfetto.tracePath(key)
-        if (!BotPerfetto.stop(key)) return false
+        if (!BotPerfetto.stop(key)) {
+            record(ctx, id, "Scheduler save deferred reason=$reason stage=stop")
+            return false
+        }
         val part = File(dir, "$id.part")
         val trace = File(dir, "$id.pftrace")
         try {
@@ -91,7 +96,10 @@ internal object BotMatchDiagnostics {
                 Files.move(part.toPath(), trace.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
                 record(ctx, id, "Scheduler recording saved bytes=${trace.length()} reason=$reason")
             } else {
-                if (!BotPerfetto.shell("[ ! -s $source ]").ok) return false
+                if (!BotPerfetto.shell("[ ! -s $source ]").ok) {
+                    record(ctx, id, "Scheduler save deferred reason=$reason stage=copy")
+                    return false
+                }
                 if (!trace.isFile) record(ctx, id, "Scheduler recording was empty reason=$reason")
             }
             if (!BotPerfetto.shell("rm -f $source").ok) return false
@@ -110,7 +118,8 @@ internal object BotMatchDiagnostics {
             it.isFile && validId.matches(it.nameWithoutExtension)
         }
         val reports = files.filter { it.extension == "txt" }.sortedBy { it.name }
-        val trace = files.filter { it.extension == "pftrace" }.maxByOrNull { it.name }
+        val trace = reports.lastOrNull()?.let { File(dir, "${it.nameWithoutExtension}.pftrace") }
+            ?.takeIf { it.isFile }
         return Export(reports + listOfNotNull(trace), pendingIds(dir).isNotEmpty())
     }
 

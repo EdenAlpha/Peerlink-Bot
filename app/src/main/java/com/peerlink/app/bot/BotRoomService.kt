@@ -29,7 +29,8 @@ import com.peerlink.app.ui.MainActivity
  */
 object BotRoomService : BotRoomBackend {
 
-    override suspend fun createRoom(ctx: Context, allowResourceDownload: Boolean, verifyEngine: ((Int) -> Unit)?): String {
+    override suspend fun createRoom(ctx: Context, allowResourceDownload: Boolean, verifyEngine: ((Int) -> Unit)?,
+                                    onMatchStarting: (() -> Unit)?): String {
         val loaded = BotIdentity.load(ctx)
         val identity = if (loaded != null) loaded else {
             // First room on this phone: mint the bot's account (the mint.py
@@ -111,7 +112,7 @@ object BotRoomService : BotRoomBackend {
             if (rid <= 0L) throw KgsGate.GateException("Room opened without a valid matchmaking ID.")
             PeerBotService.start(ctx, num)
             startGameVpn(ctx)
-            check(BotMatchDriver.start(gate, rid, num)) { "The previous bot room is still stopping" }
+            check(BotMatchDriver.start(gate, rid, num, onMatchStarting)) { "The previous bot room is still stopping" }
             roomOpened = true
             return num
         } finally {

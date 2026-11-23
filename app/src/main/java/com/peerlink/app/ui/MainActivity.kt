@@ -455,7 +455,7 @@ class MainActivity : AppCompatActivity(), NsdDiscovery.NsdCallback {
                                             appendLine("- engine_events/ : native frame checks, ball transitions, match states, and process stop events")
                                             if (heap.files.isNotEmpty() || heap.pending) appendLine("- bot_memory/ : requested bot allocation profiles and recording status")
                                             if (matchDiagnostics.files.isNotEmpty() || matchDiagnostics.pending)
-                                                appendLine("- scheduler_trace/ : pre-match RAM cleanup reports and latest scheduler trace")
+                                                appendLine("- scheduler_trace/ : RAM cleanup reports and scheduler trace for the latest recording attempt")
                                             appendLine("- game_file_audit.txt : last startup file audit, retained across session-log resets")
                                             if (!javaCrash.isNullOrBlank()) appendLine("- java_crash_report.txt : latest Java exception report")
                                             if (udpTrace.isNotBlank()) {

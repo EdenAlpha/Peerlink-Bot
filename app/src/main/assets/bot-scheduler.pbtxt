@@ -5,7 +5,6 @@ flush_period_ms: 2000
 file_write_period_ms: 2000
 max_file_size_bytes: 50331648
 compression_type: COMPRESSION_TYPE_DEFLATE
-unique_session_name: "peerlink-scheduler"
 builtin_data_sources { primary_trace_clock: BUILTIN_CLOCK_MONOTONIC }
 
 data_sources { config {

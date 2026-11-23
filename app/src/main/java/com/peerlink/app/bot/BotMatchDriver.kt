@@ -51,10 +51,10 @@ object BotMatchDriver {
     private var running = false
 
     /** Start the driver for a freshly created room. False if one is running. */
-    fun start(gate: KgsGate, rid: Long, roomNumber: String): Boolean {
+    fun start(gate: KgsGate, rid: Long, roomNumber: String, onMatchStarting: (() -> Unit)? = null): Boolean {
         if (running) return false
         running = true
-        thread(name = "bot-match-driver") { run(gate, rid, roomNumber) }
+        thread(name = "bot-match-driver") { run(gate, rid, roomNumber, onMatchStarting) }
         return true
     }
 
@@ -80,7 +80,7 @@ object BotMatchDriver {
     private fun already(result: String?): Boolean =
         result?.startsWith("ERR_ALREADY") == true
 
-    private fun run(gate: KgsGate, rid: Long, roomNumber: String) {
+    private fun run(gate: KgsGate, rid: Long, roomNumber: String, onMatchStarting: (() -> Unit)?) {
         val flow = BotMatchFlow(gate, gate, BotMatchFlow.SquadSource { emptyList() })
         val self = gate.uid
         try {
@@ -228,6 +228,8 @@ object BotMatchDriver {
             // slot live NOW (reactive) and fill its target once the session
             // reply carries the game's address (arm is idempotent).
             PeerSlot.arm(opp, gate.uid, "", "", 0)
+            runCatching { onMatchStarting?.invoke() }
+                .onFailure { log("Scheduler start request failed: ${it.javaClass.simpleName}") }
 
             // -- game_session + the opponent's address (retried together:
             //    the reply must ALSO contain the address block).
