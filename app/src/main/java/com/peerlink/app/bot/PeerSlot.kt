@@ -1,6 +1,7 @@
 package com.peerlink.app.bot
 
 import com.peerlink.app.core.AppState
+import android.os.Process
 import android.os.SystemClock
 import com.peerlink.app.bot.PacketFlowTrace.Point
 import java.net.DatagramPacket
@@ -109,6 +110,23 @@ object PeerSlot {
     fun logFlow(trigger: String) {
         AppState.appendLog("[BOT-FLOW] trigger=$trigger armed=$armed engineAttached=$engineAttached " + flowTrace.summary())
     }
+
+    /** Give the blocking socket workers a chance to run when both engines are active. */
+    private fun prioritizeForwarder() {
+        val tid = Process.myTid()
+        val name = Thread.currentThread().name
+        val target = Process.THREAD_PRIORITY_DISPLAY
+        runCatching {
+            val before = Process.getThreadPriority(tid)
+            if (before > target) Process.setThreadPriority(tid, target)
+            AppState.appendLog("[BOT-FLOW] THREAD_PRIORITY name=$name tid=$tid beforeNice=$before " +
+                "actualNice=${Process.getThreadPriority(tid)}")
+        }.onFailure {
+            AppState.appendLog("[BOT-FLOW] THREAD_PRIORITY name=$name tid=$tid requestedNice=$target " +
+                "result=${it.javaClass.simpleName}")
+        }
+    }
+
     private fun noteDrop(reason: String) {
         val count = flowTrace.drop(reason)
         if (count == 1L || count % 1000 == 0L)
@@ -238,6 +256,7 @@ object PeerSlot {
      * dropped, honestly.
      */
     private fun receiveLoop(s: DatagramSocket) {
+        prioritizeForwarder()
         val buf = ByteArray(UDP_RECEIVE_CAPACITY)
         val pkt = DatagramPacket(buf, buf.size)
         var rxCount = 0
@@ -441,6 +460,7 @@ object PeerSlot {
         engineRxThread?.interrupt()
         engineRxThread = thread(name = "bot-engine-rx") {
             fun pump(s: DatagramSocket, isV6: Boolean, reflexive: Boolean) {
+                prioritizeForwarder()
                 val buf = ByteArray(UDP_RECEIVE_CAPACITY)
                 val pkt = DatagramPacket(buf, buf.size)
                 while (armed && !s.isClosed) {

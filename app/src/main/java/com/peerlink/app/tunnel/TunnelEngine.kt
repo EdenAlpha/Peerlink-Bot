@@ -3761,7 +3761,10 @@ fun exactWifiUdpNetwork(): android.net.Network? {
             if (tcp.isFIN() && !tcb.uploadFinished && finPosition == (tcb.myAcknowledgementNum and 0xffffffffL)) {
                 tcb.myAcknowledgementNum = (finPosition + 1) and 0xffffffffL
                 tcb.uploadFinished = true
-                if (!tcb.upload.hasPending) tcb.channel.shutdownOutput()
+                if (!tcb.upload.hasPending) {
+                    tcb.channel.shutdownOutput()
+                    updateTcpWriteInterest(tcb)
+                }
                 if (tcb.isIpv6) processIpv6Fin(tcb) else processFin(tcb)
                 return@synchronized
             }
@@ -3782,7 +3785,12 @@ fun exactWifiUdpNetwork(): android.net.Network? {
         val key = tcb.selectionKey ?: return
         val ops = key.interestOps()
         val next = if (tcb.upload.hasPending) ops or SelectionKey.OP_WRITE else ops and SelectionKey.OP_WRITE.inv()
-        if (next != ops) {
+        if (next == 0 && tcb.uploadFinished) {
+            // Android's poll selector can keep waking on a TCP hangup with zero interests.
+            // Both directions have finished, so the channel can leave the selector.
+            tcb.close()
+            key.selector().wakeup()
+        } else if (next != ops) {
             key.interestOps(next)
             key.selector().wakeup()
         }
@@ -3792,8 +3800,8 @@ fun exactWifiUdpNetwork(): android.net.Network? {
         try {
             if (!tcb.upload.hasPending) return
             tcb.upload.onWritable(tcb.channel)
-            updateTcpWriteInterest(tcb)
             if (tcb.uploadFinished && !tcb.upload.hasPending) tcb.channel.shutdownOutput()
+            updateTcpWriteInterest(tcb)
         } catch (e: Exception) {
             if (tcb.isIpv6) sendIpv6RstAndClose(tcb, 0) else sendRstAndClose(tcb, 0)
         }
@@ -3845,6 +3853,7 @@ fun exactWifiUdpNetwork(): android.net.Network? {
                 }
                 tcb.mySequenceNum++
             }
+            updateTcpWriteInterest(tcb)
             return
         }
         buf.flip()

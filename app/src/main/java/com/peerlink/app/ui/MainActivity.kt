@@ -1370,13 +1370,16 @@ class MainActivity : AppCompatActivity(), NsdDiscovery.NsdCallback {
      * score shot as separate files.
      */
     private fun saveZipToDownloads(filename: String, entries: List<ZipEntryData>): Boolean {
+        var pending: Uri? = null
         return try {
             val values = ContentValues().apply {
                 put(MediaStore.Downloads.DISPLAY_NAME, filename)
                 put(MediaStore.Downloads.MIME_TYPE, "application/zip")
+                put(MediaStore.Downloads.IS_PENDING, 1)
             }
             val uri = contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
                 ?: return false
+            pending = uri
             contentResolver.openOutputStream(uri)?.use { output ->
                 java.util.zip.ZipOutputStream(output.buffered(1024 * 1024)).use { zip ->
                     for (entry in entries) {
@@ -1390,10 +1393,18 @@ class MainActivity : AppCompatActivity(), NsdDiscovery.NsdCallback {
                     }
                 }
             } ?: return false
+            val ready = ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) }
+            check(contentResolver.update(uri, ready, null, null) == 1) { "Could not publish the diagnostic ZIP" }
+            pending = null
             true
         } catch (e: Exception) {
             Log.e("MainActivity", "saveZipToDownloads failed: ${e.message}", e)
             false
+        } finally {
+            pending?.let { uri ->
+                runCatching { contentResolver.delete(uri, null, null) }
+                    .onFailure { Log.w("MainActivity", "Could not remove incomplete diagnostic ZIP", it) }
+            }
         }
     }
 
