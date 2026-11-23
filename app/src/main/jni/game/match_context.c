@@ -1,21 +1,18 @@
 /* Actual live-room inputs to original login and GameInfoModel APIs.
  * RequestStartGame itself is only inspected by this adapter. */
+#include <stdio.h>
+#include <stdlib.h>
+
 typedef __UINTPTR_TYPE__ uptr;
 typedef __SIZE_TYPE__ usize;
 typedef unsigned int u32;
 typedef unsigned long long u64;
-extern void *calloc(usize,usize);
-extern void free(void*);
-extern void *fopen(const char*,const char*);
-extern usize fread(void*,usize,usize,void*);
-extern int fclose(void*);
-extern int dprintf(int,const char*,...);
 struct Input {char magic[4];u32 uid;u64 game_id;u32 team_id,sid_size,category_size,keyword_size;};
 struct String {uptr words[3];};
 _Static_assert(sizeof(struct Input)==32,"live input header");
 
 static int load(const char *path,struct Input *in,unsigned char data[584]){
- void *f=fopen(path,"rb");if(!f)return 0;
+ FILE *f=fopen(path,"rb");if(!f)return 0;
  int ok=fread(in,1,sizeof(*in),f)==sizeof(*in);
  if(!ok||in->magic[0]!='R'||in->magic[1]!='G'||in->magic[2]!='I'||in->magic[3]!='1'||
     !in->uid||!in->game_id||!in->team_id||!in->sid_size||in->sid_size>512||
@@ -64,10 +61,10 @@ long peerlink_live_match_context_input(uptr base,const char *path){
  if(mode==36)return -6;
  uptr root=((uptr(*)(u32))(base+0x7a87db8))(1);
  uptr model=root?*(uptr*)(root+0x20):0;
- if(!model)return -7;
+ uptr report=*(uptr*)(services+0x18);
+ if(!model||!report)return -7;
  u64 old_id=((u64(*)(uptr))(base+0x7a5934c))(model);
  if(old_id&&old_id!=in.game_id)return -8;
- ((void(*)(uptr,u64))(base+0x7a59344))(model,in.game_id);
  unsigned char *owned=calloc(1,0xa48);if(!owned)return -9;
  uptr current=((uptr(*)(uptr))(base+0x7a58998))(model);
  ((void(*)(void*))(base+0x7a579bc))(owned);
@@ -80,8 +77,20 @@ long peerlink_live_match_context_input(uptr base,const char *path){
   if(storage)((void(*)(uptr))(base+0x2f376d4))(storage);
  }
  free(owned);
- if(((u64(*)(uptr))(base+0x7a5934c))(model)!=in.game_id||*(u32*)(current+0x18)!=mode)return -10;
- dprintf(2,"ORIGINAL_LIVE_MATCH_CONTEXT account_verified=1 game_id_verified=1 category_enum=%u\n",mode);
+
+ // The original CmdGetGameId success handler (0x76e13d0) gives the same
+ // server response to the match model, report model and reporting service.
+ ((void(*)(uptr,u64))(base+0x7a59344))(model,in.game_id);
+ ((void(*)(uptr,u64))(base+0x7a5935c))(model,in.game_id);
+ ((void(*)(uptr,u64))(base+0x7e1d254))(report,in.game_id);
+ unsigned char report_id[24];
+ int report_id_size=snprintf((char*)report_id,sizeof(report_id),"%llu",in.game_id);
+ if(((u64(*)(uptr))(base+0x7a5934c))(model)!=in.game_id||
+    ((u64(*)(uptr))(base+0x7a59364))(model)!=in.game_id||
+    report_id_size<=0||(usize)report_id_size>=sizeof(report_id)||
+    !string_equal((const void*)(report+0x98),report_id,(usize)report_id_size)||
+    *(u32*)(current+0x18)!=mode)return -10;
+ dprintf(2,"ORIGINAL_LIVE_MATCH_CONTEXT account_verified=1 game_id_verified=1 report_id_verified=1 category_enum=%u\n",mode);
  return 1;
 }
 

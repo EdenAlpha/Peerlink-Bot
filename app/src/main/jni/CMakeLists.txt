@@ -52,8 +52,10 @@ add_library(peerlinkbackend SHARED
         game/preview_host.cpp
         game/executable_patch.cpp
         game/network_startup_diagnostics.cpp
+        game/match_lifecycle_diagnostics.cpp
         game/match_stop_diagnostics.cpp
         game/match_state_diagnostics.cpp
+        game/match_frame_hooks.cpp
         game/diagnostic_journal.cpp
         game/network_socket_diagnostics.cpp
         game/null_ui_guard.cpp)
@@ -66,10 +68,9 @@ add_executable(libpeerlinkstarter.so
         selinux.cpp
         cgroup.cpp)
 
-# "android" is the NDK system library that provides android_get_device_api_level().
-# "log"     is the NDK logging library (__android_log_print used in logging.h).
-# Shizuku also uses "log" — we match that exactly, plus add "android".
-target_link_libraries(libpeerlinkstarter.so c++_shared log android)
+# The paired ADB shell starts this executable outside the app's native library namespace.
+target_link_options(libpeerlinkstarter.so PRIVATE -static-libstdc++ "LINKER:--as-needed")
+target_link_libraries(libpeerlinkstarter.so log android)
 
 if (NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
     add_custom_command(TARGET libpeerlinkstarter.so POST_BUILD

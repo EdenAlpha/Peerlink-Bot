@@ -53,6 +53,13 @@ inline bool should_complete_visual_start(const VisualStartView &v) {
         v.event_manager_present && v.settled;
 }
 
+inline bool should_enter_match_scene(bool visual_start_sent, bool completed_intro,
+                                    unsigned flow_state, unsigned match_phase) {
+    // The normal flow can still transition itself while it is busy. Restore
+    // the lost handoff only once the engine is already playing the match.
+    return visual_start_sent && completed_intro && flow_state == 0 && match_phase == 17;
+}
+
 struct RenderedStartView {
     bool rendered;
     bool synchronized;

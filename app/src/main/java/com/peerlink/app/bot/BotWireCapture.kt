@@ -2,26 +2,42 @@ package com.peerlink.app.bot
 
 import java.io.Closeable
 import java.io.File
-import java.util.concurrent.ArrayBlockingQueue
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
+import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.concurrent.Semaphore
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
 
-/** Full UDP payloads at each ferry boundary. Packet threads only offer a copy
- * to a bounded queue; file I/O and hex formatting belong to the writer. */
+internal data class FerryReceipt(val receiveCall: Long, val elapsed: Long, val wall: Long, val cpu: Long) {
+    companion object {
+        fun now(receiveCall: Long) = FerryReceipt(receiveCall, System.nanoTime(),
+            System.currentTimeMillis(), android.os.Debug.threadCpuTimeNanos())
+    }
+}
+
+/** A completed forward is queued as one item. Packet threads never wait on the file writer. */
 internal class BotWireCapture(
     private val file: File,
     private val maxBytes: Long = 16L * 1024 * 1024,
-    queueCapacity: Int = 1024,
+    private val queueCapacity: Int = 1024,
     private val wallMs: () -> Long = System::currentTimeMillis,
     private val elapsedNs: () -> Long = System::nanoTime,
 ) : Closeable {
     private sealed interface Item {
         class Packet(val point: PacketFlowTrace.Point, val vpn: Boolean,
-                     val wall: Long, val elapsed: Long, val bytes: ByteArray) : Item
+                     val wall: Long, val elapsed: Long, val bytes: ByteArray,
+                     val receipt: FerryReceipt? = null, val sendStart: Long = 0,
+                     val sent: Long = 0, val sentWall: Long = 0, val cpuDelta: Long = -1) : Item {
+            val rows get() = if (sent == 0L) 1L else 2L
+        }
         class Flush(val done: CountDownLatch) : Item
     }
-    private val queue = ArrayBlockingQueue<Item>(queueCapacity)
+    private val queue = ConcurrentLinkedQueue<Item>()
+    private val slots = Semaphore(queueCapacity)
+    private val bytesAvailable = Semaphore(4 * 1024 * 1024)
+    private val available = Semaphore(0)
     private val io = Any()
     private val writer = file.bufferedWriter()
     private val written = AtomicLong()
@@ -33,9 +49,11 @@ internal class BotWireCapture(
     private val thread: Thread
 
     init {
-        val header = "# bot_transport v1; payload_hex is the unchanged UDP payload at the named ferry boundary\n" +
+        val header = "# bot_transport v2; payload_hex is the unchanged UDP payload at the named ferry boundary\n" +
+            "# captureStartedAtMs=${wallMs()}\n" +
             "# route: host=direct socket, vpn=fabricated-address carrier; TX means local socket acceptance\n" +
-            "ts_ms,elapsed_ns,point,route,payload_len,payload_hex\n"
+            "# RX is the return from receive; TX is the return from send. Both rows of a forward share rx_ns.\n" +
+            "ts_ms,elapsed_ns,point,route,payload_len,payload_hex,receive_call_ns,rx_ns,send_start_ns,ferry_cpu_ns\n"
         writer.write(header)
         writer.flush()
         bytesWritten = header.length.toLong()
@@ -44,12 +62,35 @@ internal class BotWireCapture(
 
     fun record(point: PacketFlowTrace.Point, vpn: Boolean, payload: ByteArray) {
         if (!accepting) return
-        if (capped || payload.size > 4096 || payload.isEmpty()) {
-            dropped.incrementAndGet()
+        enqueue(Item.Packet(point, vpn, wallMs(), elapsedNs(), payload.copyOf()))
+    }
+
+    // PeerSlot owns these payloads and never mutates them after handing them over.
+    fun recordTransfer(point: PacketFlowTrace.Point, vpn: Boolean, bytes: ByteArray, receipt: FerryReceipt,
+                       sendStart: Long, sent: Long, sentWall: Long, cpuDelta: Long) {
+        enqueue(Item.Packet(point, vpn, receipt.wall, receipt.elapsed, bytes, receipt, sendStart, sent, sentWall, cpuDelta))
+    }
+
+    private fun enqueue(packet: Item.Packet) {
+        if (!accepting) return
+        if (capped || packet.bytes.size !in 1..65535 || !slots.tryAcquire()) {
+            dropped.addAndGet(packet.rows)
             return
         }
-        val item = Item.Packet(point, vpn, wallMs(), elapsedNs(), payload.copyOf())
-        if (!queue.offer(item)) dropped.incrementAndGet()
+        if (!bytesAvailable.tryAcquire(packet.bytes.size)) {
+            slots.release()
+            dropped.addAndGet(packet.rows)
+            if (!accepting) available.release()
+            return
+        }
+        if (!accepting) {
+            bytesAvailable.release(packet.bytes.size)
+            slots.release()
+            available.release()
+            return
+        }
+        queue.add(packet)
+        available.release()
     }
 
     fun stats(): String = "packets=${written.get()} queueOrCapDrops=${dropped.get()} " +
@@ -59,8 +100,12 @@ internal class BotWireCapture(
      * changing while ZIP assembly is reading it. */
     fun snapshot(destination: File): File {
         val done = CountDownLatch(1)
-        val flushed = accepting && queue.offer(Item.Flush(done), 2, TimeUnit.SECONDS) &&
-            done.await(2, TimeUnit.SECONDS)
+        val live = accepting
+        if (live) {
+            queue.add(Item.Flush(done))
+            available.release()
+        }
+        val flushed = live && done.await(2, TimeUnit.SECONDS)
         synchronized(io) {
             if (accepting) writer.flush()
             file.copyTo(destination, overwrite = true)
@@ -71,35 +116,40 @@ internal class BotWireCapture(
 
     override fun close() {
         accepting = false
+        available.release()
         thread.join(2000)
     }
 
     private fun writeLoop() {
+        val line = StringBuilder(512)
+        var characters = CharArray(512)
         try {
-            while (accepting || queue.isNotEmpty()) {
-                when (val item = queue.poll(100, TimeUnit.MILLISECONDS)) {
+            while (accepting || slots.availablePermits() < queueCapacity || queue.isNotEmpty()) {
+                available.acquire()
+                when (val item = queue.poll()) {
                     is Item.Flush -> {
                         synchronized(io) { writer.flush() }
                         item.done.countDown()
                     }
                     is Item.Packet -> {
-                        val line = buildString(item.bytes.size * 2 + 100) {
-                            append(item.wall).append(',').append(item.elapsed).append(',')
-                            append(item.point.name).append(',').append(if (item.vpn) "vpn" else "host")
-                            append(',').append(item.bytes.size).append(',')
-                            for (byte in item.bytes) {
-                                val v = byte.toInt() and 255
-                                append(HEX[v ushr 4]).append(HEX[v and 15])
-                            }
-                            append('\n')
+                        bytesAvailable.release(item.bytes.size)
+                        slots.release()
+                        line.setLength(0)
+                        appendRow(line, item, item.point, item.wall, item.elapsed, false)
+                        if (item.sent != 0L) {
+                            val tx = if (item.point == PacketFlowTrace.Point.GAME_RX)
+                                PacketFlowTrace.Point.ENGINE_TX else PacketFlowTrace.Point.GAME_TX
+                            appendRow(line, item, tx, item.sentWall, item.sent, true)
                         }
-                        if (capped || bytesWritten + line.length > maxBytes) {
+                        if (capped || bytesWritten + line.length + FINAL_STATUS_RESERVE > maxBytes) {
                             capped = true
-                            dropped.incrementAndGet()
+                            dropped.addAndGet(item.rows)
                         } else synchronized(io) {
-                            writer.write(line)
+                            if (characters.size < line.length) characters = CharArray(line.capacity())
+                            line.toCharArray(characters, 0, 0, line.length)
+                            writer.write(characters, 0, line.length)
                             bytesWritten += line.length
-                            if (written.incrementAndGet() % 64L == 0L) writer.flush()
+                            if ((written.getAndAdd(item.rows) % 64L) + item.rows >= 64L) writer.flush()
                         }
                     }
                     null -> Unit
@@ -112,14 +162,47 @@ internal class BotWireCapture(
             while (true) {
                 when (val item = queue.poll() ?: break) {
                     is Item.Flush -> item.done.countDown()
-                    is Item.Packet -> dropped.incrementAndGet()
+                    is Item.Packet -> {
+                        bytesAvailable.release(item.bytes.size)
+                        slots.release()
+                        dropped.addAndGet(item.rows)
+                    }
                 }
             }
-            synchronized(io) { runCatching { writer.close() }.onFailure { errors.incrementAndGet() } }
+            synchronized(io) {
+                runCatching {
+                    writer.use {
+                        val trailer = "# final ${stats()}\n"
+                        if (bytesWritten + trailer.length <= maxBytes) it.write(trailer)
+                    }
+                }.onFailure { errors.incrementAndGet() }
+            }
         }
     }
 
-    private companion object { const val HEX = "0123456789abcdef" }
+    private fun appendRow(line: StringBuilder, item: Item.Packet, point: PacketFlowTrace.Point,
+                          wall: Long, elapsed: Long, tx: Boolean) = with(line) {
+        append(wall).append(',').append(elapsed).append(',').append(point.name).append(',')
+        append(if (item.vpn) "vpn" else "host").append(',').append(item.bytes.size).append(',')
+        for (byte in item.bytes) {
+            val v = byte.toInt() and 255
+            append(HEX[v ushr 4]).append(HEX[v and 15])
+        }
+        append(',')
+        item.receipt?.let { append(it.receiveCall) }
+        append(',')
+        item.receipt?.let { append(it.elapsed) }
+        append(',')
+        if (tx) append(item.sendStart)
+        append(',')
+        if (tx && item.cpuDelta >= 0) append(item.cpuDelta)
+        append('\n')
+    }
+
+    private companion object {
+        const val HEX = "0123456789abcdef"
+        const val FINAL_STATUS_RESERVE = 160
+    }
 }
 
 /** Main-process lifecycle; failure to record must never stop forwarding. */
@@ -128,19 +211,32 @@ internal object BotWireRecorder {
     @Synchronized fun start(context: android.content.Context) {
         if (capture != null) return
         val file = File(context.filesDir, "bot_transport.csv")
-        capture = runCatching { BotWireCapture(file) }.onFailure {
+        capture = runCatching {
+            archive(file, File(context.filesDir, "bot_transport_previous.csv"))
+            BotWireCapture(file)
+        }.onFailure {
             com.peerlink.app.core.AppState.appendLog("[BOT-WIRE] capture unavailable=${it.javaClass.simpleName}")
         }.getOrNull()
     }
-    fun record(point: PacketFlowTrace.Point, vpn: Boolean, payload: ByteArray) {
-        capture?.record(point, vpn, payload)
+    internal fun archive(current: File, previous: File) {
+        if (!current.isFile) return
+        Files.move(current.toPath(), previous.toPath(), StandardCopyOption.ATOMIC_MOVE,
+            StandardCopyOption.REPLACE_EXISTING)
+    }
+    fun recordTransfer(point: PacketFlowTrace.Point, vpn: Boolean, payload: ByteArray, receipt: FerryReceipt,
+                       sendStart: Long = 0, sent: Long = 0, sentWall: Long = 0, cpuDelta: Long = -1) {
+        capture?.recordTransfer(point, vpn, payload, receipt, sendStart, sent, sentWall, cpuDelta)
     }
     @Synchronized fun stop() { capture?.close(); capture = null }
-    fun snapshot(context: android.content.Context): File? {
+    @Synchronized fun snapshots(context: android.content.Context): List<File> {
         val live = capture
-        val out = File(context.cacheDir, "bot_transport_export.csv")
-        return if (live != null) live.snapshot(out) else {
-            File(context.filesDir, "bot_transport.csv").takeIf { it.isFile }?.copyTo(out, overwrite = true)
-        }
+        val current = File(context.cacheDir, "bot_transport.csv")
+        return listOfNotNull(
+            if (live != null) live.snapshot(current) else copyTrace(context, current),
+            copyTrace(context, File(context.cacheDir, "bot_transport_previous.csv")),
+        )
+    }
+    private fun copyTrace(context: android.content.Context, destination: File): File? {
+        return File(context.filesDir, destination.name).takeIf { it.isFile }?.copyTo(destination, overwrite = true)
     }
 }

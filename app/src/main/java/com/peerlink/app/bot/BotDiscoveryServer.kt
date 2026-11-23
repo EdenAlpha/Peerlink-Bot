@@ -6,7 +6,6 @@ import java.net.DatagramSocket
 import java.net.InetSocketAddress
 import java.net.NetworkInterface
 import java.net.SocketException
-import java.net.SocketTimeoutException
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.concurrent.thread
@@ -28,7 +27,6 @@ internal class BotDiscoveryServer(private val audit: (String) -> Unit) : AutoClo
                 val endpoint = InetSocketAddress(ip, port)
                 val socket = DatagramSocket(null)
                 try {
-                    socket.soTimeout = 250
                     socket.bind(endpoint)
                     sockets[endpoint] = socket
                 } catch (error: Exception) { socket.close(); throw error }
@@ -46,9 +44,11 @@ internal class BotDiscoveryServer(private val audit: (String) -> Unit) : AutoClo
     }
 
     private fun receive(endpoint: InetSocketAddress, socket: DatagramSocket) {
+        val buffer = ByteArray(4096)
+        val packet = DatagramPacket(buffer, buffer.size)
         while (running.get()) {
             try {
-                val packet = DatagramPacket(ByteArray(4096), 4096)
+                packet.length = buffer.size
                 socket.receive(packet)
                 // The SDK binds its real physical address before discovery.
                 // A datagram addressed to our loopback listener can therefore
@@ -66,7 +66,6 @@ internal class BotDiscoveryServer(private val audit: (String) -> Unit) : AutoClo
                 val count = replies.incrementAndGet()
                 if (count == 1L || count % 5L == 0L)
                     audit("[BOT-DISCOVERY] ${diagnostics()} mapping=${BotMode.BOT_FAB_IP}:${packet.port}")
-            } catch (_: SocketTimeoutException) {
             } catch (error: Exception) {
                 if (running.get()) audit("[BOT-DISCOVERY] replyFailed=${error.javaClass.simpleName}")
                 if (error is SocketException) break

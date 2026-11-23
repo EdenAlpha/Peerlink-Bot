@@ -144,7 +144,9 @@ object EngineBridge {
      * The old code only tried route 2 and gave up when the helper was not
      * running, which is why the engine was never staged on the phone.
      */
-    @Synchronized fun stageEngine(context: Context): Boolean {
+    fun stageEngine(context: Context): Boolean = stageVerifiedEngine(context) != null
+
+    @Synchronized private fun stageVerifiedEngine(context: Context): GameFileIntegrity.Fingerprint? {
         val stage = java.io.File(stageDir(context))
         val staged = java.io.File(stage, "libUE4.so")
         AppState.appendLog("[BOT-FILES] ENGINE_CHECK source=installed_game comparison=SHA256 cached_size_is_not_proof")
@@ -153,23 +155,22 @@ object EngineBridge {
         val gameLibDir = gameLibDir(context)
         if (gameLibDir != null) {
             log("the game's library directory is $gameLibDir")
-            if (copyEngineFrom(java.io.File(gameLibDir), stage)) {
+            copyEngineFrom(File(gameLibDir), stage)?.let { fingerprint ->
                 log("engine staged for the app: ${stage.absolutePath} (route=app)")
-                return true
+                return fingerprint
             }
         } else {
             log("the game's library directory was not found from this app")
         }
-        val fromApk = copyEngineFromApk(context, stage)
-        if (fromApk) {
+        copyEngineFromApk(context, stage)?.let { fingerprint ->
             log("engine staged from the game's APK: ${stage.absolutePath} (route=app/apk)")
-            return true
+            return fingerprint
         }
 
         // ---- route 2: the privileged helper ---------------------------
         if (!PrimeClient.isAlive(timeoutMs = 800)) {
             log("the privileged helper is not running -- the engine stays unstaged")
-            return false
+            return null
         }
         val r = probeViaHelper(
             hashOnly = false,
@@ -181,11 +182,12 @@ object EngineBridge {
         if (staged.isFile && staged.length() >= MIN_ENGINE_BYTES) {
             // A helper copy is not proof of source identity. Verify through the
             // installed APK or native directory before accepting it.
-            if ((gameLibDir != null && copyEngineFrom(File(gameLibDir), stage)) || copyEngineFromApk(context, stage)) return true
+            val fingerprint = gameLibDir?.let { copyEngineFrom(File(it), stage) } ?: copyEngineFromApk(context, stage)
+            if (fingerprint != null) return fingerprint
             AppState.appendLog("[BOT-FILES] FAIL file=engine source=unreadable helper_copy_could_not_be_verified")
         }
         log("the helper ran but the engine is still not staged at ${staged.absolutePath}")
-        return false
+        return null
     }
 
     /**
@@ -203,7 +205,8 @@ object EngineBridge {
         log("engine status: staged=$stagedBytes bytes loaded=$loaded")
 
         if (loaded) return true
-        if (!stageEngine(context)) {
+        val stagedFingerprint = stageVerifiedEngine(context)
+        if (stagedFingerprint == null) {
             log("the engine is not staged -- a game connection cannot start")
             return false
         }
@@ -216,8 +219,7 @@ object EngineBridge {
         }
         // Reject an unsupported executable before offering or copying large
         // resource sets for a different engine build.
-        val stagedHash = staged.inputStream().use(GameFileIntegrity::fingerprint).sha256
-        check(stagedHash == EngineRuntime.ENGINE_SHA256) {
+        check(stagedFingerprint.sha256 == EngineRuntime.ENGINE_SHA256) {
             "This bot test supports the verified eFootball 11.1.1 engine; no match-resource download was started"
         }
         // Reuse verified files already on this phone before native startup.
@@ -274,27 +276,26 @@ object EngineBridge {
     }
 
     /** Copy the engine (and its ad-library dependency) into [stage]. */
-    private fun copyEngineFrom(srcDir: java.io.File, stage: java.io.File): Boolean {
+    private fun copyEngineFrom(srcDir: File, stage: File): GameFileIntegrity.Fingerprint? {
         val src = java.io.File(srcDir, "libUE4.so")
         if (!src.isFile || src.length() < MIN_ENGINE_BYTES) {
             log("the engine is not readable at ${src.absolutePath}")
-            return false
+            return null
         }
         return try {
             if (!stage.isDirectory && !stage.mkdirs()) {
                 log("cannot make the staging directory ${stage.absolutePath}")
-                return false
+                return null
             }
             val ad = java.io.File(srcDir, "libgadsme.so")
-            if (!ad.isFile) return false
+            if (!ad.isFile) return null
             copyFile(ad, java.io.File(stage, "libgadsme.so"))
             val playcore = File(srcDir, "libplaycore.so")
             if (playcore.isFile) copyFile(playcore, File(stage, "libplaycore.so"))
             copyFile(src, java.io.File(stage, "libUE4.so"))
-            true
         } catch (t: Throwable) {
             log("staging the engine failed: ${t.javaClass.simpleName}: ${t.message}")
-            false
+            null
         }
     }
 
@@ -302,11 +303,12 @@ object EngineBridge {
      * Some games keep their libraries inside the APK instead of extracting
      * them.  Same idea, read from the archive.
      */
-    private fun copyEngineFromApk(context: Context, stage: java.io.File): Boolean = try {
+    private fun copyEngineFromApk(context: Context, stage: File): GameFileIntegrity.Fingerprint? = try {
         val info = context.packageManager.getApplicationInfo(GAME_PACKAGE, 0)
         val archives = listOf(info.sourceDir) + info.splitSourceDirs.orEmpty().toList()
         if (!stage.isDirectory && !stage.mkdirs()) error("Cannot create engine directory")
         val copied = mutableSetOf<String>()
+        var engineFingerprint: GameFileIntegrity.Fingerprint? = null
         for (archive in archives.distinct()) {
             if (!File(archive).isFile) continue
             java.util.zip.ZipFile(archive).use { zip ->
@@ -314,25 +316,25 @@ object EngineBridge {
                     if (name in copied) continue
                     val entry = zip.getEntry("lib/arm64-v8a/$name") ?: continue
                     if (name == "libUE4.so" && entry.size < MIN_ENGINE_BYTES) continue
-                    GameFileIntegrity { AppState.appendLog(it) }.ensure(
+                    val fingerprint = GameFileIntegrity { AppState.appendLog(it) }.ensure(
                         File(stage, name), "engine/$name sourceAPK=${File(archive).name}", readOnly = true
                     ) { zip.getInputStream(entry) }
+                    if (name == "libUE4.so") engineFingerprint = fingerprint
                     copied.add(name)
                 }
             }
         }
-        "libUE4.so" in copied && "libgadsme.so" in copied
+        if ("libgadsme.so" in copied) engineFingerprint else null
     } catch (error: Exception) {
         log("reading the game's APKs failed: ${error.javaClass.simpleName}: ${error.message}")
-        false
+        null
     }
 
     /** A cached library is accepted only after comparing it with the installed source. */
-    private fun copyFile(src: java.io.File, dst: java.io.File) {
+    private fun copyFile(src: File, dst: File): GameFileIntegrity.Fingerprint =
         GameFileIntegrity { AppState.appendLog(it) }.ensure(
             dst, "engine/${dst.name} source=nativeLibraryDir", readOnly = true
         ) { src.inputStream() }
-    }
 
     private fun identify() {
         val context = appContext ?: return

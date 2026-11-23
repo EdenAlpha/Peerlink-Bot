@@ -19,11 +19,14 @@ object EngineHost {
     @Volatile private var ownerUid = 0L
     @Volatile private var service: Messenger? = null
     private var context: Context? = null
-    @Volatile private var enginePid = 0
+    @Volatile var enginePid = 0
+        private set
     @Volatile private var engineStartedAt = 0L
     @Volatile private var stopRequestedAt = 0L
     private var nextFlowReportAt = 0L
     private var binding: CountDownLatch? = null
+    private var bound = false
+    private var foregroundStartRequested = false
     private val preparation = Any()
     private val pending = ConcurrentHashMap<Int, CompletableFuture<Bundle>>()
     private val sequence = AtomicInteger()
@@ -35,7 +38,12 @@ object EngineHost {
                 val line = data.getString("status").orEmpty()
                 if (line.isNotBlank()) PeerBotService.status(line)
             } else if (message.what == EngineProtocol.NATIVE_STATE) {
-                data.getLongArray("state")?.let { AppState.appendLog("[BOT-NATIVE] state=${it.contentToString()} (frame counter at index 20)") }
+                data.getLongArray("state")?.let { values ->
+                    AppState.appendLog("[BOT-NATIVE] state=${values.contentToString()} (frame counter at index 20)")
+                    if (BotHeapRecording.observing(enginePid) && EngineSnapshot(values).matchConstructed) {
+                        context?.let { BotHeapRecording.completed(it, enginePid, "pitch_loaded") }
+                    }
+                }
             } else if (message.what == EngineProtocol.DIAGNOSTIC) {
                 val line = data.getString("line").orEmpty()
                 if (line.startsWith("[BOT-FILES]")) {
@@ -55,8 +63,11 @@ object EngineHost {
     })
     private val connection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName, binder: IBinder) {
-            service = Messenger(binder)
-            synchronized(this@EngineHost) { binding?.countDown() }
+            synchronized(this@EngineHost) {
+                if (!bound) return
+                service = Messenger(binder)
+                binding?.countDown()
+            }
         }
         override fun onServiceDisconnected(name: ComponentName) = disconnected("onServiceDisconnected")
         override fun onBindingDied(name: ComponentName) = disconnected("onBindingDied")
@@ -69,6 +80,7 @@ object EngineHost {
         val lostPid = enginePid
         val since = engineStartedAt
         context?.let { owner ->
+            if (BotHeapRecording.observing(lostPid)) BotHeapRecording.completed(owner, lostPid, "bot_process_ended")
             EngineProcessExitReports.observe(owner, lostPid, since) { line ->
                 AppState.appendLog("[BOT-DIAG] $line")
             }
@@ -78,25 +90,45 @@ object EngineHost {
         PeerSlot.engineAttached = false
         lastError = "Bot engine stopped — start a new room"
         PeerBotService.status(lastError)
+        releaseService()
         for ((id, future) in pending) if (pending.remove(id, future))
             future.completeExceptionally(IllegalStateException(lastError))
-        synchronized(this) {
-            binding?.countDown()
-            binding = null
-            runCatching { context?.unbindService(connection) }
+    }
+
+    @Synchronized private fun releaseService() {
+        service = null
+        binding?.countDown()
+        binding = null
+        val owner = context ?: return
+        if (bound) {
+            bound = false
+            runCatching { owner.unbindService(connection) }
+        }
+        if (foregroundStartRequested) {
+            foregroundStartRequested = false
+            runCatching { owner.stopService(Intent(owner, BotEngineService::class.java)) }
         }
     }
+
     private fun bind(owner: Context) {
         check(Looper.myLooper() != Looper.getMainLooper()) { "Prepare the bot on a worker thread" }
         val latch = synchronized(this) {
-            context = owner.applicationContext
+            val app = owner.applicationContext
+            context = app
             if (service != null) return
             binding ?: CountDownLatch(1).also {
                 binding = it
-                if (!context!!.bindService(Intent(context, BotEngineService::class.java), connection,
-                        Context.BIND_AUTO_CREATE or Context.BIND_IMPORTANT)) {
-                    binding = null
+                val intent = Intent(app, BotEngineService::class.java)
+                bound = app.bindService(intent, connection, Context.BIND_AUTO_CREATE or Context.BIND_IMPORTANT)
+                if (!bound) {
+                    releaseService()
                     error("Could not start the bot engine service")
+                }
+                foregroundStartRequested = try {
+                    app.startForegroundService(intent) != null
+                } catch (error: RuntimeException) {
+                    AppState.appendLog("[BOT-DIAG] ENGINE_FOREGROUND_START unavailable=${error.javaClass.simpleName}")
+                    false
                 }
             }
         }
@@ -119,16 +151,21 @@ object EngineHost {
         try {
             startupRetryable = true
             stopRequestedAt = 0
+            enginePid = 0
             engineStartedAt = System.currentTimeMillis()
             bind(owner)
+            val process = request(EngineProtocol.PROCESS_INFO, timeout = 10)
+            enginePid = process.getInt("pid")
+            AppState.appendLog("[BOT-DIAG] ENGINE_PROCESS pid=$enginePid " +
+                "foreground=${process.getString("foreground")} importance=${process.getInt("importance")}")
             val result = request(EngineProtocol.PREPARE, Bundle().apply { putLong("uid", uid) }, 300)
-            enginePid = result.getInt("pid")
             isReady = result.getBoolean("ok")
             startupRetryable = result.getBoolean("retryable", true)
             if (isReady) ownerUid = uid
             else lastError = result.getString("reason") ?: "The bot simulation did not start"
             isReady
         } catch (error: Exception) {
+            releaseService()
             lastError = error.cause?.message ?: error.message ?: "Bot startup failed"
             PeerBotService.status(lastError)
             false
@@ -150,8 +187,13 @@ object EngineHost {
     internal fun beginIntroduction(peerUid: Long, connectingStart: Long): Boolean = request(EngineProtocol.BEGIN_INTRODUCTION,
         Bundle().apply { putLong("peer", peerUid); putLong("connectingStart", connectingStart) }).getBoolean("ok")
     internal fun transportIoReady(): Int = request(EngineProtocol.TRANSPORT_IO_READY).getInt("state")
-    internal fun configureRevisionCheck(enabled: Boolean): Boolean = request(EngineProtocol.REVISION_POLICY,
-        Bundle().apply { putBoolean("enabled", enabled) }).getBoolean("ok")
+    internal fun configureServerSettings(settings: MatchServerSettings): Boolean = request(EngineProtocol.SERVER_SETTINGS,
+        Bundle().apply {
+            putBoolean("revisionCheck", settings.revisionCheck)
+            putString("protocolOptions", settings.protocolOptions)
+            putString("onlineOptions", settings.onlineOptions)
+            putIntArray("slowdownThresholds", settings.slowdownThresholds.toIntArray())
+        }).getBoolean("ok")
     internal fun configureTurn(input: ByteArray): Boolean = request(EngineProtocol.CONFIGURE_TURN,
         Bundle().apply { putByteArray("input", input) }).getBoolean("ok")
     internal fun turnRequest(): ByteArray = requireNotNull(
@@ -177,16 +219,20 @@ object EngineHost {
         }).getBoolean("ok")
     fun pass(): Boolean = request(EngineProtocol.PASS).getBoolean("ok")
     internal fun probeController(): Boolean = request(EngineProtocol.PROBE_CONTROLLER).getBoolean("ok")
+    internal fun probeHeapRecording(pid: Int): Boolean =
+        isReady && pid > 0 && pid == enginePid && request(EngineProtocol.HEAP_RECORDING_PROBE,
+            Bundle().apply { putInt("pid", pid) }, timeout = 3).getBoolean("ok")
     internal fun probePreviewCallback(): Boolean = request(EngineProtocol.PROBE_PREVIEW).getBoolean("ok")
     fun stop(reason: String = "engine_host_stop") {
+        if (BotHeapRecording.observing(enginePid))
+            context?.let { BotHeapRecording.completed(it, enginePid, "bot_stopped") }
         stopRequestedAt = SystemClock.elapsedRealtime()
         AppState.appendLog("[BOT-DIAG] PEERLINK_STOP component=engine_host reason=$reason observedAtMs=$stopRequestedAt")
         PeerSlot.logFlow("engine_host_stop")
         runCatching { request(EngineProtocol.STOP) }
         isReady = false
         ownerUid = 0
-        service = null
-        synchronized(this) { runCatching { context?.unbindService(connection) }; binding = null }
+        releaseService()
     }
 }
 
@@ -209,9 +255,11 @@ internal object EngineProtocol {
     const val TURN_REQUEST = 16
     const val BEGIN_INTRODUCTION = 17
     const val TRANSPORT_IO_READY = 18
-    const val REVISION_POLICY = 19
+    const val SERVER_SETTINGS = 19
     const val LOADING_DIAGNOSTICS = 20
     const val PROBE_PREVIEW = 21
+    const val PROCESS_INFO = 22
+    const val HEAP_RECORDING_PROBE = 23
     const val STATUS = 100
     const val NATIVE_STATE = 101
     const val DIAGNOSTIC = 102
@@ -227,21 +275,43 @@ data class EngineSnapshot(val values: LongArray) {
     val connected get() = sessionConnected && field(3) == 4L && field(4) == 4L
     val metadataReady get() = field(5) == 5L && field(6) == 1L && field(7) == 0L
     val matchConstructed get() = field(8) == 17L && field(9) == 54L && field(10) == 22L
+    val matchAtBreak get() = connected && field(8) == 21L && field(9) == 54L && field(10) == 22L
+    val halftimeMenu get() = field(32).toInt()
+    val halftimeCanConfirm get() = matchAtBreak && (halftimeMenu == 3 || halftimeMenu == 5)
+    val halftimeView get() = when (halftimeMenu) {
+        1 -> "match_idle"
+        2 -> "halftime_menu_loading"
+        3 -> "halftime_waiting_for_input"
+        4 -> "halftime_finishing"
+        5 -> "halftime_menu_open"
+        6 -> "halftime_time_up_demo"
+        else -> "unknown"
+    }
     val ballOnPitch get() = field(11) == 1L
     val simulationInputReady get() = field(29) == 1L
-    val canTestPass get() = connected && matchConstructed && ballOnPitch && simulationInputReady && field(16) == 1L &&
+    val canControlMatch get() = connected && matchConstructed && ballOnPitch && field(16) == 1L &&
         (field(17) == 1L || field(17) == -1L)
-    val memoryMiB get() = field(18) / 1024
+    val canTestPass get() = canControlMatch && simulationInputReady
+    val memoryMiB get() = if (field(18) < 0) -1L else field(18) / 1024
     val matchDataHandlerPresent get() = field(19) == 1L
     val ballSpeedMmPerSecond get() = field(15)
-    fun status(): String = when {
+    val commandFrame get() = field(30)
+    val hostsRoom get() = field(31) == 1L
+    val ballStationaryAtCentre get() = ballOnPitch && field(12) in -800L..800L &&
+        field(13) in 0L..600L && field(14) in -800L..800L && ballSpeedMmPerSecond < 450L
+    fun status(afterKickoff: Boolean = false): String = when {
         nativeFailed -> "Bot connection failed: $nativeFailureReason"
+        afterKickoff && matchAtBreak && halftimeMenu in 1..2 -> "Halftime — waiting for the bot’s halftime menu"
+        afterKickoff && matchAtBreak && halftimeMenu == 6 -> "Halftime — finishing the first-half presentation"
+        afterKickoff && matchAtBreak && halftimeMenu == 4 -> "Halftime — waiting for the second half"
+        afterKickoff && matchAtBreak -> "Match paused — waiting for play to resume"
+        afterKickoff && !matchConstructed -> "Match play has stopped — waiting for the result"
         !sessionConnected -> "Connecting to your game"
         !connected -> "Peer link connected — opening match-data channels"
         !metadataReady -> "Connected — exchanging teams"
         !matchConstructed -> "Loading the match — continue in eFootball when ready"
         !ballOnPitch -> "Match loaded — waiting for play to resume"
-        !simulationInputReady -> "Waiting for the match to be ready"
-        else -> "Match simulation ready — bot control test available"
+        !afterKickoff && !simulationInputReady -> "Waiting for the match to be ready"
+        else -> "Match in progress"
     }
 }

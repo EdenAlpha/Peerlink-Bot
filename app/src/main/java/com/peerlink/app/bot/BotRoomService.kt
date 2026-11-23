@@ -29,7 +29,7 @@ import com.peerlink.app.ui.MainActivity
  */
 object BotRoomService : BotRoomBackend {
 
-    override suspend fun createRoom(ctx: Context, allowResourceDownload: Boolean): String {
+    override suspend fun createRoom(ctx: Context, allowResourceDownload: Boolean, verifyEngine: ((Int) -> Unit)?): String {
         val loaded = BotIdentity.load(ctx)
         val identity = if (loaded != null) loaded else {
             // First room on this phone: mint the bot's account (the mint.py
@@ -83,62 +83,43 @@ object BotRoomService : BotRoomBackend {
         BotMode.ensureStarted(ctx, identityInUse.userId)
         PeerBotService.start(ctx, "")
         PeerBotService.status("Preparing the bot simulation")
+        var roomOpened = false
         try {
             check(EngineBridge.ensureEngineForSession(ctx, allowResourceDownload)) {
                 EngineHost.lastError.ifBlank { "The bot simulation could not start" }
             }
-        } catch (error: Exception) {
-            PeerBotService.stop(ctx)
-            BotMode.stop()
-            throw error
-        }
+            verifyEngine?.invoke(EngineHost.enginePid)
 
-        // The capture's login-time quality report (blocks 35 + 38-40): fetch
-        // the region list, measure the echo endpoints, SET. The room-time
-        // report (block 63) re-sends the SET inside the room before the
-        // ready -- run #47 order: entry_side -> relay_qual -> CME -> ready.
-        // The device runs of 2026-10-15 proved the ready is refused
-        // (ERR_EMPTY) when no measurement was ever reported, regardless of
-        // the declared endpoint shape.
-        val quality = BotRelayQuality.loginReport(gate)
-        if (quality.skipped || quality.result != "NOERR") {
-            AppState.appendLog(
-                "[BOT-QUALITY] login report did not land (${quality.result ?: "no endpoints"}) " +
-                    "-- the room-time report will retry"
-            )
-        }
+            // Measure relay quality before the room-time report and ready.
+            val quality = BotRelayQuality.loginReport(gate)
+            if (quality.skipped || quality.result != "NOERR") {
+                AppState.appendLog("[BOT-QUALITY] login report did not land (${quality.result ?: "no endpoints"}) " +
+                    "-- the room-time report will retry")
+            }
 
-        val r = gate.createRoom()
-        if (r["result"] == "_NO_ENDPOINT") {
-            throw KgsGate.GateException(
-                "Bot endpoint not set -- bot mode must declare the fabricated " +
-                    "peer identity before creating a room."
-            )
-        }
-        if (r["result"] == "NOERR") {
+            val r = gate.createRoom()
+            if (r["result"] == "_NO_ENDPOINT") {
+                throw KgsGate.GateException("Bot endpoint not set -- bot mode must declare the fabricated " +
+                    "peer identity before creating a room.")
+            }
+            if (r["result"] != "NOERR") throw KgsGate.GateException("room create rejected: ${shallow(r)}")
             val num = gate.roomNumberOf(r)
             if (num.isBlank()) {
                 throw KgsGate.GateException("Room opened but Konami returned no room number.")
             }
-            // Keep the bot session ALIVE while the user plays in eFootball:
-            // a foreground service (persistent room notification + live
-            // status) and the per-app VPN for the game's traffic. Without
-            // this the app freezes the moment the user switches away and the
-            // bot never answers the game's To Match (2026-10-15 fix).
+            val rid = ((r["room_id"] as? Map<*, *>)?.get("id") as? Number)?.toLong() ?: 0L
+            if (rid <= 0L) throw KgsGate.GateException("Room opened without a valid matchmaking ID.")
             PeerBotService.start(ctx, num)
             startGameVpn(ctx)
-
-            // Step 3: the state-driven driver takes over -- it watches the
-            // room and fires the bot's half of the gate ladder as the user's
-            // game joins (creator = HOME: entry side -> ready -> go ->
-            // session -> TURN -> antenna), then arms the peer slot.
-            val rid = ((r["room_id"] as? Map<*, *>)?.get("id") as? Number)?.toLong() ?: 0L
-            if (rid != 0L) BotMatchDriver.start(gate, rid, num)
+            check(BotMatchDriver.start(gate, rid, num)) { "The previous bot room is still stopping" }
+            roomOpened = true
             return num
+        } finally {
+            if (!roomOpened) {
+                PeerBotService.stop(ctx)
+                BotMode.stop()
+            }
         }
-        throw KgsGate.GateException(
-            "room create rejected: ${shallow(r)}"
-        )
     }
 
     /** Shallow error surface only -- no request/response bodies land in the UI. */

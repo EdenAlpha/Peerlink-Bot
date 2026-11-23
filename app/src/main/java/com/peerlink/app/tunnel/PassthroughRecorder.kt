@@ -118,12 +118,17 @@ object PassthroughRecorder {
 
     private fun enqueue(dir: Char, packet: ByteArray, length: Int) {
         if (!started.get() || length <= 0) return
+        if (capped) {
+            dropped.incrementAndGet()
+            return
+        }
         if (queue.offer(Item.Packet(dir, System.currentTimeMillis(), packet.copyOf(length)))) return
         dropped.incrementAndGet()
     }
 
     private fun runWriter() {
         val sb = StringBuilder(4_096)
+        var characters = CharArray(4_096)
         while (true) {
             val item = try {
                 queue.poll(200, java.util.concurrent.TimeUnit.MILLISECONDS)
@@ -145,7 +150,9 @@ object PassthroughRecorder {
                         is Item.Event -> w.write("# event ${item.atMs} ${item.text}\r\n")
                         is Item.Packet -> {
                             formatPacket(sb, item.dir, item.atMs, item.bytes)
-                            w.write(sb.toString())
+                            if (characters.size < sb.length) characters = CharArray(sb.capacity())
+                            sb.toCharArray(characters, 0, 0, sb.length)
+                            w.write(characters, 0, sb.length)
                             written.incrementAndGet()
                             if (written.get() % 64L == 0L && (outputFile?.length() ?: 0L) > MAX_FILE_BYTES) {
                                 capped = true

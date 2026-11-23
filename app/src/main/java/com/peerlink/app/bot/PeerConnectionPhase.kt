@@ -6,6 +6,50 @@ import java.util.concurrent.TimeUnit
  * Match-data readiness remains a separate prerequisite for gameplay inputs.
  */
 internal object PeerConnectionPhase {
+    fun confirmServerConnection(
+        running: () -> Boolean,
+        report: () -> Map<*, *>,
+        poll: () -> Map<*, *>,
+        exchangeAddresses: () -> Unit = {},
+        progress: (String) -> Unit = {},
+        timeoutSeconds: Long = 90,
+        pause: () -> Unit = { Thread.sleep(1_000) },
+    ): Boolean {
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(timeoutSeconds)
+        var reported = false
+        while (running()) {
+            exchangeAddresses()
+            val response = if (reported) poll() else report()
+            if (!running()) return false
+            val result = response["result"] as? String
+            when (result) {
+                null, "_NET_FAIL", "_HTTP_EMPTY", "_DECODE_FAIL" -> Unit
+                "NOERR" -> {
+                    if (reported) {
+                        when (response["is_check_finished"]) {
+                            "YES" -> {
+                                val error = response["error_code"] as? String
+                                check(error == "NOERR") { "The server rejected the room connection check: $error" }
+                                progress("SERVER_CONNECTION_CHECK confirmed=true")
+                                return true
+                            }
+                            "NO" -> Unit
+                            else -> error("The room connection check returned an invalid completion flag")
+                        }
+                    } else {
+                        reported = true
+                        progress("SERVER_CONNECTION_CHECK report=NOERR awaiting_confirmation=true")
+                        continue
+                    }
+                }
+                else -> error("The server refused the room connection ${if (reported) "check" else "report"}: $result")
+            }
+            check(System.nanoTime() < deadline) { "The server did not confirm the room connection in time" }
+            pause()
+        }
+        return false
+    }
+
     fun awaitMetadata(
         running: () -> Boolean,
         snapshot: () -> EngineSnapshot,

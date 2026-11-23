@@ -12,10 +12,15 @@ uint16_t half(uintptr_t at) { return *reinterpret_cast<const uint16_t *>(at); }
 unsigned byte(uintptr_t at) { return *reinterpret_cast<const unsigned char *>(at); }
 template<class T> T fn(uintptr_t offset) { return reinterpret_cast<T>(engine + offset); }
 
+struct Checksum {
+    uint32_t state_frame = 0, value = 0, terms = 0;
+    std::array<uint32_t, 71> parts{}; // Match, ball, 3 objects, 2*11*3 player parts.
+    std::array<uint32_t, 71> part_terms{};
+};
 struct Snapshot {
     std::atomic<int> published{0};
-    uint32_t command_frame = 0, state_frame = 0, checksum = 0, terms = 0;
-    std::array<uint32_t, 71> parts{}; // Match, ball, 3 objects, 2*11*3 player parts.
+    uint32_t command_frame = 0;
+    Checksum check;
     std::array<uint32_t, 10> options{};
     std::array<unsigned, 28> flags{};
     std::array<uint32_t, 66> player_position_bits{};
@@ -42,46 +47,61 @@ uintptr_t command_controller(uintptr_t *checker = nullptr) {
     return controller;
 }
 
-void capture(Snapshot &output, uintptr_t controller) {
-    if (output.published.load(std::memory_order_acquire) || !engine) return;
+uintptr_t checksum_state() {
     // 7053d8c loads the map's service handle; 6affecc dereferences that
     // handle once more before 6afff10/6afff20 receive the checksum state.
     uintptr_t handle = ptr(engine + 0xa5909a0);
-    uintptr_t state = handle ? ptr(handle) : 0;
-    if (!state) return;
+    return handle ? ptr(handle) : 0;
+}
+
+bool read_checksum(Checksum &output, uintptr_t state, const char *kind = nullptr, uint32_t command_frame = 0) {
+    if (!state) return false;
     // These are the same read-only checksum contributors called by 6afff20.
     // Avoid 6afff10: it increments the checksum service's invocation counter.
     using Match = uint32_t (*)(uintptr_t, uint32_t *, uint32_t *, uint32_t *);
     using Part = void (*)(uintptr_t, uint32_t *, uint32_t *);
     using Object = void (*)(uintptr_t, uint32_t *, uint32_t *, uint32_t);
     using Player = void (*)(uintptr_t, uint32_t *, uint32_t *, uint32_t, uint32_t);
-    uint32_t sum = 0, ordinal = 0, frame = 0;
-    if (!(fn<Match>(0x6b00048)(state, &sum, &ordinal, &frame) & 1)) return;
-    int expected = 0;
-    if (!output.published.compare_exchange_strong(expected, 1, std::memory_order_acq_rel)) return;
-    peerlink_journal("MATCH_STATE_CAPTURE_BEGIN kind=%s commandFrame=%u stateFrame=%u",
-        &output == &initial ? "initial" : "at_stop", word(controller + 0x30), frame);
-    output.command_frame = word(controller + 0x30);
-    output.state_frame = frame;
+    uint32_t sum = 0, ordinal = 0;
+    if (!(fn<Match>(0x6b00048)(state, &sum, &ordinal, &output.state_frame) & 1)) return false;
+    if (kind) peerlink_journal("MATCH_STATE_CAPTURE_BEGIN kind=%s commandFrame=%u stateFrame=%u",
+        kind, command_frame, output.state_frame);
     size_t index = 0;
-    output.parts[index++] = sum;
-    uint32_t previous = sum;
-    fn<Part>(0x6b00474)(state, &sum, &ordinal);
-    output.parts[index++] = sum - previous;
-    for (uint32_t object = 0; object < 3; ++object) {
+    uint32_t previous = 0, previous_ordinal = 0;
+    auto record_part = [&] {
+        output.parts[index] = sum - previous;
+        output.part_terms[index++] = ordinal - previous_ordinal;
         previous = sum;
+        previous_ordinal = ordinal;
+    };
+    record_part();
+    fn<Part>(0x6b00474)(state, &sum, &ordinal);
+    record_part();
+    for (uint32_t object = 0; object < 3; ++object) {
         fn<Object>(0x6b0050c)(state, &sum, &ordinal, object);
-        output.parts[index++] = sum - previous;
+        record_part();
     }
     constexpr uintptr_t player_parts[] = {0x6b00650, 0x6b00794, 0x6b00908};
     for (uint32_t side = 0; side < 2; ++side) for (uint32_t slot = 0; slot < 11; ++slot)
         for (uintptr_t function : player_parts) {
-            previous = sum;
             fn<Player>(function)(state, &sum, &ordinal, side, slot);
-            output.parts[index++] = sum - previous;
+            record_part();
         }
-    output.checksum = (sum + (sum >> 16)) & 0xffff; // Original 6b0116c.
+    output.value = (sum + (sum >> 16)) & 0xffff; // Original 6b0116c.
     output.terms = ordinal;
+    return true;
+}
+
+void capture(Snapshot &output, uintptr_t controller) {
+    if (output.published.load(std::memory_order_acquire) || !engine) return;
+    int expected = 0;
+    if (!output.published.compare_exchange_strong(expected, 1, std::memory_order_acq_rel)) return;
+    const char *kind = &output == &initial ? "initial" : "at_stop";
+    output.command_frame = word(controller + 0x30);
+    if (!read_checksum(output.check, checksum_state(), kind, output.command_frame)) {
+        output.published.store(0, std::memory_order_release);
+        return;
+    }
     // Only verified scalar options read by the original 6a5d5d4 settings copy.
     // Do not export pointer fields, account identifiers, or session material.
     uintptr_t owner = ptr(engine + 0xa5fb348), work = owner ? ptr(owner + 0x48) : 0;
@@ -114,7 +134,7 @@ void capture(Snapshot &output, uintptr_t controller) {
     }
     output.published.store(2, std::memory_order_release);
     peerlink_journal("MATCH_STATE_CAPTURE_COMPLETE kind=%s commandFrame=%u stateFrame=%u checksum=%u",
-        &output == &initial ? "initial" : "at_stop", output.command_frame, output.state_frame, output.checksum);
+        kind, output.command_frame, output.check.state_frame, output.check.value);
 }
 
 template<class T, size_t N> void append_array(std::string &text, const std::array<T, N> &values) {
@@ -126,9 +146,9 @@ void append_snapshot(std::string &text, const char *name, const Snapshot &state)
     text += '\n'; text += name;
     if (state.published.load(std::memory_order_acquire) != 2) { text += " present=0"; return; }
     text += " present=1 commandFrame=" + std::to_string(state.command_frame) +
-        " stateFrame=" + std::to_string(state.state_frame) + " checkValue=" + std::to_string(state.checksum) +
-        " terms=" + std::to_string(state.terms) + " parts=";
-    append_array(text, state.parts);
+        " stateFrame=" + std::to_string(state.check.state_frame) + " checkValue=" + std::to_string(state.check.value) +
+        " terms=" + std::to_string(state.check.terms) + " parts=";
+    append_array(text, state.check.parts);
     text += " sourceOptions="; append_array(text, state.options);
     text += " sourceFlags="; append_array(text, state.flags);
     text += " players=" + std::to_string(state.players) + " playerPositionBits=";
@@ -138,6 +158,55 @@ void append_snapshot(std::string &text, const char *name, const Snapshot &state)
 }
 
 void peerlink_match_state_begin(uintptr_t base) { engine = base; }
+
+void peerlink_record_check_frame(uint32_t frame, uint32_t value) {
+    if (!engine || !frame) return;
+    Checksum check;
+    if (!read_checksum(check, checksum_state()) || check.state_frame != frame || check.value != value) {
+        peerlink_journal("MATCH_CHECK_FRAME frame=%u checkValue=%u snapshotVerified=0 observedFrame=%u observedValue=%u",
+            frame, value, check.state_frame, check.value);
+        return;
+    }
+    // Native ball contributor 6b00474 -> 6b00d18 -> 72d9980. Its
+    // history record is distinct from the ball object's live coordinates.
+    const uintptr_t match = ptr(engine + 0xa58de28);
+    const uint32_t selected = match ? word(match + 0x54) : 3;
+    const uintptr_t history = selected < 3 ? ptr(match + 0x70 + selected * 0x50) : 0;
+    const uintptr_t ball = history ? fn<uintptr_t (*)(uintptr_t, uint32_t)>(0x72d9980)(history, 0) : 0;
+    std::string details;
+    details.reserve(1200);
+    details += "parts="; append_array(details, check.parts);
+    details += " partTerms="; append_array(details, check.part_terms);
+    if (ball) {
+        std::array<uint32_t, 6> bits{};
+        std::memcpy(bits.data(), reinterpret_cast<const void *>(ball), sizeof(bits));
+        details += " ballBits="; append_array(details, bits);
+    }
+    peerlink_journal("MATCH_CHECK_FRAME frame=%u checkValue=%u snapshotVerified=1 terms=%u %s",
+        frame, value, check.terms, details.c_str());
+}
+
+void peerlink_record_check_comparison(uintptr_t checker, uintptr_t context) {
+    const uint32_t frame = word(context + 12);
+    if (!frame || frame != word(context + 8)) return;
+    const uint32_t stored = half(context + 2), current = half(context + 4);
+    const bool local_second = byte(context + 1) == 255;
+    peerlink_journal("MATCH_CHECK_COMPARE frame=%u localValue=%u peerValue=%u equal=%u verdict=%u mismatchCount=%u firstMismatchFrame=%u",
+        frame, local_second ? current : stored, local_second ? stored : current,
+        unsigned(stored == current), word(context + 16), word(checker + 8), word(checker + 12));
+}
+
+void peerlink_record_ball_park(uintptr_t ball, uintptr_t position, uintptr_t group,
+                              uintptr_t transition, uintptr_t flow) {
+    if (ptr(group + 0x30) != ball || word(position) != 0 || word(position + 8) != 0x42c80000 ||
+        (word(ball + 0x30) == 0 && word(ball + 0x38) == 0x42c80000)) return;
+    const uintptr_t controller = command_controller();
+    const uint32_t frame = controller ? word(controller + 0x30) : 0;
+    if (!frame) return;
+    peerlink_journal("MATCH_ACTIVE_BALL_PARK commandFrame=%u flow=%u transitionFlag=%u matchFlowFlag=%u previousXBits=%u previousYBits=%u previousZBits=%u",
+        frame, byte(flow + 0x333c), byte(transition + 0x22e), byte(flow + 0x33a8),
+        word(ball + 0x30), word(ball + 0x34), word(ball + 0x38));
+}
 
 void peerlink_match_state_sample_initial() {
     if (initial.published.load(std::memory_order_acquire)) return;

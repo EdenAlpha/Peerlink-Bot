@@ -1,29 +1,69 @@
 package com.peerlink.app.bot
 
+import android.app.ActivityManager
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.app.Service
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.os.*
+import com.peerlink.app.R
+import java.io.File
+import java.util.concurrent.Executors
+import java.util.concurrent.Future
 import java.util.concurrent.ScheduledThreadPoolExecutor
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
 
 /** Private, bound, same-UID service. A native engine exit cannot take down the game VPN. */
 class BotEngineService : Service() {
+    private companion object {
+        const val ENGINE_CHANNEL = "peerlink_bot_engine"
+        const val ENGINE_NOTIFICATION_ID = 2011
+    }
+
+    @Volatile private var foregroundStatus = "bound"
     private val worker = ScheduledThreadPoolExecutor(1) { Thread(it, "bot-engine-service") }
+    private val memoryWorker = Executors.newSingleThreadExecutor {
+        Thread(it, "bot-memory-sampler").apply { priority = Thread.MIN_PRIORITY }
+    }
     private var observer: Messenger? = null
     private var controllerAllowed = false
-    private var testing = false
+    private var automaticPlay = false
+    private var tacticalReadFailed = false
     private var pollStarted = false
     private var pollTask: ScheduledFuture<*>? = null
     private var lastStatus = ""
-    private var nextPass = 0L
-    private var passes = 0
-    private var keyDown = false
-    private var pss = 0L
+    private val brain = BotBrain()
+    private val kickoff = OpeningKickoff()
+    private val celebration = GoalCelebration()
+    private var waitingAfterGoal = false
+    private var halftimeMenu = -1
+    private var halftimeStartedAt = 0L
+    private var halftimePostSeen = false
+    private var halftimePresses = 0
+    private var nextHalftimePress = 0L
+    private var playTask: ScheduledFuture<*>? = null
+    private var stick = BotStick()
+    private var heldButton: BotAction? = null
+    private var keyRelease: ScheduledFuture<*>? = null
+    private val actionWindow = BotActionWindow()
+    private var lastPlayFrame = 0
+    private var lastPlayAt: Long? = null
+    private var nextPlaySample = 0L
+    @Volatile private var pss = 0L
+    private var memorySample: Future<*>? = null
     private var nextMemorySample = 0L
+    private val setupMemorySamples = SetupMemorySamples()
+    private var priorityTid = 0
+    private var originalNice: Int? = null
+    private var nextSchedulerSample = 0L
     private var nextNativeSample = 0L
     private var nextNetworkSample = 0L
     private var nextMemoryReclaim = 0L
+    private var nextHostStall = 0L
+    @Volatile private var enteredGameplay = false
     private var diagnosticTask: ScheduledFuture<*>? = null
     private val connectionTrace = NativeConnectionTrace()
     private val messenger = Messenger(object : Handler(Looper.getMainLooper()) {
@@ -38,17 +78,62 @@ class BotEngineService : Service() {
         EngineRuntime.report = ::report
         EngineRuntime.audit = { line -> diagnostic(line) }
     }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (foregroundStatus == "active") return START_NOT_STICKY
+        try {
+            val notifications = getSystemService(NotificationManager::class.java)
+            notifications.createNotificationChannel(NotificationChannel(
+                ENGINE_CHANNEL, "PeerLink bot engine", NotificationManager.IMPORTANCE_LOW
+            ).apply { setShowBadge(false) })
+            val notification = Notification.Builder(this, ENGINE_CHANNEL)
+                .setSmallIcon(R.drawable.ic_launcher_monochrome)
+                .setContentTitle("PeerLink bot engine")
+                .setContentText("Running your local opponent")
+                .setOngoing(true)
+                .build()
+            if (Build.VERSION.SDK_INT >= 34) {
+                startForeground(ENGINE_NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+            } else {
+                startForeground(ENGINE_NOTIFICATION_ID, notification)
+            }
+            foregroundStatus = "active"
+        } catch (error: RuntimeException) {
+            // Android can deny promotion if the user leaves before the start is
+            // delivered. Release the started service and keep the existing bind.
+            foregroundStatus = error.javaClass.simpleName
+            stopSelfResult(startId)
+        }
+        return START_NOT_STICKY
+    }
+
     override fun onBind(intent: Intent?): IBinder = messenger.binder
+
+    override fun onUnbind(intent: Intent?): Boolean {
+        // The main PeerLink process owns the room and its VPN. If it goes
+        // away, release the engine's started service as well as its binding.
+        stopSelf()
+        return false
+    }
+
     private fun handle(message: Message) {
         observer = message.replyTo ?: observer
         val result = Bundle()
         try {
             val args = message.data
             when (message.what) {
+                EngineProtocol.PROCESS_INFO -> {
+                    val memory = ActivityManager.RunningAppProcessInfo()
+                    ActivityManager.getMyMemoryState(memory)
+                    result.putInt("pid", Process.myPid())
+                    result.putInt("importance", memory.importance)
+                    result.putString("foreground", foregroundStatus)
+                }
                 EngineProtocol.PREPARE -> {
                     result.putBoolean("ok", EngineRuntime.prepare(this, args.getLong("uid")))
                     result.putInt("pid", Process.myPid())
                     result.putBoolean("retryable", EngineRuntime.startupRetryable)
+                    diagnostic("ENGINE_FOREGROUND state=$foregroundStatus pid=${Process.myPid()}")
                     if (!result.getBoolean("ok")) result.putString("reason", lastStatus.ifBlank { "Bot simulation could not start" })
                     if (result.getBoolean("ok")) diagnostic(EngineRuntime.networkStartupDiagnostics())
                 }
@@ -68,10 +153,12 @@ class BotEngineService : Service() {
                 EngineProtocol.CHECK -> result.putLong("verdict", EngineRuntime.check())
                 EngineProtocol.CONFIGURE_TURN -> result.putBoolean("ok", EngineRuntime.configureTurn(
                     requireNotNull(args.getByteArray("input"))))
-                EngineProtocol.REVISION_POLICY -> {
-                    check(args.containsKey("enabled")) { "Server revision policy is missing" }
-                    result.putBoolean("ok", EngineRuntime.configureRevisionCheck(args.getBoolean("enabled")))
-                    diagnostic("SERVER_REVISION_POLICY enabled=${args.getBoolean("enabled")} accepted=${result.getBoolean("ok")}")
+                EngineProtocol.SERVER_SETTINGS -> {
+                    check(args.containsKey("revisionCheck")) { "Server revision policy is missing" }
+                    val settings = MatchServerSettings(args.getBoolean("revisionCheck"),
+                        requireNotNull(args.getString("protocolOptions")), requireNotNull(args.getString("onlineOptions")),
+                        requireNotNull(args.getIntArray("slowdownThresholds")).toList())
+                    result.putBoolean("ok", EngineRuntime.configureServerSettings(settings))
                 }
                 EngineProtocol.TURN_REQUEST -> result.putByteArray("request", EngineRuntime.turnRequest())
                 EngineProtocol.TURN_ADDRESS -> result.putByteArray("address", EngineRuntime.turnAddress())
@@ -87,6 +174,9 @@ class BotEngineService : Service() {
                     result.putBoolean("ok", ok)
                     if (ok && !pollStarted) {
                         pollStarted = true
+                        nextMemorySample = 0L
+                        diagnosticTask?.cancel(false)
+                        diagnosticTask = null
                         pollTask = worker.scheduleWithFixedDelay(::poll, 0, 500, TimeUnit.MILLISECONDS)
                     }
                 }
@@ -94,30 +184,32 @@ class BotEngineService : Service() {
                 EngineProtocol.LOADING_DIAGNOSTICS -> result.putString("details", EngineRuntime.loadingDiagnostics())
                 EngineProtocol.START_TEST -> {
                     controllerAllowed = args.getBoolean("controllerAllowed")
-                    testing = controllerAllowed && args.getBoolean("automatic", true)
-                    passes = 0
+                    automaticPlay = controllerAllowed && args.getBoolean("automatic", true)
+                    tacticalReadFailed = false
+                    if (!automaticPlay) stopPlaying()
                     result.putBoolean("ok", controllerAllowed)
                 }
                 EngineProtocol.PASS -> result.putBoolean("ok", pressPass())
                 EngineProtocol.PROBE_CONTROLLER -> result.putBoolean("ok", EngineRuntime.probeController())
+                EngineProtocol.HEAP_RECORDING_PROBE -> result.putBoolean("ok",
+                    com.peerlink.app.BuildConfig.DEBUG && args.getInt("pid") == Process.myPid() && EngineRuntime.probeHeapRecording())
                 EngineProtocol.PROBE_PREVIEW -> result.putBoolean("ok", EngineRuntime.probePreviewCallback())
                 EngineProtocol.STOP -> {
                     diagnostic("PEERLINK_STOP component=engine_service reason=stop_command")
                     sampleDiagnostics()
                     diagnosticTask?.cancel(false)
-                    testing = false
+                    automaticPlay = false
                     pollTask?.cancel(false)
+                    stopPlaying()
                     EngineRuntime.stopPreview()
                     EngineRuntime.neutral()
-                    keyDown = false
                     result.putBoolean("ok", true)
                 }
                 else -> error("Unknown bot engine command")
             }
             if (message.what == EngineProtocol.BEGIN_INTRODUCTION || message.what == EngineProtocol.OPEN_SESSION) {
                 diagnostic("NATIVE_COMMAND command=${if (message.what == EngineProtocol.OPEN_SESSION) "open_session" else "begin_introduction"} accepted=${result.getBoolean("ok")}")
-                if (result.getBoolean("ok") && diagnosticTask == null)
-                    diagnosticTask = worker.scheduleWithFixedDelay(::sampleDiagnostics, 0, 100, TimeUnit.MILLISECONDS)
+                if (result.getBoolean("ok") && !pollStarted && diagnosticTask == null) startDiagnostics(250)
             }
             if (message.what == EngineProtocol.PREPARE_CHANNELS || message.what == EngineProtocol.PEER_TURN_ADDRESS || message.what == EngineProtocol.SETUP_MATCH) {
                 diagnostic("NATIVE_COMMAND command=${when (message.what) {
@@ -144,8 +236,99 @@ class BotEngineService : Service() {
     }
     private fun snapshot(passive: Boolean = false): EngineSnapshot {
         val now = SystemClock.elapsedRealtime()
-        if (now >= nextMemorySample) { pss = Debug.getPss().toLong(); nextMemorySample = now + 5000 }
-        return EngineSnapshot(EngineRuntime.snapshot(passive).copyOf(30).also { it[18] = pss })
+        val values = EngineRuntime.snapshot(passive)
+        observeHostStall("snapshot", now)
+        val state = EngineSnapshot(values)
+        val playing = enteredGameplay || state.matchConstructed
+        val tid = values.getOrNull(33) ?: 0L
+        setMatchThreadPriority(if (state.matchConstructed) tid.toInt() else 0)
+        val sampleMemory = now >= nextMemorySample
+        val sampleScheduler = playing && state.matchConstructed && tid > 0 && now >= nextSchedulerSample
+        if ((sampleMemory || sampleScheduler) && memorySample?.isDone != false) {
+            val inSetup = pollStarted
+            if (sampleMemory) nextMemorySample = now + if (playing) 15000 else 5000
+            if (sampleScheduler) nextSchedulerSample = now + 1000
+            memorySample = memoryWorker.submit {
+                val started = SystemClock.elapsedRealtime()
+                if (sampleMemory && inSetup && !playing && !enteredGameplay) EngineRuntime.reclaimMatchPool()
+                if (sampleScheduler) {
+                    val counters = runCatching {
+                        File("/proc/self/task/$tid/schedstat").bufferedReader().use { it.readLine() }
+                    }.getOrNull()
+                    EngineRuntime.journal("BOT_GAME_THREAD tid=$tid requestedAtMs=$now sampledAtMs=$started " +
+                        "frame=${state.commandFrame} schedstat=${counters?.trim()?.replace(' ', ',') ?: "unavailable"}")
+                }
+                if (sampleMemory) {
+                    if (!playing) pss = Debug.getPss()
+                    // The kernel maintains these counters without walking the engine's page tables.
+                    val usage = runCatching { File("/proc/self/status").useLines { lines ->
+                        lines.filter { it.startsWith("VmRSS:") || it.startsWith("VmSwap:") ||
+                            it.startsWith("RssAnon:") || it.startsWith("RssFile:") || it.startsWith("RssShmem:") }
+                            .associate { it.substringBefore(':') to it.substringAfter(':').trim().substringBefore(' ').toLong() }
+                    } }.getOrDefault(emptyMap())
+                    val memory = ActivityManager.MemoryInfo()
+                    getSystemService(ActivityManager::class.java).getMemoryInfo(memory)
+                    val phase = when {
+                        playing -> "match_play"
+                        inSetup -> "team_setup"
+                        state.metadataReady -> "teams_ready"
+                        state.connected -> "exchanging_teams"
+                        else -> "connecting"
+                    }
+                    val line = "BOT_MEMORY phase=$phase availableKiB=${memory.availMem / 1024} " +
+                        "thresholdKiB=${memory.threshold / 1024} lowMemory=${memory.lowMemory} " +
+                        "rssKiB=${usage["VmRSS"] ?: -1} swapKiB=${usage["VmSwap"] ?: -1} " +
+                        "residentAnonKiB=${usage["RssAnon"] ?: -1} residentFileKiB=${usage["RssFile"] ?: -1} " +
+                        "residentSharedKiB=${usage["RssShmem"] ?: -1} androidPssKiB=${if (playing) -1 else pss} " +
+                        "nativeHeapKiB=${Debug.getNativeHeapAllocatedSize() / 1024} " +
+                        "javaUsedKiB=${(Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory()) / 1024} " +
+                        "sampleStartMs=$started sampleDurationMs=${SystemClock.elapsedRealtime() - started}"
+                    if (playing) EngineRuntime.journal(line) else {
+                        diagnostic(line)
+                        setupMemorySamples.next(state.metadataReady, inSetup, started, pss)?.let { checkpoint ->
+                            val scanStart = SystemClock.elapsedRealtime()
+                            val groups = EngineRuntime.setupMemoryGroups(checkpoint)
+                            EngineRuntime.journal("BOT_MEMORY_GROUPS phase=$phase checkpoint=$checkpoint $groups " +
+                                "sampleStartMs=$scanStart sampleDurationMs=${SystemClock.elapsedRealtime() - scanStart}")
+                        }
+                    }
+                }
+            }
+        }
+        values[18] = if (playing) -1 else pss
+        return state
+    }
+    // Called on the service worker. Target only the TID observed inside this process.
+    private fun setMatchThreadPriority(tid: Int) {
+        if (tid == priorityTid) return
+        val target = Process.THREAD_PRIORITY_FOREGROUND
+        originalNice?.let { original ->
+            runCatching {
+                if (Process.getThreadPriority(priorityTid) == target)
+                    Process.setThreadPriority(priorityTid, original)
+            }
+        }
+        originalNice = null
+        priorityTid = tid
+        if (tid <= 0 || !File("/proc/self/task/$tid").isDirectory) return
+        try {
+            val before = Process.getThreadPriority(tid)
+            if (before > target) {
+                Process.setThreadPriority(tid, target)
+                originalNice = before
+            }
+            EngineRuntime.journal("BOT_CPU_PRIORITY tid=$tid beforeNice=$before actualNice=${Process.getThreadPriority(tid)} requestedNice=$target")
+        } catch (error: RuntimeException) {
+            EngineRuntime.journal("BOT_CPU_PRIORITY tid=$tid requestedNice=$target result=${error.javaClass.simpleName}")
+        }
+    }
+
+    private fun observeHostStall(operation: String, startedAt: Long) {
+        val now = SystemClock.elapsedRealtime()
+        if (enteredGameplay && now - startedAt >= 37 && now >= nextHostStall) {
+            nextHostStall = now + 1000
+            EngineRuntime.journal("BOT_HOST_STALL operation=$operation startedAtMs=$startedAt durationMs=${now - startedAt}")
+        }
     }
     private fun diagnostic(line: String, firstFailure: Boolean = false) {
         if (firstFailure || line.startsWith("MATCH_LOADING") || line.startsWith("NATIVE_STATE") ||
@@ -159,9 +342,13 @@ class BotEngineService : Service() {
             }
         }) }
     }
-    private fun sampleDiagnostics() {
+    private fun startDiagnostics(intervalMs: Long) {
+        diagnosticTask = worker.scheduleWithFixedDelay({ sampleDiagnostics() }, 0, intervalMs, TimeUnit.MILLISECONDS)
+    }
+
+    private fun sampleDiagnostics(published: EngineSnapshot? = null) {
         try {
-            val state = snapshot(passive = true)
+            val state = published ?: snapshot(passive = true)
             val now = SystemClock.elapsedRealtime()
             // Network startup can fail before SETUP_MATCH enables the loading
             // monitor. Export these passive diagnostics during introduction,
@@ -186,14 +373,16 @@ class BotEngineService : Service() {
         val now = SystemClock.elapsedRealtime()
         if (now < nextNativeSample) return
         nextNativeSample = now + 5000
-        diagnostic(EngineRuntime.loadingDiagnostics())
+        if (!enteredGameplay) diagnostic(EngineRuntime.loadingDiagnostics())
         runCatching { observer?.send(Message.obtain(null, EngineProtocol.NATIVE_STATE).apply {
             data = Bundle().apply { putLongArray("state", state.values) }
         }) }
     }
     private fun poll() {
         try {
+            val startedAt = SystemClock.elapsedRealtime()
             val advance = EngineRuntime.advanceMatch(controllerAllowed)
+            observeHostStall("match_poll", startedAt)
             check(advance >= 0) {
                 val reason = when (advance) {
                     -205 -> "The bot's user-data task disappeared before completion"
@@ -208,64 +397,199 @@ class BotEngineService : Service() {
                     -216 -> "The bot's original match-setup task is unavailable"
                     -217 -> "The bot's match-setup synchronization failed"
                     -218 -> "The bot's match-setup synchronization timed out"
+                    -219 -> "The bot could not start the original platform session and match reporting tasks"
                     else -> "Bot match setup failed"
                 }
                 "$reason (native stage $advance)"
             }
             val state = snapshot()
+            if (state.matchConstructed && state.simulationInputReady) enteredGameplay = true
+            sampleDiagnostics(state)
             logNativeState(state)
-            val line = state.status()
-            if (line != lastStatus) report(line)
+            val line = state.status(afterKickoff = enteredGameplay)
+            if (line != lastStatus) {
+                if (enteredGameplay && state.matchAtBreak) diagnostic(EngineRuntime.loadingDiagnostics())
+                report(line)
+            }
             val now = SystemClock.elapsedRealtime()
             // Loading the foreground game caused a confirmed Android LMK on
             // the 4 GB phone. Return already-freed native pages during this
             // loading window; never discard live match objects or game data.
-            if (advance >= 2 && !state.matchConstructed && now >= nextMemoryReclaim) {
+            if (advance >= 2 && !enteredGameplay && !state.matchConstructed && now >= nextMemoryReclaim) {
                 nextMemoryReclaim = now + 5000
                 EngineRuntime.releaseUnusedMemory("match_loading")
-                val memory = android.app.ActivityManager.MemoryInfo()
-                getSystemService(android.app.ActivityManager::class.java).getMemoryInfo(memory)
-                diagnostic("BOT_MEMORY availableKiB=${memory.availMem / 1024} " +
-                    "thresholdKiB=${memory.threshold / 1024} lowMemory=${memory.lowMemory} " +
-                    "nativeHeapKiB=${Debug.getNativeHeapAllocatedSize() / 1024}")
             }
-            if (testing && passes < 10 && state.canTestPass && now >= nextPass) {
-                if (pressPass()) { passes++; nextPass = now + 6000 }
+            if (automaticPlay && enteredGameplay && state.canControlMatch) {
+                if (!tacticalReadFailed && playTask == null)
+                    playTask = worker.scheduleWithFixedDelay(::play, 0, 100, TimeUnit.MILLISECONDS)
+                // Use the minimal native state for the opening kickoff.
+                // Stop assisting once the ball moves, even if the reader
+                // later loses tactical data or play returns to centre.
+                if (kickoff.shouldPress(state.canTestPass, state.hostsRoom, state.commandFrame, state.ballStationaryAtCentre) &&
+                    pressPass(state, manual = false)) {
+                    kickoff.pressed(state.commandFrame)
+                    EngineRuntime.journal("BOT_PLAY_KICKOFF frame=${state.commandFrame} action=PASS")
+                }
+            } else if (playTask != null) {
+                stopPlaying()
+            }
+            if (state.matchAtBreak && enteredGameplay) {
+                brain.resetDirection()
+                if (halftimeMenu < 0) {
+                    halftimeStartedAt = now
+                    halftimePostSeen = false
+                }
+                if (state.halftimeMenu != halftimeMenu) {
+                    halftimeMenu = state.halftimeMenu
+                    halftimePresses = 0
+                    nextHalftimePress = 0
+                    if (halftimeMenu == 4) halftimePostSeen = true
+                    EngineRuntime.journal("BOT_HALFTIME_MENU view=${state.halftimeView} frame=${state.commandFrame} " +
+                        "breakElapsedMs=${now - halftimeStartedAt} postSeen=$halftimePostSeen")
+                }
+                if (automaticPlay && state.halftimeCanConfirm && heldButton == null && halftimePresses < 2 &&
+                    now >= nextHalftimePress && EngineRuntime.halftimeConfirm()) {
+                    heldButton = BotAction.PASS // Same A button. The regular release also works between halves.
+                    keyRelease = worker.schedule(::releaseButton, BotAction.PASS.holdMs, TimeUnit.MILLISECONDS)
+                    halftimePresses++
+                    nextHalftimePress = now + 2500
+                    EngineRuntime.journal("BOT_HALFTIME_CONFIRM attempt=$halftimePresses frame=${state.commandFrame}")
+                }
+            } else if (halftimeMenu >= 0) {
+                EngineRuntime.journal("BOT_HALFTIME_EXIT frame=${state.commandFrame} playable=${state.canTestPass} " +
+                    "connected=${state.connected} breakElapsedMs=${now - halftimeStartedAt}")
+                halftimeMenu = -1
             }
         } catch (error: Exception) {
-            testing = false
+            automaticPlay = false
             pollTask?.cancel(false)
+            stopPlaying()
             // A checksum stop can occur inside the normal five-second sample
             // interval. Export its exact comparison even if throttled state
             // reporting would otherwise skip this final observation.
-            runCatching { diagnostic(EngineRuntime.loadingDiagnostics()) }
-            runCatching { logNativeState(snapshot()) }
-            EngineRuntime.neutral()
             val failure = runCatching { snapshot() }.getOrNull()
+            runCatching { diagnostic(EngineRuntime.loadingDiagnostics()) }
+            if (failure != null) {
+                sampleDiagnostics(failure)
+                logNativeState(failure)
+            }
+            EngineRuntime.neutral()
             report(if (failure?.nativeFailed == true) failure.status() else error.message ?: "Bot match setup stopped")
+            if (!worker.isShutdown && diagnosticTask == null) startDiagnostics(1000)
         }
     }
-    private fun pressPass(): Boolean {
-        if (!controllerAllowed || keyDown || !snapshot().canTestPass) return false
-        if (!EngineRuntime.inputKey(96, true)) return false
-        diagnostic("BOT_INPUT key=96 action=down nativeAccepted=true destination=private_bot_engine")
-        keyDown = true
-        worker.schedule({
+    private fun play() {
+        try {
+            val now = SystemClock.elapsedRealtime()
+            val state = EngineRuntime.playState()
+            observeHostStall("play_state", now)
+            if (state == null || state.frame == lastPlayFrame) {
+                if (lastPlayAt?.let { now - it >= 250 } != false) setStick(BotStick())
+                if (now >= nextPlaySample) {
+                    nextPlaySample = now + 3000
+                    EngineRuntime.journal("BOT_PLAY_WAIT state=${if (state == null) "unavailable" else "no_new_frame"}")
+                }
+                return
+            }
+            lastPlayFrame = state.frame
+            lastPlayAt = now
+            val afterGoal = celebration.observingGoal(state)
+            if (afterGoal != waitingAfterGoal) {
+                waitingAfterGoal = afterGoal
+                EngineRuntime.journal("BOT_GOAL_INPUT frame=${state.frame} paused=$afterGoal ballX=${state.ball.x} ballZ=${state.ball.z}")
+            }
+            if (afterGoal) {
+                if (heldButton != null) releaseButton()
+                setStick(BotStick())
+                return
+            }
+            if (heldButton?.defensive == false) return
+            val control = state.forControl()
+            if (heldButton != null) {
+                if (control.selected >= 0 && control.owner == control.selected) releaseButton()
+            }
+            val plan = brain.decide(control)
+            if (!setStick(plan.stick)) return
+            val action = plan.action
+            if (heldButton == null && action != null && actionWindow.available(now, action, control) && pressButton(action)) {
+                actionWindow.sent(now, action, control.selected)
+                EngineRuntime.journal("BOT_PLAY_ACTION frame=${state.frame} action=${action.name} " +
+                    "selected=${state.selected} owner=${state.owner} side=${state.side} " +
+                    "controlPlayer=${control.selected} controlOwner=${control.owner} intendedReceiver=${plan.receiver}")
+            }
+            if (now >= nextPlaySample) {
+                nextPlaySample = now + 3000
+                EngineRuntime.journal("BOT_PLAY_STATE frame=${state.frame} side=${state.side} " +
+                    "selected=${state.selected} owner=${state.owner} direction=${state.direction} " +
+                    "controlPlayer=${control.selected} controlOwner=${control.owner} " +
+                    "ballX=${state.ball.x} ballZ=${state.ball.z} positions=${state.players.count { it != null }} " +
+                    "stickX=${stick.x} stickY=${stick.y} sprint=${stick.sprint}")
+            }
+        } catch (error: Exception) {
+            tacticalReadFailed = true
+            stopPlaying()
+            EngineRuntime.journal("BOT_PLAY_TACTICS_STOPPED error=${error.javaClass.simpleName}")
+        }
+    }
+
+    private fun setStick(next: BotStick): Boolean {
+        if (next == stick) return true
+        if (!EngineRuntime.inputMotion(next.x, next.y, next.sprint)) return false
+        stick = next
+        return true
+    }
+
+    private fun pressButton(action: BotAction): Boolean {
+        if (heldButton != null || !EngineRuntime.inputKey(action.key, true)) return false
+        heldButton = action
+        keyRelease = worker.schedule(::releaseButton, action.holdMs, TimeUnit.MILLISECONDS)
+        return true
+    }
+
+    private fun releaseButton() {
+        keyRelease?.cancel(false)
+        keyRelease = null
+        heldButton?.let { action ->
             try {
-                val accepted = EngineRuntime.inputKey(96, false)
-                diagnostic("BOT_INPUT key=96 action=up nativeAccepted=$accepted destination=private_bot_engine")
-            } finally { keyDown = false }
-        }, 140, TimeUnit.MILLISECONDS)
-        report("Bot Pass input sent — check the response in eFootball")
+                if (!EngineRuntime.inputKey(action.key, false)) {
+                    EngineRuntime.neutral()
+                    stick = BotStick()
+                }
+            } finally {
+                heldButton = null
+            }
+        }
+    }
+
+    private fun stopPlaying() {
+        playTask?.cancel(false)
+        playTask = null
+        celebration.reset()
+        waitingAfterGoal = false
+        lastPlayFrame = 0
+        lastPlayAt = null
+        runCatching { releaseButton() }
+        runCatching { setStick(BotStick()) }
+    }
+
+    private fun pressPass(published: EngineSnapshot? = null, manual: Boolean = true): Boolean {
+        if (!controllerAllowed || heldButton != null || !(published ?: snapshot()).canTestPass ||
+            !setStick(BotStick()) || !pressButton(BotAction.PASS)) return false
+        actionWindow.sent(SystemClock.elapsedRealtime(), BotAction.PASS, -1)
+        if (manual) {
+            diagnostic("BOT_INPUT key=96 action=down nativeAccepted=true destination=private_bot_engine")
+            report("Bot Pass input sent — check the response in eFootball")
+        }
         return true
     }
     override fun onDestroy() {
+        if (foregroundStatus == "active") stopForeground(STOP_FOREGROUND_REMOVE)
         diagnostic("PEERLINK_STOP component=engine_service reason=android_onDestroy action=close_host_and_exit")
         diagnosticTask?.cancel(false)
-        testing = false
+        worker.shutdownNow()
+        memoryWorker.shutdownNow()
         runCatching { EngineRuntime.neutral() }
         EngineRuntime.closeHost()
-        worker.shutdownNow()
         super.onDestroy()
         // The original engine owns native worker threads and cannot be dlclosed safely.
         // The bot Activity shares this process; VPN and UI live in the main process.

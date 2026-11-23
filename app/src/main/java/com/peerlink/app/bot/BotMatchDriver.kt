@@ -11,8 +11,8 @@ import kotlin.concurrent.thread
  * and opaque native address exchange while its session is connecting.
  *   transport configuration -> seat -> entry side (HOME/leader) -> check_match_enable
  *   -> match_ready (.53.2) -> go_match -> game_session -> opponent address
- *   -> original session + TURN exchange -> check-res echo -> game_id -> send_session_id
- *   -> antenna beat -> PeerSlot armed (live connection phase).
+ *   -> original session + TURN exchange -> confirmed server connection check
+ *   -> game_id -> send_session_id -> original engine match setup.
  *
  * v1 could stop silently, and the user's game then sat on "Waiting for
  * Opponent" forever because the bot's half had failed quietly (a 10-minute
@@ -43,14 +43,6 @@ object BotMatchDriver {
 
     /** Retry spacing for transient ("_NET_FAIL"-class) answers. */
     private const val RETRY_MS = 3_000L
-
-    /**
-     * Antenna re-push cadence. The exact 11.1.0 interval comes from the
-     * server's AntennaInfoSendIntervalMs (CMD_GET_SERVER_ENV); until that is
-     * wired in, 5 s matches the STUN beat's proven cadence and stays well
-     * inside any sane interval.
-     */
-    private const val ANTENNA_INTERVAL_MS = 5_000L
 
     /** TURN watch: poll for the peer address, then carry on without it. */
     private const val WATCH_TIMEOUT_MS = 60_000L
@@ -93,17 +85,16 @@ object BotMatchDriver {
         val self = gate.uid
         try {
             check(EngineHost.isReady) { "Bot simulation is not ready; start a new room" }
-            // The regular client applies CMD_GET_SERVER_ENV before constructing
-            // its match-data model. A standalone host otherwise retains the
-            // native default, which can reject a server-permitted revision.
+            // Apply the same server settings as the regular client before
+            // constructing the original match-data model.
             while (running) {
                 val environment = gate.step("CMD_GET_SERVER_ENV")
                 if (transient(environment["result"]?.toString())) { Thread.sleep(RETRY_MS); continue }
-                val revisionCheck = MatchServerSettings.revisionCheck(environment)
-                check(EngineHost.configureRevisionCheck(revisionCheck)) {
-                    "The bot could not apply the server's database revision policy"
+                val settings = MatchServerSettings.fromResponse(environment)
+                check(EngineHost.configureServerSettings(settings)) {
+                    "The bot could not apply the server's match settings"
                 }
-                log("SERVER_MATCH_SETTINGS source=CMD_GET_SERVER_ENV is_revision_check=${if (revisionCheck) "YES" else "NO"} nativeApplied=true")
+                log("SERVER_MATCH_SETTINGS source=CMD_GET_SERVER_ENV is_revision_check=${if (settings.revisionCheck) "YES" else "NO"} nativeApplied=true")
                 break
             }
             if (!running) return
@@ -328,21 +319,13 @@ object BotMatchDriver {
             log("original peer transport confirmed; reporting connection before waiting for match data")
             status("Peer link connected — confirming match setup with the server")
 
-            // -- check-res echo (capture block 105 body); retried on noise,
-            //    otherwise logged and carried on (the game sends its own).
-            var chkDone = false
-            while (running && !chkDone) {
-                val chk = flow.checkResEcho(gate, rid, self, opp, gs!!)
-                val cr = chk["result"]?.toString()
-                if (transient(cr)) {
-                    log("check_res -> $cr -- retrying")
-                    Thread.sleep(RETRY_MS)
-                } else {
-                    log("check_res (capture block 105 body) -> $cr")
-                    chkDone = true
-                }
-            }
-            if (!running) return
+            if (!PeerConnectionPhase.confirmServerConnection(
+                running = { running },
+                report = { flow.checkResEcho(gate, rid, self, opp, gs!!) },
+                poll = { flow.pollConnectionReport(gate, rid, self, opp) },
+                exchangeAddresses = turnExchange::pump,
+                progress = ::log,
+            )) return
 
             // -- game id + session id (the gate assembles these over a beat).
             var gameId: Long? = null
@@ -353,25 +336,15 @@ object BotMatchDriver {
                     Thread.sleep(RETRY_MS)
                 }
             }
+            if (!running) return
             log("game_id found")
-            flow.sendSessionId(gate, gameId!!)
+            val sessionIdReply = flow.sendSessionId(gate, gameId!!)
+            log("send_session_id -> ${sessionIdReply["result"] ?: "unavailable"}")
             status("Connected — synchronizing team data")
             if (!PeerConnectionPhase.awaitMetadata(
                 running = { running }, snapshot = EngineHost::snapshot,
                 exchangeAddresses = turnExchange::pump,
             )) return
-            // The verified original-host sequence reports this real pre-play
-            // phase before starting its native pre-match process. A connected
-            // transport alone is not evidence that team synchronization ended.
-            while (running) {
-                val phase = gate.step("CMD_CHANGE_GAMEPHASE", PreMatchNotifications.dataSync(gameId!!))
-                val result = phase["result"]?.toString()
-                if (transient(result)) { Thread.sleep(RETRY_MS); continue }
-                check(result == "NOERR") { "The server refused the pre-match data-sync phase: $result" }
-                log("SERVER_MATCH_PHASE phase=DATASYNC result=NOERR nativeMetadataReady=true")
-                break
-            }
-            if (!running) return
             status("Connected — setting up the bot's match")
             val room = flow.roomState(gate, rid)
             val matchSettings = room["room_match_settings"] as? Map<*, *>
@@ -383,14 +356,9 @@ object BotMatchDriver {
                 "cpu_level=${environment["cpu_level"]} injury=${environment["injury"]} " +
                 "ball_type=${environment["ball_type"]} nativeInputSupplied=true")
             val controllersAllowed = environment["can_use_mobile_controller"] == "YES"
-            check(EngineHost.startInputTest(controllersAllowed)) { "Enable mobile controllers in the room settings for the bot control test" }
+            check(EngineHost.startInputTest(controllersAllowed)) { "Enable mobile controllers in the room settings so the bot can play" }
 
             turnExchange.pump()
-
-            // -- antenna beat (the liveness signal the server watches).
-            val (setR, getR) = flow.antennaBeat(gate, rid, self, opp, gs!!)
-            log("antenna set=${setR["result"]} get=${getR["result"]} " +
-                "finished=${getR["is_check_finished"]}")
 
             log("connection phase ARMED -- the ferry is live; the ENGINE owns " +
                 "every answer from here, the bot answers nothing")
@@ -401,16 +369,10 @@ object BotMatchDriver {
                 "peerPort=${com.peerlink.app.core.AppState.enginePeerPort}")
             status(EngineHost.snapshot().status())
 
-            // Mid-match liveness: re-push the antenna echo on a cadence.
-            var nextAntenna = System.currentTimeMillis() + ANTENNA_INTERVAL_MS
             while (running) {
                 Thread.sleep(1000)
                 if (!running) break
                 turnExchange.pump()
-                if (System.currentTimeMillis() >= nextAntenna) {
-                    flow.antennaBeat(gate, rid, self, opp, gs!!)
-                    nextAntenna = System.currentTimeMillis() + ANTENNA_INTERVAL_MS
-                }
             }
         } catch (t: Throwable) {
             log("DRIVER_EXCEPTION type=${t.javaClass.simpleName} observedAtMs=${android.os.SystemClock.elapsedRealtime()}; recording flow before leaving driver")

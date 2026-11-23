@@ -218,13 +218,17 @@ private fun MatchRoomCard(
                 Text("Couldn't read game files", color = PL.ink, fontSize = 22.sp, fontWeight = FontWeight.Bold)
                 Text("${room.missingFiles} files were missing or unreadable. Check that eFootball is installed, then try again.",
                     color = PL.inkSoft, fontSize = 13.sp, lineHeight = 19.sp)
-                MatchPrimaryButton("Check again", Icons.Rounded.Refresh) { PlayRoomController.createRoom() }
+                MatchPrimaryButton("Check again", Icons.Rounded.Refresh) {
+                    PlayRoomController.createRoom(recordMemory = room.recordMemoryOnRetry)
+                }
                 MatchSecondaryButton("Export diagnostics", Icons.Rounded.Download, onClick = onExportLogs)
             }
             is RoomState.Failed -> {
                 Text("Couldn't open the room", color = PL.ink, fontSize = 22.sp, fontWeight = FontWeight.Bold)
                 Text(room.reason, color = PL.inkSoft, fontSize = 13.sp, lineHeight = 19.sp)
-                MatchPrimaryButton("Try again", Icons.Rounded.Refresh) { PlayRoomController.createRoom() }
+                MatchPrimaryButton("Try again", Icons.Rounded.Refresh) {
+                    PlayRoomController.createRoom(recordMemory = room.recordMemoryOnRetry)
+                }
                 MatchSecondaryButton("Export diagnostics", Icons.Rounded.Download, onClick = onExportLogs)
             }
             RoomState.Ending -> {
@@ -232,6 +236,13 @@ private fun MatchRoomCard(
                 LinearProgressIndicator(Modifier.fillMaxWidth().height(4.dp).clip(CircleShape),
                     color = PL.gold, trackColor = Color.White.copy(alpha = 0.10f))
                 Text("You can start another room when this finishes.", color = PL.inkSoft, fontSize = 13.sp)
+            }
+        }
+        if (com.peerlink.app.BuildConfig.DEBUG && (room == RoomState.Idle || room is RoomState.Failed)) {
+            if (room is RoomState.Failed && room.recordMemoryOnRetry) {
+                MatchSecondaryButton("Create room without recording", Icons.Rounded.ArrowForward) { PlayRoomController.createRoom() }
+            } else {
+                MatchSecondaryButton("Record memory and create room", Icons.Rounded.Memory) { PlayRoomController.createRoom(recordMemory = true) }
             }
         }
     }

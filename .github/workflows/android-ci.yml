@@ -78,6 +78,8 @@ jobs:
           "$RUNNER_TEMP/input-readiness-test"
           g++ -std=c++17 -Wall -Wextra -Werror tests/native/edit_work_merge_test.cpp -o "$RUNNER_TEMP/edit-work-merge-test"
           "$RUNNER_TEMP/edit-work-merge-test"
+          g++ -std=c++17 -Wall -Wextra -Werror -pthread -Iapp/src/main/jni tests/native/udp_trace_storage_test.cpp -o "$RUNNER_TEMP/udp-trace-storage-test"
+          "$RUNNER_TEMP/udp-trace-storage-test"
 
       - name: Verify APK
         run: |

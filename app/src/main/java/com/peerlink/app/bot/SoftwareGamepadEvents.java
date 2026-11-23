@@ -1,6 +1,7 @@
 package com.peerlink.app.bot;
 
 import android.os.SystemClock;
+import android.view.InputDevice;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
 
@@ -14,12 +15,17 @@ public final class SoftwareGamepadEvents {
         long now = SystemClock.uptimeMillis();
         return new KeyEvent(now, now, action, code, 0, 0, 4242, 0, 0, 0x401);
     }
-    public static MotionEvent neutral() {
+    public static MotionEvent motion(float x, float y, float dash) {
         MotionEvent.PointerProperties pointer = new MotionEvent.PointerProperties(); pointer.id = 0;
         MotionEvent.PointerCoords coordinates = new MotionEvent.PointerCoords();
+        coordinates.setAxisValue(MotionEvent.AXIS_X, x);
+        coordinates.setAxisValue(MotionEvent.AXIS_Y, y);
+        // This engine accepts both Android right-trigger aliases in axis order.
+        coordinates.setAxisValue(MotionEvent.AXIS_RTRIGGER, dash);
+        coordinates.setAxisValue(MotionEvent.AXIS_GAS, dash);
         long now = SystemClock.uptimeMillis();
         return MotionEvent.obtain(now, now, MotionEvent.ACTION_MOVE, 1,
             new MotionEvent.PointerProperties[]{pointer}, new MotionEvent.PointerCoords[]{coordinates},
-            0, 0, 1, 1, 4242, 0, 0x01000010, 0);
+            0, 0, 1, 1, 4242, 0, InputDevice.SOURCE_JOYSTICK, 0);
     }
 }

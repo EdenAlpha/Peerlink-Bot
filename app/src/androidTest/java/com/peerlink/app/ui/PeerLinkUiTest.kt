@@ -168,7 +168,7 @@ class PeerLinkUiTest {
     @Test fun startupFailureLeavesPreparationAndShowsRetry() {
         val previous = PlayRoomController.backend
         PlayRoomController.attach(object : BotRoomBackend {
-            override suspend fun createRoom(ctx: Context, allowResourceDownload: Boolean): String {
+            override suspend fun createRoom(ctx: Context, allowResourceDownload: Boolean, verifyEngine: ((Int) -> Unit)?): String {
                 error("The graphics-free bot could not start.")
             }
         }, context)

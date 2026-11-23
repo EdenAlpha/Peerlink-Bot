@@ -4,12 +4,48 @@
 #include "executable_patch.h"
 
 #include <cerrno>
+#include <cinttypes>
+#include <cstdio>
 #include <cstring>
 #include <limits>
 #include <sys/mman.h>
 #include <unistd.h>
 
 namespace peerlink {
+
+void *reserve_writable_page(uintptr_t begin, uintptr_t end, size_t page_size) {
+    constexpr int fixed_without_replacement = 0x100000; // Linux MAP_FIXED_NOREPLACE.
+    if (page_size < 4096 || page_size > 65536 || (page_size & (page_size - 1)) ||
+        begin >= end || end - begin < page_size) return MAP_FAILED;
+    uintptr_t candidate = (begin + page_size - 1) & ~(uintptr_t(page_size) - 1);
+    FILE *maps = fopen("/proc/self/maps", "re");
+    if (!maps) return MAP_FAILED;
+    auto try_gap = [&](uintptr_t upper) -> void * {
+        // A competing mmap can claim a gap between the map read and reservation.
+        // The kernel must reject replacement in that case.
+        for (unsigned attempt = 0; attempt < 4 && candidate <= upper && upper - candidate >= page_size;
+             ++attempt, candidate += page_size) {
+            void *result = mmap(reinterpret_cast<void *>(candidate), page_size, PROT_READ | PROT_WRITE,
+                MAP_PRIVATE | MAP_ANONYMOUS | fixed_without_replacement, -1, 0);
+            if (result == reinterpret_cast<void *>(candidate)) return result;
+            // Kernels that do not know this flag may treat it as an address hint.
+            if (result != MAP_FAILED) munmap(result, page_size);
+        }
+        return MAP_FAILED;
+    };
+    char line[1024];
+    void *result = MAP_FAILED;
+    while (candidate < end && fgets(line, sizeof(line), maps)) {
+        uintptr_t start = 0, finish = 0;
+        if (sscanf(line, "%" SCNxPTR "-%" SCNxPTR, &start, &finish) != 2 || finish <= candidate) continue;
+        result = try_gap(start < end ? start : end);
+        if (result != MAP_FAILED || start >= end) break;
+        candidate = finish;
+    }
+    if (result == MAP_FAILED) result = try_gap(end);
+    fclose(maps);
+    return result;
+}
 
 bool replace_executable_bytes(uintptr_t address, const void *bytes, size_t length,
                               CodePatchFailure *failure) {

@@ -37,7 +37,7 @@ public final class GameAndroidRuntime implements AutoCloseable {
     private final ClassLoader loader;
     private final CompletableFuture<Activity> attached = new CompletableFuture<>();
 
-    private GameAndroidRuntime(Context owner, Context game, File root) throws Exception {
+    private GameAndroidRuntime(Context owner, Context game, File root, File engine) throws Exception {
         if (Looper.myLooper() != Looper.getMainLooper()) throw new IllegalStateException("Android main thread required");
         this.game = game; storage = root; packageName = owner.getPackageName();
         frames = new BotRenderSurface(320, 180, new Handler(Looper.getMainLooper()));
@@ -58,9 +58,19 @@ public final class GameAndroidRuntime implements AutoCloseable {
             ApplicationInfo info = game.getApplicationInfo();
             ArrayList<String> paths = new ArrayList<>(); paths.add(bridge.getAbsolutePath()); paths.add(info.sourceDir);
             if (info.splitSourceDirs != null) paths.addAll(Arrays.asList(info.splitSourceDirs));
-            String libraries = new File(owner.getFilesDir(), "engine").getAbsolutePath() + File.pathSeparator + owner.getApplicationInfo().nativeLibraryDir;
-            if (info.nativeLibraryDir != null) libraries += File.pathSeparator + info.nativeLibraryDir;
-            loader = new PathClassLoader(String.join(File.pathSeparator, paths), libraries, owner.getClassLoader());
+            LinkedHashSet<String> libraries = new LinkedHashSet<>();
+            libraries.add(engine.getParentFile().getAbsolutePath());
+            libraries.add(new File(owner.getFilesDir(), "engine").getAbsolutePath());
+            libraries.add(owner.getApplicationInfo().nativeLibraryDir);
+            if (info.nativeLibraryDir != null) libraries.add(info.nativeLibraryDir);
+            loader = new PathClassLoader(String.join(File.pathSeparator, paths),
+                    String.join(File.pathSeparator, libraries), owner.getClassLoader()) {
+                @Override public String findLibrary(String name) {
+                    // GameActivity and NativeActivity must resolve the same ELF
+                    // that the native backend has already pinned and verified.
+                    return "UE4".equals(name) ? engine.getAbsolutePath() : super.findLibrary(name);
+                }
+            };
             current = this;
             ComponentName component = new ComponentName(owner.getPackageName(), "com.peerlink.engine.PhoneGameHost");
             Intent launch = new Intent().setComponent(component);
@@ -87,8 +97,8 @@ public final class GameAndroidRuntime implements AutoCloseable {
             frames.close(); throw error;
         }
     }
-    static GameAndroidRuntime create(Context owner, Context game, File root) throws Exception {
-        GameAndroidRuntime runtime = EngineAndroidHost.onMainThread(() -> new GameAndroidRuntime(owner, game, root));
+    static GameAndroidRuntime create(Context owner, Context game, File root, File engine) throws Exception {
+        GameAndroidRuntime runtime = EngineAndroidHost.onMainThread(() -> new GameAndroidRuntime(owner, game, root, engine));
         try { runtime.attached.get(60, TimeUnit.SECONDS); return runtime; }
         catch (Exception error) { runtime.close(); throw error; }
     }

@@ -204,12 +204,12 @@ object AppState {
     //  L O G G I N G
     // ═══════════════════════════════════════════════════════════════
 
-    private val logBuffer = StringBuilder(65536)
     // Cap for the in-memory log buffer. 1MB is plenty for the fallback use cases
     // (crash reports, export fallback). The session FILE is uncapped and is what
     // the export button reads — so this cap does NOT limit what gets saved to
     // Downloads. See appendLog() for why this matters.
     private const val MAX_DISPLAY_LOG = 1_000_000
+    private val logBuffer = LogTail(MAX_DISPLAY_LOG)
     private val logLock = Any()
     private val timestampFormatter = object : ThreadLocal<SimpleDateFormat>() {
         override fun initialValue(): SimpleDateFormat = SimpleDateFormat("HH:mm:ss.SSS", Locale.US)
@@ -287,8 +287,7 @@ object AppState {
      * (creating a new session file), the export still contains the complete
      * history across restarts — no caps, no truncation.
      *
-     * Falls back to the in-memory logBuffer only if NO session files exist
-     * at all (e.g. export clicked before any session was started).
+     * Include current startup messages when exporting before the session writer opens.
      */
     fun flushAndReadSessionLog(context: android.content.Context): String {
         // Force-flush the writer so the latest entries are on disk.
@@ -330,9 +329,15 @@ object AppState {
             }
         } catch (_: Exception) {}
 
-        // Fallback to in-memory buffer if no session files gave us anything
         if (sb.isEmpty()) {
             sb.append(getLogs())
+        } else {
+            val current = synchronized(logLock) { if (fileWriter == null) logBuffer.toString() else "" }
+            if (current.isNotBlank() && !sb.endsWith(current)) {
+                sb.appendLine()
+                sb.appendLine("Current app messages from this process")
+                sb.append(current)
+            }
         }
 
         return sb.toString()
@@ -460,20 +465,6 @@ object AppState {
         val line = buildTimestampedLine(message)
         synchronized(logLock) {
             logBuffer.append(line)
-            // Cap the in-memory buffer at 1MB. This buffer is ONLY used for:
-            //   (a) the DATA FEED admin panel UI (which the user doesn't use)
-            //   (b) as a fallback for crash reports
-            //   (c) as a fallback for export if the session file is missing
-            // The canonical log store is the session FILE (uncapped) — export
-            // reads from the file, not from this buffer. So capping the buffer
-            // does NOT affect the "no cap on downloads" requirement.
-            // Previously this was uncapped, which combined with
-            // CrashLogger.persistLiveLog() on every call caused 10MB+ of
-            // SharedPreferences I/O per log line — the root cause of the
-            // process being killed on Android 15.
-            if (logBuffer.length > MAX_DISPLAY_LOG) {
-                logBuffer.delete(0, logBuffer.length - MAX_DISPLAY_LOG)
-            }
         }
         enqueueFileWrite(line)
         // NOTE: CrashLogger.persistLiveLog() is NO LONGER called here.

@@ -11,6 +11,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import com.peerlink.app.bot.BotMatchDriver
+import com.peerlink.app.bot.BotHeapRecording
 import com.peerlink.app.bot.BotMode
 import com.peerlink.app.bot.EngineHost
 import com.peerlink.app.bot.PeerSlot
@@ -33,7 +34,8 @@ import android.content.Intent
 /** The bot's room service: creates the room and returns its number. */
 interface BotRoomBackend {
     /** Create a room as the bot; returns the room number to show the user. */
-    suspend fun createRoom(ctx: Context, allowResourceDownload: Boolean = false): String
+    suspend fun createRoom(ctx: Context, allowResourceDownload: Boolean = false,
+                           verifyEngine: ((Int) -> Unit)? = null): String
 }
 
 /**
@@ -54,9 +56,10 @@ sealed interface RoomState {
     data class Ready(val number: String, val note: String = "") : RoomState
 
     /** Room creation failed (gate down, not logged in, …). */
-    data class Failed(val reason: String) : RoomState
+    data class Failed(val reason: String, val recordMemoryOnRetry: Boolean = false) : RoomState
 
-    data class FilesNeeded(val missingFiles: Int, val missingBytes: Long, val totalFiles: Int) : RoomState
+    data class FilesNeeded(val missingFiles: Int, val missingBytes: Long, val totalFiles: Int,
+                           val recordMemoryOnRetry: Boolean = false) : RoomState
 
     /** The local bot and its connection are still shutting down. */
     data object Ending : RoomState
@@ -92,7 +95,7 @@ object PlayRoomController {
      * Ask the bot to create a room: login at the gate, CMD_CREATEJOIN_ROOM,
      * surface the returned number. Never invents one on failure.
      */
-    @Synchronized fun createRoom(allowResourceDownload: Boolean = false) {
+    @Synchronized fun createRoom(allowResourceDownload: Boolean = false, recordMemory: Boolean = false) {
         if (_state.value is RoomState.Creating || _state.value is RoomState.Ready || _state.value is RoomState.Ending) return
         val be = backend
         val ctx = appContext
@@ -103,14 +106,27 @@ object PlayRoomController {
             )
             return
         }
-        _state.value = RoomState.Creating("The bot is opening a room at Konami…")
+        _state.value = RoomState.Creating(if (recordMemory) "Starting the bot memory recorder…" else "The bot is opening a room at Konami…")
         io.launch {
+            var recording: String? = null
+            var opened = false
             try {
-                onRoomCreated(be.createRoom(ctx, allowResourceDownload))
+                val verify: ((Int) -> Unit)? = if (recordMemory) {
+                    val id = BotHeapRecording.prepare(ctx)
+                    recording = id
+                    { pid: Int ->
+                        preparationNote("Checking that Android recorded a bot allocation…")
+                        BotHeapRecording.startAndVerify(ctx, id, pid) { EngineHost.probeHeapRecording(pid) }
+                    }
+                } else null
+                onRoomCreated(be.createRoom(ctx, allowResourceDownload, verify))
+                opened = true
             } catch (missing: com.peerlink.app.bot.GameResourcePacks.MissingResources) {
-                _state.value = RoomState.FilesNeeded(missing.missingFiles, missing.missingBytes, missing.totalFiles)
+                _state.value = RoomState.FilesNeeded(missing.missingFiles, missing.missingBytes, missing.totalFiles, recordMemory)
             } catch (t: Throwable) {
-                onRoomFailed(t.message ?: "Room creation failed.")
+                _state.value = RoomState.Failed(t.message ?: "Room creation failed.", recordMemory)
+            } finally {
+                if (!opened) recording?.let { id -> runCatching { BotHeapRecording.finish(ctx, id, "preparation_ended") } }
             }
         }
     }

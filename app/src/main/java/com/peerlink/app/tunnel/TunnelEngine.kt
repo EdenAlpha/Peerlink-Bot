@@ -152,11 +152,9 @@ class TunnelEngine(
             }
         }
 
-        fun pollWait(timeoutMs: Long): PooledPacket? {
+        fun awaitPacket(running: AtomicBoolean): PooledPacket? {
             lock.withLock {
-                val pkt = queue.pollFirst()
-                if (pkt != null) return pkt
-                notEmpty.await(timeoutMs, TimeUnit.MILLISECONDS)
+                while (queue.isEmpty() && running.get()) notEmpty.await()
                 return queue.pollFirst()
             }
         }
@@ -175,7 +173,7 @@ class TunnelEngine(
 
         val size: Int get() = lock.withLock { queue.size }
 
-        fun clear() { lock.withLock { queue.clear() } }
+        fun clear() { lock.withLock { queue.clear(); notEmpty.signalAll() } }
     }
 
     // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
@@ -270,11 +268,9 @@ class TunnelEngine(
             }
         }
 
-        fun pollWait(timeoutMs: Long): QueuedUdpTcpPacket? {
+        fun awaitPacket(running: AtomicBoolean): QueuedUdpTcpPacket? {
             lock.withLock {
-                if (queue.isEmpty() && timeoutMs > 0) {
-                    notEmpty.awaitNanos(timeoutMs * 1_000_000L)
-                }
+                while (queue.isEmpty() && running.get()) notEmpty.await()
                 return queue.pollFirst()
             }
         }
@@ -295,9 +291,9 @@ class TunnelEngine(
     private var peerSelector: Selector? = null
     private var localWifiIp: String? = null
 
-    private var udpSelector: Selector? = null
-    private var tcpSelector: Selector? = null
-    private var ipv6UdpSelector: Selector? = null
+    private var udpSelector: ReadinessSelector? = null
+    private var tcpSelector: ReadinessSelector? = null
+    private var ipv6UdpSelector: ReadinessSelector? = null
 
     private val MTU = 1400
     private val BUFFER_SIZE = 65535
@@ -1339,9 +1335,9 @@ class TunnelEngine(
         jitterBuffer = null
         lastKeepaliveSentNs.set(0)
 
-        udpSelector = Selector.open()
-        tcpSelector = Selector.open()
-        ipv6UdpSelector = Selector.open()
+        udpSelector = ReadinessSelector()
+        tcpSelector = ReadinessSelector()
+        ipv6UdpSelector = ReadinessSelector()
 
         debugLog("ENGINE", "Passthrough bridge mode: Kotlin TCP/UDP proxy only")
         debugLog("ENGINE", "Bridge TUN mode: blocking")
@@ -1470,9 +1466,9 @@ class TunnelEngine(
         // âš¡ Start keepalives immediately
         lastKeepaliveSentNs.set(System.nanoTime())
         try {
-            udpSelector = Selector.open()
-            tcpSelector = Selector.open()
-            ipv6UdpSelector = Selector.open()
+            udpSelector = ReadinessSelector()
+            tcpSelector = ReadinessSelector()
+            ipv6UdpSelector = ReadinessSelector()
 
             tunNonBlocking = false
             debugLog("ENGINE", "Using blocking TUN I/O for stable packet cadence")
@@ -1940,7 +1936,7 @@ fun exactWifiUdpNetwork(): android.net.Network? {
                 val nowNs = System.nanoTime()
                 val staleMs = JitterDiag.HEARTBEAT_STALE_MS
                 checkHeartbeat(nowNs, JitterDiag.heartbeatTunRead, "tunReadLoop", staleMs)
-                checkHeartbeat(nowNs, JitterDiag.heartbeatTunWrite, "tunWriteLoop", staleMs)
+                if (queueDepth > 0) checkHeartbeat(nowNs, JitterDiag.heartbeatTunWrite, "tunWriteLoop", staleMs)
                 checkHeartbeat(nowNs, JitterDiag.heartbeatPeerRx, "peerReceiveLoop", staleMs)
 
                 JitterDiag.resetInterval()
@@ -2877,8 +2873,7 @@ fun exactWifiUdpNetwork(): android.net.Network? {
                     val selector = ipv6UdpSelector ?: throw IllegalStateException("IPv6 selector stopped")
                     synchronized(ipv6ChannelCacheLock) {
                         check(isRunning.get()) { "UDP bridge stopped" }
-                        selector.wakeup()
-                        opened.register(selector, SelectionKey.OP_READ, Ipv6FlowRef(srcAddr, destAddr, srcPort, destPort))
+                        selector.register(opened, SelectionKey.OP_READ, Ipv6FlowRef(srcAddr, destAddr, srcPort, destPort))
                         ipv6ChannelCache[key] = opened
                     }
                     channel = opened
@@ -2903,7 +2898,7 @@ fun exactWifiUdpNetwork(): android.net.Network? {
         
         while (isRunning.get()) {
             try {
-                val ready = selector.select(5)
+                val ready = selector.select()
                 if (ready <= 0) continue
                 
                 val keys = selector.selectedKeys()
@@ -2985,7 +2980,7 @@ fun exactWifiUdpNetwork(): android.net.Network? {
 
     private fun getIpv6Tcb(key: String): TcpTcb? { synchronized(ipv6TcbCacheLock) { return ipv6TcbCache[key] } }
     private fun putIpv6Tcb(key: String, tcb: TcpTcb) { synchronized(ipv6TcbCacheLock) { ipv6TcbCache[key] = tcb } }
-    private fun closeIpv6Tcb(tcb: TcpTcb) { tcb.close(); synchronized(ipv6TcbCacheLock) { ipv6TcbCache.remove(tcb.ipAndPort) } }
+    private fun closeIpv6Tcb(tcb: TcpTcb) { tcb.close(); synchronized(ipv6TcbCacheLock) { ipv6TcbCache.remove(tcb.ipAndPort, tcb) } }
 
     private fun initializeIpv6TcpConnection(key: String, remoteIp: String, remotePort: Int, localIp: String, localPort: Int, tcp: ParsedTcpHeader, remoteAddrBytes: ByteArray, localAddrBytes: ByteArray) {
         if (!tcp.isSYN()) {
@@ -3018,7 +3013,7 @@ fun exactWifiUdpNetwork(): android.net.Network? {
                 tcb.mySequenceNum++
             } else {
                 tcb.status = TcpTcb.TcbStatus.SYN_SENT
-                val sk = channel.register(selector, SelectionKey.OP_CONNECT, tcb)
+                val sk = selector.register(channel, SelectionKey.OP_CONNECT, tcb)
                 tcb.selectionKey = sk
             }
         } catch (e: Exception) {
@@ -3035,15 +3030,12 @@ fun exactWifiUdpNetwork(): android.net.Network? {
             return
         }
         if (tcp.isRST()) { closeIpv6Tcb(tcb); return }
-        if (tcp.isFIN()) { processIpv6Fin(tcb, tcp); return }
-        if (tcp.isACK()) {
-            val pl = if (payloadSize > 0) ByteBuffer.wrap(data, payloadOffset, payloadSize) else null
-            processIpv6Ack(tcb, tcp, pl, payloadSize)
+        if (tcp.isACK() || tcp.isFIN()) {
+            processDeviceTcpSegment(tcb, tcp, data, payloadOffset, payloadSize)
         }
     }
 
-    private fun processIpv6Fin(tcb: TcpTcb, tcp: ParsedTcpHeader) {
-        tcb.myAcknowledgementNum = tcp.sequenceNumber + 1
+    private fun processIpv6Fin(tcb: TcpTcb) {
         val pkt = if (tcb.waitingForNetworkData) {
             tcb.status = TcpTcb.TcbStatus.CLOSE_WAIT
             buildIpv6TcpPacket(tcb.remoteAddrBytes!!, tcb.localAddrBytes!!, tcb.remotePort, tcb.localPort, tcb.mySequenceNum, tcb.myAcknowledgementNum, TCP_FLAG_ACK, null, 0)
@@ -3054,22 +3046,6 @@ fun exactWifiUdpNetwork(): android.net.Network? {
             p
         }
         offerToDevice(pkt, pkt.size, "IPv6-TCP-FIN")
-    }
-
-    private fun processIpv6Ack(tcb: TcpTcb, tcp: ParsedTcpHeader, payload: ByteBuffer?, payloadSize: Int) {
-        val selector = tcpSelector ?: return
-        if (tcb.status == TcpTcb.TcbStatus.SYN_RECEIVED) {
-            tcb.status = TcpTcb.TcbStatus.ESTABLISHED
-            tcb.selectionKey = tcb.channel.register(selector, SelectionKey.OP_READ, tcb)
-            tcb.waitingForNetworkData = true
-        }
-        if (payload != null && payloadSize > 0) {
-            try { while (payload.hasRemaining()) tcb.channel.write(payload) }
-            catch (e: Exception) { sendIpv6RstAndClose(tcb, payloadSize); return }
-        }
-        if (payloadSize > 0) { tcb.myAcknowledgementNum = tcp.sequenceNumber + payloadSize }
-        val pkt = buildIpv6TcpPacket(tcb.remoteAddrBytes!!, tcb.localAddrBytes!!, tcb.remotePort, tcb.localPort, tcb.mySequenceNum, tcb.myAcknowledgementNum, TCP_FLAG_ACK, null, 0)
-        offerToDevice(pkt, pkt.size, "IPv6-TCP-ACK")
     }
 
     private fun sendIpv6RstAndClose(tcb: TcpTcb, ackInc: Int) {
@@ -3109,7 +3085,7 @@ fun exactWifiUdpNetwork(): android.net.Network? {
 
                 batch.clear()
 
-                val first = networkToDeviceQueue.pollWait(10)
+                val first = networkToDeviceQueue.awaitPacket(isRunning)
                 if (first != null) {
                     batch.add(first)
                     networkToDeviceQueue.drainTo(batch, maxBatch - 1)
@@ -3206,7 +3182,7 @@ fun exactWifiUdpNetwork(): android.net.Network? {
         Thread.currentThread().name = "PeerLink-UDP-Out"
         val selector = udpSelector ?: return
         while (isRunning.get()) {
-            val qp = deviceToNetworkUdpQueue.pollWait(2) ?: continue
+            val qp = deviceToNetworkUdpQueue.awaitPacket(isRunning) ?: continue
             try {
                 JitterDiag.heartbeatUdpOut.set(System.nanoTime())
                 val destIp = qp.destIp
@@ -3225,8 +3201,7 @@ fun exactWifiUdpNetwork(): android.net.Network? {
                         val ref = UdpFlowRef(qp.destIpBytes.copyOf(), qp.sourceIpBytes.copyOf(), destPort, srcPort)
                         synchronized(udpChannelCacheLock) {
                             check(isRunning.get()) { "UDP bridge stopped" }
-                            selector.wakeup()
-                            opened.register(selector, SelectionKey.OP_READ, ref)
+                            selector.register(opened, SelectionKey.OP_READ, ref)
                             udpChannelCache[key] = opened
                         }
                         channel = opened
@@ -3257,7 +3232,7 @@ fun exactWifiUdpNetwork(): android.net.Network? {
         while (isRunning.get()) {
             try {
                 JitterDiag.heartbeatUdpIn.set(System.nanoTime())
-                val ready = selector.select(5)
+                val ready = selector.select()
                 if (ready <= 0) continue
                 
                 val keys = selector.selectedKeys()
@@ -3332,17 +3307,15 @@ fun exactWifiUdpNetwork(): android.net.Network? {
     private fun handleTcpForExistingTcb(tcb: TcpTcb, tcp: ParsedTcpHeader, data: ByteArray, payloadOffset: Int, payloadSize: Int) {
         if (tcp.isSYN()) { processDuplicateSyn(tcb, tcp); return }
         if (tcp.isRST()) { closeTcb(tcb); return }
-        if (tcp.isFIN()) { processFin(tcb, tcp); return }
-        if (tcp.isACK()) {
-            val pl = if (payloadSize > 0) ByteBuffer.wrap(data, payloadOffset, payloadSize) else null
-            processAck(tcb, tcp, pl, payloadSize)
+        if (tcp.isACK() || tcp.isFIN()) {
+            processDeviceTcpSegment(tcb, tcp, data, payloadOffset, payloadSize)
         }
     }
 
     private fun tcpOutputLoop() {
         Thread.currentThread().name = "PeerLink-TCP-Out"
         while (isRunning.get()) {
-            val qp = deviceToNetworkTcpQueue.pollWait(2) ?: continue
+            val qp = deviceToNetworkTcpQueue.awaitPacket(isRunning) ?: continue
             try {
                 JitterDiag.heartbeatTcpOut.set(System.nanoTime())
                 processTcpOutputPacket(qp)
@@ -3361,7 +3334,7 @@ fun exactWifiUdpNetwork(): android.net.Network? {
         while (isRunning.get()) {
             try {
                 JitterDiag.heartbeatTcpIn.set(System.nanoTime())
-                if (selector.select(5) <= 0) continue
+                if (selector.select() <= 0) continue
                 processTcpSelectedKeys(selector, readBuffer)
             } catch (e: Exception) {
                 if (isRunning.get()) debugLog("âŒ TCP-IN", "Error: ${e.message}")
@@ -3369,13 +3342,21 @@ fun exactWifiUdpNetwork(): android.net.Network? {
         }
     }
 
-    private fun processTcpSelectedKeys(selector: Selector, readBuffer: ByteBuffer) {
+    private fun processTcpSelectedKeys(selector: ReadinessSelector, readBuffer: ByteBuffer) {
         val it = selector.selectedKeys().iterator()
         while (it.hasNext()) {
             val key = it.next(); it.remove()
             if (!key.isValid) continue
-            if (key.isConnectable) { processTcpConnect(key); continue }
-            if (key.isReadable) processTcpRead(key, readBuffer)
+            val tcb = key.attachment() as TcpTcb
+            synchronized(tcb) {
+                if (!key.isValid) return@synchronized
+                if (key.isConnectable) {
+                    processTcpConnect(key)
+                } else {
+                    if (key.isWritable) processTcpWritable(tcb)
+                    if (key.isValid && key.isReadable) processTcpRead(key, readBuffer)
+                }
+            }
         }
     }
 
@@ -3731,7 +3712,7 @@ fun exactWifiUdpNetwork(): android.net.Network? {
                 tcb.mySequenceNum++
             } else {
                 tcb.status = TcpTcb.TcbStatus.SYN_SENT
-                tcb.selectionKey = channel.register(selector, SelectionKey.OP_CONNECT, tcb)
+                tcb.selectionKey = selector.register(channel, SelectionKey.OP_CONNECT, tcb)
             }
         } catch (e: Exception) {
             if (tcb != null) closeTcb(tcb)
@@ -3745,8 +3726,7 @@ fun exactWifiUdpNetwork(): android.net.Network? {
         else sendRstAndClose(tcb, 1)
     }
 
-    private fun processFin(tcb: TcpTcb, tcp: ParsedTcpHeader) {
-        tcb.myAcknowledgementNum = tcp.sequenceNumber + 1
+    private fun processFin(tcb: TcpTcb) {
         val remoteIpBytes = ipv4StringToBytesOptimized(tcb.remoteIp)
         val localIpBytes = ipv4StringToBytesOptimized(tcb.localIp)
         
@@ -3762,23 +3742,61 @@ fun exactWifiUdpNetwork(): android.net.Network? {
         offerToDevice(pkt, pkt.size, "TCP-FIN")
     }
 
-    private fun processAck(tcb: TcpTcb, tcp: ParsedTcpHeader, payload: ByteBuffer?, payloadSize: Int) {
-        val selector = tcpSelector ?: return
-        if (tcb.status == TcpTcb.TcbStatus.SYN_RECEIVED) {
-            tcb.status = TcpTcb.TcbStatus.ESTABLISHED
-            tcb.selectionKey = tcb.channel.register(selector, SelectionKey.OP_READ, tcb)
-            tcb.waitingForNetworkData = true
+    private fun processDeviceTcpSegment(tcb: TcpTcb, tcp: ParsedTcpHeader,
+                                        data: ByteArray, offset: Int, size: Int) = synchronized(tcb) {
+        val selector = tcpSelector ?: return@synchronized
+        try {
+            if (tcb.status == TcpTcb.TcbStatus.SYN_RECEIVED) {
+                tcb.selectionKey = selector.register(tcb.channel, SelectionKey.OP_READ, tcb)
+                tcb.status = TcpTcb.TcbStatus.ESTABLISHED
+                tcb.waitingForNetworkData = true
+            }
+            if (size == 0 && !tcp.isFIN()) return@synchronized
+            if (size > 0 && !tcb.uploadFinished && tcb.selectionKey != null) {
+                tcb.myAcknowledgementNum = tcb.upload.accept(tcb.channel, tcb.myAcknowledgementNum,
+                    tcp.sequenceNumber, ByteBuffer.wrap(data, offset, size))
+                updateTcpWriteInterest(tcb)
+            }
+            val finPosition = (tcp.sequenceNumber + size) and 0xffffffffL
+            if (tcp.isFIN() && !tcb.uploadFinished && finPosition == (tcb.myAcknowledgementNum and 0xffffffffL)) {
+                tcb.myAcknowledgementNum = (finPosition + 1) and 0xffffffffL
+                tcb.uploadFinished = true
+                if (!tcb.upload.hasPending) tcb.channel.shutdownOutput()
+                if (tcb.isIpv6) processIpv6Fin(tcb) else processFin(tcb)
+                return@synchronized
+            }
+            val ack = if (tcb.isIpv6) {
+                buildIpv6TcpPacket(tcb.remoteAddrBytes!!, tcb.localAddrBytes!!, tcb.remotePort,
+                    tcb.localPort, tcb.mySequenceNum, tcb.myAcknowledgementNum, TCP_FLAG_ACK, null, 0)
+            } else {
+                buildTcpIpPacket(ipv4StringToBytesOptimized(tcb.remoteIp), ipv4StringToBytesOptimized(tcb.localIp),
+                    tcb.remotePort, tcb.localPort, tcb.mySequenceNum, tcb.myAcknowledgementNum, TCP_FLAG_ACK, null, 0)
+            }
+            offerToDevice(ack, ack.size, if (tcb.isIpv6) "IPv6-TCP-ACK" else "TCP-ACK")
+        } catch (e: Exception) {
+            if (tcb.isIpv6) sendIpv6RstAndClose(tcb, 0) else sendRstAndClose(tcb, 0)
         }
-        if (payload != null && payloadSize > 0) {
-            try { while(payload.hasRemaining()) tcb.channel.write(payload) }
-            catch(e: Exception) { sendRstAndClose(tcb, payloadSize); return }
+    }
+
+    private fun updateTcpWriteInterest(tcb: TcpTcb) {
+        val key = tcb.selectionKey ?: return
+        val ops = key.interestOps()
+        val next = if (tcb.upload.hasPending) ops or SelectionKey.OP_WRITE else ops and SelectionKey.OP_WRITE.inv()
+        if (next != ops) {
+            key.interestOps(next)
+            key.selector().wakeup()
         }
-        if (payloadSize > 0) { tcb.myAcknowledgementNum = tcp.sequenceNumber + payloadSize }
-        
-        val remoteIpBytes = ipv4StringToBytesOptimized(tcb.remoteIp)
-        val localIpBytes = ipv4StringToBytesOptimized(tcb.localIp)
-        val pkt = buildTcpIpPacket(remoteIpBytes, localIpBytes, tcb.remotePort, tcb.localPort, tcb.mySequenceNum, tcb.myAcknowledgementNum, TCP_FLAG_ACK, null, 0)
-        offerToDevice(pkt, pkt.size, "TCP-ACK")
+    }
+
+    private fun processTcpWritable(tcb: TcpTcb) {
+        try {
+            if (!tcb.upload.hasPending) return
+            tcb.upload.onWritable(tcb.channel)
+            updateTcpWriteInterest(tcb)
+            if (tcb.uploadFinished && !tcb.upload.hasPending) tcb.channel.shutdownOutput()
+        } catch (e: Exception) {
+            if (tcb.isIpv6) sendIpv6RstAndClose(tcb, 0) else sendRstAndClose(tcb, 0)
+        }
     }
 
     private fun processTcpConnect(key: SelectionKey) {
@@ -3796,7 +3814,7 @@ fun exactWifiUdpNetwork(): android.net.Network? {
                     offerToDevice(pkt, pkt.size, "TCP-SYNACK")
                 }
                 tcb.mySequenceNum++
-                key.interestOps(SelectionKey.OP_READ)
+                key.interestOps((key.interestOps() and SelectionKey.OP_CONNECT.inv()) or SelectionKey.OP_READ)
             }
         } catch(e: Exception) {
             if (tcb.isIpv6) sendIpv6RstAndClose(tcb, 0)
@@ -3811,8 +3829,9 @@ fun exactWifiUdpNetwork(): android.net.Network? {
             if (tcb.isIpv6) sendIpv6RstAndClose(tcb, 0) else sendRstAndClose(tcb, 0)
             return
         }
+        if (len == 0) return
         if (len == -1) {
-            key.interestOps(0)
+            key.interestOps(key.interestOps() and SelectionKey.OP_READ.inv())
             if (tcb.status != TcpTcb.TcbStatus.LAST_ACK) {
                 tcb.status = TcpTcb.TcbStatus.LAST_ACK
                 if (tcb.isIpv6) {
@@ -3852,7 +3871,7 @@ fun exactWifiUdpNetwork(): android.net.Network? {
 
     private fun getTcb(key: String): TcpTcb? { synchronized(tcbCacheLock) { return tcbCache[key] } }
     private fun putTcb(key: String, tcb: TcpTcb) { synchronized(tcbCacheLock) { tcbCache[key] = tcb } }
-    private fun closeTcb(tcb: TcpTcb) { tcb.close(); synchronized(tcbCacheLock) { tcbCache.remove(tcb.ipAndPort) } }
+    private fun closeTcb(tcb: TcpTcb) { tcb.close(); synchronized(tcbCacheLock) { tcbCache.remove(tcb.ipAndPort, tcb) } }
 
     // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     // DATA CLASSES
@@ -3863,10 +3882,12 @@ fun exactWifiUdpNetwork(): android.net.Network? {
     private class TcpTcb(
         val ipAndPort: String, val remoteIp: String, val remotePort: Int,
         val localIp: String, val localPort: Int, val channel: SocketChannel,
-        var mySequenceNum: Long, var myAcknowledgementNum: Long, var theirAcknowledgementNum: Long
+        var mySequenceNum: Long, @Volatile var myAcknowledgementNum: Long, var theirAcknowledgementNum: Long
     ) {
         enum class TcbStatus { SYN_SENT, SYN_RECEIVED, ESTABLISHED, CLOSE_WAIT, LAST_ACK }
         var status = TcbStatus.SYN_SENT
+        val upload = TcpUploadBuffer()
+        var uploadFinished = false
         var waitingForNetworkData = false
         var selectionKey: SelectionKey? = null
         var isIpv6 = false

@@ -65,6 +65,13 @@ int main() {
     start.event_manager_present = false; assert(!should_complete_visual_start(start)); start.event_manager_present = true;
     start.settled = false; assert(!should_complete_visual_start(start));
 
+    assert(should_enter_match_scene(true, true, 0, 17));
+    assert(!should_enter_match_scene(false, true, 0, 17));
+    assert(!should_enter_match_scene(true, false, 0, 17));
+    assert(!should_enter_match_scene(true, true, 7, 17));
+    assert(!should_enter_match_scene(true, true, 0, 12));
+    assert(!should_enter_match_scene(true, true, 0, 21));
+
     RenderedStartView rendered{true,true,true,0,12,false,true,true,8,true,true,false,true};
     assert(should_drive_rendered_start(rendered));
     rendered.stranded_menu=false;

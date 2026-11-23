@@ -4,6 +4,33 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class PeerConnectionPhaseTest {
+    @Test fun serverReportIsSentOnceBeforeWaitingForConfirmation() {
+        val replies = ArrayDeque(listOf(
+            mapOf("result" to "_NET_FAIL"),
+            mapOf("result" to "NOERR", "is_check_finished" to "NO", "error_code" to "NOERR"),
+            mapOf("result" to "NOERR", "is_check_finished" to "YES", "error_code" to "NOERR"),
+        ))
+        val steps = mutableListOf<String>()
+        assertTrue(PeerConnectionPhase.confirmServerConnection(
+            running = { true },
+            report = { steps.add("report"); mapOf("result" to "NOERR") },
+            poll = { steps.add("poll"); replies.removeFirst() },
+            pause = {},
+        ))
+        assertEquals(listOf("report", "poll", "poll", "poll"), steps)
+    }
+
+    @Test fun serverRejectionCannotAdvanceToGameId() {
+        val refusal = assertThrows(IllegalStateException::class.java) {
+            PeerConnectionPhase.confirmServerConnection(
+                running = { true },
+                report = { mapOf("result" to "NOERR") },
+                poll = { mapOf("result" to "NOERR", "is_check_finished" to "YES", "error_code" to "ERR_INVALIDARG") },
+            )
+        }
+        assertTrue(refusal.message!!.contains("ERR_INVALIDARG"))
+    }
+
     @Test fun phaseReportCannotPrecedeNativeMetadataSynchronization() {
         var synchronized = false
         val values = LongArray(29).apply { this[2] = 4; this[3] = 4; this[4] = 4 }

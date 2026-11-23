@@ -1,6 +1,8 @@
 // Host regression harness. It includes the production C++ backend directly;
 // only Android/JNI adapters are shimmed by tests/shim.
 #include "../app/src/main/jni/peerlink_backend.cpp"
+#include "../app/src/main/jni/process_memory.h"
+#include "../app/src/main/jni/game/match_pool_memory.h"
 #include <chrono>
 #include <future>
 #include <iostream>
@@ -59,6 +61,90 @@ static std::array<uint8_t,16> v6(unsigned last) {
 }
 
 int main() {
+    {
+        using namespace peerlink_match_pool;
+        const size_t bytes = capacity + 4096;
+        void *mapping = mmap(nullptr, bytes, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        if (mapping == MAP_FAILED) return 1;
+        const auto storage = reinterpret_cast<uintptr_t>(mapping) + 16;
+        const auto tail = storage + 16 * 1024 * 1024;
+        auto *head = reinterpret_cast<BlockHeader *>(tail);
+        auto *sentinel = reinterpret_cast<BlockHeader *>(storage + capacity - sizeof(BlockHeader));
+        const auto distance = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(sentinel) - tail);
+        *head = {0x62857f00, static_cast<uint32_t>(tail - storage), distance, 0};
+        *sentinel = {0x62857f00, distance, 0, 0};
+        for (const size_t pageSize : {4096u, 16384u}) {
+            Pages pages;
+            check("free pool pages align inside both boundary tags",
+                freeTailPages(storage, capacity, tail, pageSize, pages) &&
+                pages.start >= tail + sizeof(BlockHeader) &&
+                pages.start < tail + sizeof(BlockHeader) + pageSize &&
+                pages.start % pageSize == 0 && pages.size && pages.size % pageSize == 0 &&
+                pages.start + pages.size <= reinterpret_cast<uintptr_t>(sentinel));
+        }
+        Pages pages;
+        head->flags |= 1;
+        check("a live pool block cannot be returned", !freeTailPages(storage, capacity, tail, 4096, pages));
+        head->flags &= ~1u;
+        sentinel->previous = distance - 16;
+        check("a mismatched footer prevents reclaim", !freeTailPages(storage, capacity, tail, 4096, pages));
+        munmap(mapping, bytes);
+    }
+    {
+        using namespace peerlink_memory;
+        const char *maps =
+            "1000-2000 rw-p 00000000 00:00 0 [anon:scudo:secondary]\nRss: 12 kB\nPss: 10 kB\nSwapPss: 8 kB\nPrivate_Dirty: 11 kB\n"
+            "2000-3000 r--p 00000000 08:01 99 /private/com.soccer/files/test.cpk\nRss: 4 kB\nPss: 2 kB\nSwapPss: 0 kB\n"
+            "3000-4000 rw-p 00000000 00:00 0\nRss: 3 kB\nPss: 3 kB\nSwapPss: 1024 kB\n";
+        FILE *source = tmpfile();
+        if (!source) return 1;
+        fputs(maps, source); rewind(source);
+        Sample sample;
+        check("complete setup memory sample", readSmaps(source, sample) && sample.ranges == 3);
+        fclose(source);
+        const std::string line = describe(sample);
+        check("resident and swap metrics independent", line.find("scudoSecondary=12,10,8,11") != std::string::npos);
+        check("anonymous swapped pages visible", line.find("anon=3,3,1024,0") != std::string::npos);
+        check("game assets grouped without paths", line.find("gameFiles=4,2,0,0") != std::string::npos &&
+            line.find("soccer") == std::string::npos);
+    }
+    {
+        using namespace peerlink_memory;
+        const char *beforeMaps =
+            "100000-900000 rw-p 00000000 00:00 0\nRss: 2048 kB\nPss: 2048 kB\nSwapPss: 4096 kB\nPrivate_Dirty: 2048 kB\n"
+            "a00000-e00000 rw-p 00000000 00:00 0\nRss: 4096 kB\nPss: 4096 kB\nSwapPss: 0 kB\nPrivate_Dirty: 4096 kB\n"
+            "f00000-1100000 rw-p 00000000 00:00 0\nRss: 2048 kB\nPss: 2048 kB\nSwapPss: 0 kB\nPrivate_Dirty: 2048 kB\n";
+        const char *afterMaps =
+            "100000-900000 rw-p 00000000 00:00 0 [anon:scudo:secondary]\nRss: 6144 kB\nPss: 6144 kB\nSwapPss: 0 kB\nPrivate_Dirty: 6144 kB\n"
+            "a00000-c00000 rw-p 00000000 00:00 0 [anon:scudo:primary]\nRss: 1024 kB\nPss: 1024 kB\nSwapPss: 64 kB\nPrivate_Dirty: 900 kB\n"
+            "c00000-e00000 rw-p 00000000 00:00 0\nRss: 1024 kB\nPss: 1024 kB\nSwapPss: 0 kB\nPrivate_Dirty: 1024 kB\n"
+            "1200000-1800000 r--p 00000000 08:02 712 /private/large.cpk\nRss: 4096 kB\nPss: 4096 kB\nSwapPss: 0 kB\n";
+        auto parseMaps = [](const char *maps, Sample &sample) {
+            FILE *source = tmpfile();
+            if (!source) return false;
+            fputs(maps, source);
+            rewind(source);
+            const bool ok = readSmaps(source, sample) && sample.layoutComplete;
+            fclose(source);
+            return ok;
+        };
+        Sample before, after;
+        check("mapping comparison parses both layouts", parseMaps(beforeMaps, before) && parseMaps(afterMaps, after));
+        const auto delta = describeMappingChanges(before, after);
+        check("renamed interval counts as existing and shows swap change",
+            delta.find("sameRange=1,4096,-4096,4096") != std::string::npos &&
+            delta.find("anon>scudoSecondary,1>1,8192,4096,-4096,4096") != std::string::npos);
+        check("split interval counts once with combined changes",
+            delta.find("changedBounds=1,-2048,64,-2172") != std::string::npos);
+        check("separate new and removed intervals are counted",
+            delta.find("newRange=1,4096,0,0") != std::string::npos &&
+            delta.find("removedRange=1,-2048,0,-2048") != std::string::npos);
+        check("mapping comparison omits file paths and addresses",
+            delta.find("large.cpk") == std::string::npos && delta.find("900000") == std::string::npos);
+        after.hasSwapPss = false;
+        check("missing swap measurements are labeled unavailable",
+            describeMappingChanges(before, after).find("sameRange=1,4096,unavailable,4096") != std::string::npos);
+    }
     {
         auto s = fresh();
         auto tx = outgoing(s.get(), 56008, 20769);
@@ -154,7 +240,7 @@ int main() {
     {
         auto s = fresh();
         s->udp_trace_capacity = 8;
-        s->udp_trace_buffer = std::make_unique<UdpTraceEvent[]>(s->udp_trace_capacity);
+        s->udp_trace_buffer = reserve_udp_trace_storage(s->udp_trace_capacity);
         const uint64_t user_rt_ns = 5'000'000'000ULL;
         const uint64_t ordinal = record_udp_trace(
                 s.get(), kUdpTraceStagePeerSend, 1'000'000'000ULL, 4,
@@ -324,7 +410,7 @@ int main() {
         auto s = fresh();
         s->sender_id = 222;
         s->udp_trace_capacity = 128;
-        s->udp_trace_buffer = std::make_unique<UdpTraceEvent[]>(s->udp_trace_capacity);
+        s->udp_trace_buffer = reserve_udp_trace_storage(s->udp_trace_capacity);
         const uint64_t base_ns = 1'000'000'000ULL;
         for (uint64_t seq = 1; seq <= 20; ++seq) {
             const uint64_t rx_ns = base_ns + seq * 1'000'000ULL;
@@ -347,11 +433,13 @@ int main() {
               trace.find(",rx_written\n") != std::string::npos);
         const uint64_t next = s->udp_trace_write_count.load();
         auto &busy_slot = s->udp_trace_buffer[next % s->udp_trace_capacity];
-        busy_slot.busy.test_and_set();
-        const uint64_t skipped = record_udp_trace(
+        uint64_t skipped;
+        {
+            TryTraceSlotGuard guard(busy_slot);
+            skipped = record_udp_trace(
                 s.get(), kUdpTraceStagePeerRecv, base_ns, 4,
                 kUdpTraceFlagTunnel, 20769, 56008, 64, 21, 0x12345678u);
-        busy_slot.busy.clear();
+        }
         check("busy diagnostic slot is skipped without blocking packet work",
               skipped == 0 && s->udp_trace_skipped.load() == 1);
         std::unique_lock<std::mutex> timestamp_lock(s->timestamp_mutex);

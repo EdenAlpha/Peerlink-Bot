@@ -133,14 +133,17 @@ public final class GameArchive implements Closeable {
             int t = x ^ (x << 11); x = y; y = z; z = w;
             w ^= (w >>> 19) ^ t ^ (t >>> 8); words.putInt(i, words.getInt(i) ^ w);
         }
-        ByteArrayOutputStream result = new ByteArrayOutputStream(expected);
+        byte[] result = new byte[expected];
         try (InflaterInputStream inflate = new InflaterInputStream(new ByteArrayInputStream(payload))) {
-            byte[] chunk = new byte[32768]; int n;
-            while ((n = inflate.read(chunk)) != -1) {
-                require(n <= expected - result.size(), "Database expands past declared size"); result.write(chunk, 0, n);
+            int written = 0;
+            while (written < result.length) {
+                int count = inflate.read(result, written, result.length - written);
+                require(count >= 0, "Database decode size mismatch");
+                written += count;
             }
+            require(inflate.read() == -1, "Database expands past declared size");
         }
-        require(result.size() == expected, "Database decode size mismatch"); return result.toByteArray();
+        return result;
     }
     private static void require(boolean condition, String message) throws IOException {
         if (!condition) throw new IOException(message);

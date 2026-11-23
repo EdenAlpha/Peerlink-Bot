@@ -17,4 +17,7 @@ struct CodePatchFailure {
 bool replace_executable_bytes(uintptr_t address, const void *bytes, size_t length,
                               CodePatchFailure *failure = nullptr);
 
+// Reserve a page inside [begin, end), leaving existing mappings intact.
+void *reserve_writable_page(uintptr_t begin, uintptr_t end, size_t page_size);
+
 } // namespace peerlink

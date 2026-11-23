@@ -2,6 +2,7 @@ package com.peerlink.app.bot
 
 import android.content.Context
 import java.io.File
+import java.nio.file.Files
 import java.util.zip.ZipInputStream
 
 /** App-private working files; the installed game and its saved data remain read-only. */
@@ -12,11 +13,13 @@ internal object GameAssets {
     }
 
     fun prepare(owner: Context, status: (String) -> Unit, audit: (String) -> Unit = {},
-                allowMissingMatchResources: Boolean = false): Prepared {
+                allowMissingMatchResources: Boolean = false,
+                releaseVerifiedCache: (File) -> Long = { 0 },
+                fingerprintPrivateFile: (File) -> GameFileIntegrity.Fingerprint = GameFileIntegrity::fingerprintFile): Prepared {
         val report = StringBuilder("PeerLink startup file audit\nstartedAtMillis=${System.currentTimeMillis()}\n" +
             "This is the last startup audit; exporting or reusing an engine does not rerun it.\n")
         val record: (String) -> Unit = { line -> report.appendLine(line); audit(line) }
-        try { return prepareChecked(owner, status, record, allowMissingMatchResources) }
+        try { return prepareChecked(owner, status, record, allowMissingMatchResources, releaseVerifiedCache, fingerprintPrivateFile) }
         catch (error: Exception) {
             record("[BOT-FILES] SUMMARY result=FAIL error=${error.javaClass.simpleName}: ${error.message}")
             throw error
@@ -35,7 +38,9 @@ internal object GameAssets {
     fun auditReportFile(owner: Context): File = File(owner.filesDir, "bot-startup-file-audit.txt")
 
     private fun prepareChecked(owner: Context, status: (String) -> Unit, audit: (String) -> Unit,
-                               allowMissingMatchResources: Boolean): Prepared {
+                               allowMissingMatchResources: Boolean,
+                               releaseVerifiedCache: (File) -> Long,
+                               fingerprintPrivateFile: (File) -> GameFileIntegrity.Fingerprint): Prepared {
         val game = owner.createPackageContext("jp.konami.pesam", Context.CONTEXT_IGNORE_SECURITY)
         fun installation(): String {
             val info = owner.packageManager.getPackageInfo("jp.konami.pesam", 0)
@@ -47,9 +52,32 @@ internal object GameAssets {
         audit("[BOT-FILES] SOURCE installation=$identity")
         audit("[BOT-FILES] SCOPE installed_APK_libraries_and_assets; downloaded/private_game_updates=NOT_CHECKED; " +
             "copy_integrity_does_not_prove_same_live_database_as_running_game")
-        val integrity = GameFileIntegrity(audit)
+        var advisedFiles = 0
+        var advisedBytes = 0L
+        val integrity = GameFileIntegrity(audit, { file ->
+            if (file.length() >= 1024L * 1024) {
+                val bytes = releaseVerifiedCache(file)
+                if (bytes > 0) {
+                    advisedFiles++
+                    advisedBytes += bytes
+                }
+            }
+        }, fingerprintPrivateFile)
         val root = File(owner.filesDir, "bot-game-11.1.1")
         check(root.isDirectory || root.mkdirs()) { "Cannot create bot working files" }
+        val fingerprints = InstalledAssetFingerprints(File(owner.cacheDir, "bot-installed-assets-v1"), identity)
+        var reusedSourceBytes = 0L
+        fun ensureInstalled(destination: File, label: String, key: String = label,
+                            open: () -> java.io.InputStream): GameFileIntegrity.Fingerprint {
+            var sourceOpened = false
+            val verified = integrity.ensure(destination, label, installedSource = fingerprints[key]) {
+                sourceOpened = true
+                open()
+            }
+            fingerprints[key] = verified
+            if (!sourceOpened) reusedSourceBytes += verified.bytes
+            return verified
+        }
         val prepared = Prepared(game, root)
         val assets = game.assets
         val names = assets.list("").orEmpty().filter {
@@ -57,9 +85,11 @@ internal object GameAssets {
         }.sorted()
         check("dt200_mobile_all.cpk" in names) { "Installed game's database pack is missing" }
         val assetDir = File(root, "assets")
+        var databasePackHash = ""
         for ((index, name) in names.withIndex()) {
             status("Checking installed game packs ${index + 1}/${names.size}")
-            integrity.ensure(File(assetDir, name), "assets/$name") { assets.open(name) }
+            val pack = ensureInstalled(File(assetDir, name), "assets/$name") { assets.open(name) }
+            if (name == "dt200_mobile_all.cpk") databasePackHash = pack.sha256
         }
         status("Checking bot match resources")
         val projectRoot = File(root, "project")
@@ -105,14 +135,19 @@ internal object GameAssets {
             audit("[BOT-FILES] DATABASE_SET nativeRequired=44 present=${tables.size} " +
                 "additional=${found - GameDatabaseSchema.strides.keys}")
             for (name in tables.sorted()) {
-                val decoded = GameArchive.decodeDatabase(archive.read(name))
                 val table = name.substringAfterLast('/')
                 val stride = GameDatabaseSchema.strides[table]
-                val records = if (stride != null) GameDatabaseSchema.validate(table, decoded.size) else null
                 val outputName = table.removeSuffix(".bin") + ".decoded"
-                audit("[BOT-FILES] DATABASE table=$table decodedBytes=${decoded.size} " +
+                val decoded by lazy(LazyThreadSafetyMode.NONE) {
+                    GameArchive.decodeDatabase(archive.read(name)).also {
+                        if (stride != null) GameDatabaseSchema.validate(table, it.size)
+                    }
+                }
+                val verified = ensureInstalled(File(prepared.database, outputName), "database/$outputName",
+                    "decoded-v1/$databasePackHash/$outputName") { decoded.inputStream() }
+                val records = if (stride != null) GameDatabaseSchema.validate(table, Math.toIntExact(verified.bytes)) else null
+                audit("[BOT-FILES] DATABASE table=$table decodedBytes=${verified.bytes} " +
                     "recordStride=${stride ?: "not_in_native_builder"} records=${records ?: "not_checked"} container=VALID")
-                integrity.ensure(File(prepared.database, outputName), "database/$outputName") { decoded.inputStream() }
             }
         }
         val command = "-opengl -nosound -unattended -NoSplash -culture=en -featureleveles31 " +
@@ -123,9 +158,12 @@ internal object GameAssets {
         }
         // These are the actual private paths resolved by FAndroidPlatformFile.
         val nativeRoot = File(root, "internal/UE4Game/PesMobile")
-        for (name in resources.keys) {
+        for ((name, fingerprint) in resources) {
             val source = File(projectRoot, name)
-            integrity.ensure(File(nativeRoot, name), "native/$name") { source.inputStream() }
+            val target = File(nativeRoot, name)
+            GameResourcePacks.link(source, target, fingerprint, audit)
+            audit("[BOT-FILES] NATIVE_RESOURCE result=PASS file=native/$name shared=${Files.isSameFile(source.toPath(), target.toPath())} " +
+                "bytes=${fingerprint.bytes} SHA256=${fingerprint.sha256}")
         }
         val nativePaks = File(nativeRoot, "PesMobile/Content/Paks")
         // The base ZIP has only five files. Other installed IoStore triplets
@@ -134,12 +172,14 @@ internal object GameAssets {
             Regex("pc[0-9]{4}_mobile_and\\.(pak|utoc|ucas)").matches(it) && it != "pc0000_mobile_and.pak"
         }.sorted()) {
             val source = File(prepared.project, "Content/Paks/$name")
-            integrity.ensure(source, "packaged/$name") { assets.open(name) }
-            val fingerprint = source.inputStream().use(GameFileIntegrity::fingerprint)
+            val fingerprint = ensureInstalled(source, "packaged/$name") { assets.open(name) }
             GameResourcePacks.link(source, File(nativePaks, name), fingerprint, audit)
         }
         val missingMatchResources = GameResourcePacks.verifyAndLink(owner, nativePaks, audit, allowMissingMatchResources)
         check(installation() == identity) { "Installed game changed during verification; retry with the game update finished" }
+        val cacheSaved = fingerprints.save()
+        audit("[BOT-FILES] INSTALLATION_CACHE reusedSourceBytes=$reusedSourceBytes saved=$cacheSaved")
+        audit("BOT_MEMORY_CACHE phase=verified_copies advisedFiles=$advisedFiles advisedBytes=$advisedBytes")
         audit("[BOT-FILES] SUMMARY result=PASS verified=${integrity.verified} repaired=${integrity.repaired} " +
             "cpk=${names.size} resources=${resources.size} nativeResources=${resources.size} databaseTables=$databaseTables nativeDatabaseTables=44 " +
             "downloadedUpdates=NOT_CHECKED")

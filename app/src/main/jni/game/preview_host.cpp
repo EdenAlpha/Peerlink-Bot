@@ -2,6 +2,7 @@
 // The temporary slot is restored before calling the original tick. No engine
 // readiness, network verdict or match-progress field is assigned here.
 #include "preview_policy.h"
+#include "diagnostic_journal.h"
 #include <atomic>
 #include <cstdint>
 #include <cstdio>
@@ -25,6 +26,7 @@ std::atomic<int> active{0}, mode{0}, sent{0}, retry_count{0}, restored{1};
 std::atomic<int> demo_sent{0};
 std::atomic<int> demo_finished{0};
 std::atomic<int> visual_start_sent{0};
+std::atomic<bool> match_scene_requested{false}, match_scene_seen{false};
 std::atomic<int> probe_done{0}, request_tid{0}, callback_tid{0};
 std::atomic<int> last_flow{-1}, last_menu{-1}, last_requested{-1}, last_current{-1};
 std::atomic<unsigned> last_busy{0};
@@ -80,6 +82,18 @@ bool flow_leaf(uptr base, const char *name, unsigned &flow_state, bool *complete
 }
 bool preview_leaf(uptr base, unsigned &flow_state) {
     return flow_leaf(base, "Match/Settings/MatchPreview", flow_state);
+}
+bool match_scene_handoff_ready(uptr base) {
+    const uptr controller = *reinterpret_cast<uptr *>(base + 0xa53b6e8);
+    if (!controller || *reinterpret_cast<uptr *>(controller + 0x178) !=
+                       *reinterpret_cast<uptr *>(controller + 0x180)) return false;
+    unsigned flow = 0;
+    bool completed = false;
+    const bool intro = flow_leaf(base, "Match/Enter/MatchEnterDemoOnline", flow, &completed);
+    const uptr match = *reinterpret_cast<uptr *>(base + 0xa533ec0);
+    return match && peerlink_preview::should_enter_match_scene(
+        visual_start_sent.load(std::memory_order_acquire), intro && completed, flow,
+        *reinterpret_cast<unsigned char *>(match + 0x138));
 }
 bool visual_start_ready(uptr base, bool settled) {
     unsigned flow = 0;
@@ -179,6 +193,20 @@ void menu_tick(uptr actor, float delta) {
     if (!lock.manager) { active.store(0, std::memory_order_release); return; }
     callback_tid.store(gettid(), std::memory_order_relaxed);
     unsigned flow_state = 0;
+    if (mode.load() == 7) {
+        if (!match_scene_requested.load(std::memory_order_acquire) &&
+            peerlink_null_client_rhi_ready(base_address) && match_scene_handoff_ready(base_address)) {
+            // The intro's normal proceed maps to MatchIdle. The idle flow
+            // has no pending transition to rename, so request the scene via
+            // the original routing entry used by the recovered preview.
+            const uptr controller = *reinterpret_cast<uptr *>(base_address + 0xa53b6e8);
+            auto route = reinterpret_cast<void (*)(uptr, const char *)>(base_address + 0x6aa70a8);
+            route(controller + 0x118, reinterpret_cast<const char *>(base_address + 0xad3954));
+            match_scene_requested.store(true, std::memory_order_release);
+            peerlink_journal("MATCH_SCENE_REQUEST scene=Match/MatchIdle from=completed_headless_intro gameThreadTid=%d", gettid());
+        }
+        active.store(0, std::memory_order_release); return;
+    }
     if (mode.load() == 6) {
         uint64_t since = reference_visual_idle_since.load(std::memory_order_acquire);
         if (!reference_visual_start_sent.load() && since && now_ms() - since >= 2000 &&
@@ -318,6 +346,29 @@ int arm(uptr base, int requested_mode, bool user_data_synchronized = false) {
     return 0;
 }
 }
+extern "C" int peerlink_game_thread_tid() {
+    return callback_tid.load(std::memory_order_relaxed);
+}
+
+// Called under the task lock. Read both the navigation scene and the menu
+// actor: the scene may still be MatchIdle while the actor opens its menu.
+extern "C" int peerlink_halftime_menu_state(uintptr_t base) {
+    constexpr char menu[] = "Match/HalfTime/MatchHalfTime";
+    unsigned flow = 0;
+    bool complete = false;
+    if (flow_leaf(base, "Match/HalfTime/MatchHalfTimePost", flow)) return 4;
+    if (flow_leaf(base, "Match/HalfTime/MatchHalfTimeTimeUpDemo", flow)) return 6;
+    const bool halftime = flow_leaf(base, menu, flow, &complete);
+    if (halftime && complete) return 4;
+    const uptr holder = *reinterpret_cast<const uptr *>(base + 0x99e6830);
+    const uptr actor = holder ? *reinterpret_cast<const uptr *>(holder) : 0;
+    const bool open = actor && !(*reinterpret_cast<const unsigned *>(actor + 8) & 0x30) &&
+        *reinterpret_cast<const unsigned *>(actor + 0x28c) == 6 && exact16(actor + 0x2b0, menu);
+    if (open) return 5;
+    if (halftime && flow == 7) return 3;
+    if (halftime) return 2;
+    return flow_leaf(base, "Match/MatchIdle", flow) ? 1 : 0;
+}
 extern "C" long peerlink_preview_drive(uintptr_t base, bool user_data_synchronized) {
     if (!base) return -1;
     if (sent.load(std::memory_order_acquire)) {
@@ -345,7 +396,25 @@ extern "C" long peerlink_demo_drive(uintptr_t base) {
 }
 extern "C" long peerlink_visual_start_drive(uintptr_t base) {
     if (!base) return -1;
-    if (visual_start_sent.load(std::memory_order_acquire)) return 1;
+    if (visual_start_sent.load(std::memory_order_acquire)) {
+        if (match_scene_seen.load(std::memory_order_acquire)) return 1;
+        unsigned flow = 0;
+        if (flow_leaf(base, "Match/MatchIdle", flow)) {
+            match_scene_seen.store(true, std::memory_order_release);
+            peerlink_journal("MATCH_SCENE_ENTERED scene=Match/MatchIdle flowState=%u requestedByHost=%d",
+                flow, match_scene_requested.load(std::memory_order_acquire));
+            return 1;
+        }
+        if (!match_scene_requested.load(std::memory_order_acquire) && match_scene_handoff_ready(base)) {
+            // A scene-observer failure after successful kickoff should not
+            // abort a running match. Keep the original match handler alive.
+            if (arm(base, 7) < 0) {
+                match_scene_requested.store(true, std::memory_order_release);
+                peerlink_journal("MATCH_SCENE_REQUEST_FAILED scene=Match/MatchIdle");
+            }
+        }
+        return 1;
+    }
     if (!visual_start_ready(base, true)) {
         visual_ready_since.store(0, std::memory_order_release);
         return 0;

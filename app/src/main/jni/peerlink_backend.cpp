@@ -1,4 +1,5 @@
 #include "peerlink_backend.h"
+#include "udp_trace_storage.h"
 
 #include <android/log.h>
 #include <arpa/inet.h>
@@ -161,42 +162,6 @@ struct TunnelDiagMeta {
     uint32_t payload_length = 0;
     uint16_t header_size = 0;
     int flags = 0;
-};
-
-struct UdpTraceData {
-    uint64_t ns = 0;
-    uint64_t sender_t0_ns = 0;
-    uint64_t sender_s1_ns = 0;
-    uint64_t sender_send_attempt_ns = 0;
-    uint64_t kernel_rx_rt_ns = 0;
-    uint64_t tunnel_seq = 0;
-    uint32_t flow_hash = 0;
-    uint32_t sender_id = 0;
-    uint32_t kernel_to_user_us = 0xFFFFFFFFu;
-    uint32_t tx_user_to_sched_us = 0xFFFFFFFFu;
-    uint32_t tx_user_to_soft_us = 0xFFFFFFFFu;
-    uint32_t tx_sched_to_soft_us = 0xFFFFFFFFu;
-    uint16_t length = 0;
-    uint16_t source_port = 0;
-    uint16_t dest_port = 0;
-    uint8_t stage = 0;
-    uint8_t ip_version = 0;
-    uint16_t flags = 0;
-};
-
-struct UdpTraceEvent : UdpTraceData {
-    std::atomic<uint64_t> commit_id{0};
-    std::atomic_flag busy = ATOMIC_FLAG_INIT;
-};
-
-// A diagnostic may be omitted under contention. A packet must never wait for
-// the exporter, another producer, or a late kernel timestamp to release a slot.
-struct TryTraceSlotGuard {
-    UdpTraceEvent &slot;
-    const bool acquired;
-    explicit TryTraceSlotGuard(UdpTraceEvent &event)
-        : slot(event), acquired(!event.busy.test_and_set(std::memory_order_acquire)) {}
-    ~TryTraceSlotGuard() { if (acquired) slot.busy.clear(std::memory_order_release); }
 };
 
 struct PendingTxTimestamp {
@@ -440,7 +405,7 @@ struct BackendState {
     long long last_summary_injected_from_peer_packets = 0;
     long long last_summary_dropped_packets = 0;
     std::array<std::atomic<uint64_t>, kFlowLogWordCount> first_seen_flow_bits{};
-    std::unique_ptr<UdpTraceEvent[]> udp_trace_buffer;
+    UdpTraceStorage udp_trace_buffer;
     size_t udp_trace_capacity = 0;
     std::atomic<uint64_t> udp_trace_write_count{0};
     // Only exporters share this mutex. Packet workers use nonblocking slots.
@@ -975,11 +940,11 @@ uint64_t record_udp_trace(BackendState *state,
     const uint64_t ordinal = state->udp_trace_write_count.fetch_add(1, std::memory_order_relaxed) + 1ULL;
     UdpTraceEvent &slot = state->udp_trace_buffer[(ordinal - 1ULL) % state->udp_trace_capacity];
     TryTraceSlotGuard guard(slot);
-    if (!guard.acquired || slot.commit_id.load(std::memory_order_relaxed) >= ordinal) {
+    if (!guard.acquired || __atomic_load_n(&slot.commit_id, __ATOMIC_RELAXED) >= ordinal) {
         state->udp_trace_skipped.fetch_add(1, std::memory_order_relaxed);
         return 0;
     }
-    slot.commit_id.store(0ULL, std::memory_order_relaxed);
+    __atomic_store_n(&slot.commit_id, 0, __ATOMIC_RELAXED);
     slot.ns = now_ns;
     slot.sender_t0_ns = sender_t0_ns;
     slot.sender_s1_ns = sender_s1_ns;
@@ -998,7 +963,7 @@ uint64_t record_udp_trace(BackendState *state,
     slot.stage = stage;
     slot.ip_version = ip_version;
     slot.flags = flags;
-    slot.commit_id.store(ordinal, std::memory_order_release);
+    __atomic_store_n(&slot.commit_id, ordinal, __ATOMIC_RELEASE);
     return ordinal;
 }
 
@@ -1069,7 +1034,7 @@ std::string dump_udp_trace(BackendState *state) {
         {
             UdpTraceEvent &event = state->udp_trace_buffer[(ordinal - 1ULL) % state->udp_trace_capacity];
             TryTraceSlotGuard guard(event);
-            if (!guard.acquired || event.commit_id.load(std::memory_order_relaxed) != ordinal) {
+            if (!guard.acquired || __atomic_load_n(&event.commit_id, __ATOMIC_RELAXED) != ordinal) {
                 ++snapshot_skipped;
                 continue;
             }
@@ -2358,7 +2323,7 @@ void update_tx_trace_slot(BackendState *state,
         state->udp_trace_skipped.fetch_add(1, std::memory_order_relaxed);
         return;
     }
-    const uint64_t committed = slot.commit_id.load(std::memory_order_acquire);
+    const uint64_t committed = __atomic_load_n(&slot.commit_id, __ATOMIC_ACQUIRE);
     if (committed != pending.ordinal || slot.tunnel_seq != pending.seq || slot.stage != kUdpTraceStagePeerSend) {
         state->pending_tx_timestamps.erase(it);
         return;
@@ -2380,7 +2345,7 @@ void update_tx_trace_slot(BackendState *state,
         slot.tx_sched_to_soft_us = saturating_delta_us(
                 pending.tx_soft_rt_ns, pending.tx_sched_rt_ns);
     }
-    slot.commit_id.store(committed, std::memory_order_release);
+    __atomic_store_n(&slot.commit_id, committed, __ATOMIC_RELEASE);
     if (pending.have_sched && pending.have_soft) {
         state->pending_tx_timestamps.erase(it);
     }
@@ -3690,19 +3655,14 @@ Java_com_peerlink_app_tunnel_NativePeerLinkBackend_nativeStart(
     state->mtu = mtu > 0 ? mtu : 1400;
     state->sender_id = static_cast<int>(monotonic_ns() & 0x7FFFFFFF);
     state->last_keepalive_sent_ns.store(monotonic_ns(), std::memory_order_release);
-    // F24-TRACE ring. Prefer the match-length ring, but degrade instead of
-    // terminating the VPN: this allocation is ~27 MiB at 262144 events, and a
-    // plain `new` throws std::bad_alloc straight out of a JNI boundary with no
-    // catch anywhere on this path. The raw capture rings already use
-    // std::nothrow (lines ~847-848); this one now does too, plus fallbacks so a
-    // memory-pressured device still records *some* trace. On total failure
-    // capacity stays 0 and tracing is simply off -- never a crash.
+    // Reserve the match-length timing ring without faulting its unused
+    // pages in while the game is loading. Keep the fallback capacities.
     static const size_t kUdpTraceCapacityFallbacks[] = {
         kUdpTraceCapacity, 131072, 65536, 32768, 0,
     };
     for (const size_t cap : kUdpTraceCapacityFallbacks) {
         if (cap == 0) break;
-        std::unique_ptr<UdpTraceEvent[]> buf(new (std::nothrow) UdpTraceEvent[cap]());
+        auto buf = reserve_udp_trace_storage(cap);
         if (!buf) continue;
         state->udp_trace_buffer = std::move(buf);
         state->udp_trace_capacity = cap;

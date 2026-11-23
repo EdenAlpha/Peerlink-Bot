@@ -131,7 +131,9 @@ class PrimeShizukuBootstrapEngine(private val context: Context) {
             if (output.isNotBlank()) {
                 AppState.appendLog("[PRIME-ADB] starter output:\n${output.takeLast(1_500)}")
             }
-            val fatal = output.lineSequence().firstOrNull { it.contains("fatal:") }
+            val fatal = output.lineSequence().firstOrNull {
+                it.contains("fatal:") || it.contains("CANNOT LINK EXECUTABLE")
+            }
             when {
                 output.contains("info: peerlink_starter exit with 0") || engineAlive() -> Result.Success(port)
                 fatal != null -> Result.Failure("Prime starter failed: $fatal")

@@ -378,7 +378,8 @@ class MainActivity : AppCompatActivity(), NsdDiscovery.NsdCallback {
                                     .getOrDefault("")
                                 val passCap = runCatching { PassthroughRecorder.snapshotForExport() }.getOrNull()
                                 val rawCap = runCatching { PeerLinkVpnService.snapshotRawCapture() }.getOrNull()
-                                val botWire = runCatching { com.peerlink.app.bot.BotWireRecorder.snapshot(this@MainActivity) }.getOrNull()
+                                val botWires = runCatching { com.peerlink.app.bot.BotWireRecorder.snapshots(this@MainActivity) }
+                                    .getOrDefault(emptyList())
                                 val shots = com.peerlink.app.service.ScoreCaptureDump.exportedFiles()
 
                                 // Bundle EVERYTHING into a single zip file.
@@ -386,6 +387,11 @@ class MainActivity : AppCompatActivity(), NsdDiscovery.NsdCallback {
                                 entries.add(ZipEntryData(name = "match_log.txt", text = fullLog))
                                 entries.add(ZipEntryData(name = "engine_exit_report.txt", text =
                                     com.peerlink.app.bot.EngineProcessExitReports.export(this@MainActivity)))
+                                val heap = com.peerlink.app.bot.BotHeapRecording.export(this@MainActivity)
+                                for (file in heap.files) entries.add(ZipEntryData(name = "bot_memory/${file.name}", file = file))
+                                if (heap.pending) entries.add(ZipEntryData(name = "bot_memory/pending.txt", text =
+                                    if (heap.starting) "The bot is still preparing. Export again after the bot reaches team setup or stops.\n"
+                                    else "A bot recording is still on this phone. Turn on Prime and export again to retrieve it.\n"))
                                 java.io.File(filesDir, "engine-events").listFiles()
                                     ?.filter { it.isFile && it.name.matches(Regex("[0-9]+-[0-9]+\\.log")) }
                                     ?.sortedBy { it.name }?.takeLast(8)?.forEach { eventLog ->
@@ -407,8 +413,8 @@ class MainActivity : AppCompatActivity(), NsdDiscovery.NsdCallback {
                                 if (rawCap?.file != null) {
                                     entries.add(ZipEntryData(name = "tunnel_capture.pcapng", file = rawCap.file))
                                 }
-                                if (botWire != null) {
-                                    entries.add(ZipEntryData(name = "bot_transport.csv", file = botWire))
+                                for (botWire in botWires) {
+                                    entries.add(ZipEntryData(name = botWire.name, file = botWire))
                                 }
                                 for (shot in shots) {
                                     entries.add(ZipEntryData(name = "score_shots/${shot.name}", file = shot))
@@ -440,7 +446,8 @@ class MainActivity : AppCompatActivity(), NsdDiscovery.NsdCallback {
                                             appendLine("Contents:")
                                             appendLine("- match_log.txt : full session log")
                                             appendLine("- engine_exit_report.txt : Android bot-process exit history queried at export, including retained earlier attempts")
-                                            appendLine("- engine_events/ : native mismatch and stop events written directly before process exit, plus recorded match states")
+                                            appendLine("- engine_events/ : native frame checks, ball transitions, match states, and process stop events")
+                                            if (heap.files.isNotEmpty() || heap.pending) appendLine("- bot_memory/ : requested bot allocation profiles and recording status")
                                             appendLine("- game_file_audit.txt : last startup file audit, retained across session-log resets")
                                             if (!javaCrash.isNullOrBlank()) appendLine("- java_crash_report.txt : latest Java exception report")
                                             if (udpTrace.isNotBlank()) {
@@ -449,8 +456,8 @@ class MainActivity : AppCompatActivity(), NsdDiscovery.NsdCallback {
                                             if (passCap != null) {
                                                 appendLine("- passthrough_capture.csv : full-byte internet-side (non-game) traffic with event markers")
                                             }
-                                            if (botWire != null) {
-                                                appendLine("- bot_transport.csv : unchanged UDP payloads at game RX, engine TX, engine RX and game TX on direct and VPN routes; capture integrity in final comment")
+                                            for (botWire in botWires) {
+                                                appendLine("- ${botWire.name} : UDP at the forwarding boundaries with wall and monotonic timestamps and capture status")
                                             }
                                             if (rawCap?.file != null) {
                                                 appendLine("- tunnel_capture.pcapng : full-byte tunneled game traffic (PCAPNG, out+in; packets=${rawCap.stats.packets} bytes=${rawCap.stats.bytes} queueDrops=${rawCap.stats.queueDrops} oversized=${rawCap.stats.oversizedDrops} writeErrors=${rawCap.stats.writeErrors})")

@@ -1,6 +1,7 @@
 package com.peerlink.app.bot
 
 import android.content.Context
+import android.app.ActivityManager
 import com.peerlink.app.core.AppState
 import java.io.File
 import java.security.MessageDigest
@@ -21,6 +22,7 @@ internal object EngineRuntime {
         private set
     @Volatile private var ownerUid = 0L
     private var gameHost: GameAndroidRuntime? = null
+    private var loadedEngineFile: File? = null
     private var discovery: BotDiscoveryServer? = null
     var report: (String) -> Unit = {}
     var audit: (String) -> Unit = {}
@@ -34,6 +36,7 @@ internal object EngineRuntime {
         }
     }
     private var heartbeatStarted = false
+    @Volatile private var trimEngineCache = false
 
     private val nativeAvailable = try {
         System.loadLibrary("peerlinkbackend")
@@ -82,8 +85,7 @@ internal object EngineRuntime {
     }
 
     /** Refuse unknown builds before executing any absolute-offset calls. */
-    private fun load(path: File): Boolean {
-        if (base != 0L) return true
+    private fun verifiedEngine(path: File, source: String): Boolean {
         val digest = MessageDigest.getInstance("SHA-256")
         path.inputStream().buffered().use { input ->
             val bytes = ByteArray(128 * 1024)
@@ -94,14 +96,40 @@ internal object EngineRuntime {
             }
         }
         val actual = digest.digest().joinToString("") { "%02x".format(it) }
-        audit("[BOT-FILES] ENGINE_BUILD result=${if (actual == ENGINE_SHA256) "PASS" else "FAIL"} " +
+        audit("[BOT-FILES] ENGINE_BUILD source=$source result=${if (actual == ENGINE_SHA256) "PASS" else "FAIL"} " +
             "actualSHA256=$actual supportedSHA256=$ENGINE_SHA256")
-        if (actual != ENGINE_SHA256) {
-            report("Unsupported eFootball build — this bot test requires the verified 11.1.1 engine")
-            return false
+        return actual == ENGINE_SHA256
+    }
+
+    private fun load(staged: File, installed: File?): File? {
+        loadedEngineFile?.let { return it }
+        if (installed != null && installed.isFile && installed.canRead()) {
+            val verified = try {
+                verifiedEngine(installed, "installed")
+            } catch (_: java.io.IOException) {
+                false
+            }
+            if (verified) {
+                // A read-only mapping of the game's installed ELF shares clean
+                // pages with the foreground game, even in separate processes.
+                base = nativeLoad(installed.absolutePath)
+                if (base != 0L) {
+                    loadedEngineFile = installed
+                    audit("[BOT-FILES] ENGINE_MAPPING source=installed")
+                    return installed
+                }
+                audit("[BOT-FILES] ENGINE_MAPPING installed=rejected fallback=staged")
+            }
         }
-        base = nativeLoad(path.absolutePath)
-        return base != 0L
+        if (!verifiedEngine(staged, "staged")) {
+            report("Unsupported eFootball build — this bot test requires the verified 11.1.1 engine")
+            return null
+        }
+        base = nativeLoad(staged.absolutePath)
+        if (base == 0L) return null
+        loadedEngineFile = staged
+        audit("[BOT-FILES] ENGINE_MAPPING source=staged")
+        return staged
     }
 
     @Synchronized
@@ -126,9 +154,36 @@ internal object EngineRuntime {
             }
             val engine = File(app.filesDir, "engine/libUE4.so")
             check(android.os.Build.VERSION.SDK_INT >= 31) { "Bot engine requires Android 12 or later" }
-            if (!engine.isFile || !onRuntime { load(engine) }) return false
+            if (!engine.isFile) return false
             val headless = BotRendering.headless(app)
-            val files = GameAssets.prepare(app, report, audit, allowMissingMatchResources = headless)
+            val deviceMemory = ActivityManager.MemoryInfo()
+            app.getSystemService(ActivityManager::class.java).getMemoryInfo(deviceMemory)
+            trimEngineCache = headless && deviceMemory.totalMem in 1..(4L * 1024 * 1024 * 1024)
+            // EngineBridge pins the staged library before this service starts.
+            // Complete the asset scan and database decode before dlopen runs the
+            // engine's constructors and increases the bot's resident memory.
+            var readCacheAdvised = 0L
+            val files = GameAssets.prepare(app, report, audit, allowMissingMatchResources = headless,
+                releaseVerifiedCache = { file -> nativeReleaseVerifiedFileCache(file.absolutePath) },
+                fingerprintPrivateFile = { file ->
+                    if (!trimEngineCache || file.length() < 32L * 1024 * 1024) {
+                        GameFileIntegrity.fingerprintFile(file)
+                    } else {
+                        val descriptor = android.os.ParcelFileDescriptor.open(file, android.os.ParcelFileDescriptor.MODE_READ_ONLY)
+                        android.os.ParcelFileDescriptor.AutoCloseInputStream(descriptor).use { input ->
+                            GameFileIntegrity.fingerprint(input) { offset, length ->
+                                if (nativeReleaseReadWindow(descriptor.fd, offset, length)) readCacheAdvised += length
+                            }
+                        }
+                    }
+                })
+            journal("BOT_MEMORY_CACHE phase=verification_read advisedBytes=$readCacheAdvised")
+            val installedEngine = files.game.applicationInfo.nativeLibraryDir?.let { File(it, "libUE4.so") }
+            val mappedEngine = onRuntime { load(engine, installedEngine) } ?: return false
+            if (mappedEngine != engine) {
+                val advised = nativeReleaseVerifiedFileCache(engine.absolutePath)
+                audit("BOT_MEMORY_CACHE phase=unused_staged_engine advisedBytes=$advised")
+            }
             if (headless) {
                 val enabled = nativeEnableHeadless(base, files.missingMatchResources > 0)
                 audit("[BOT-FILES] HEADLESS_SETUP result=${if (enabled) "PASS" else "FAIL"} ${nativeHeadlessDiagnostics(base)}")
@@ -141,7 +196,7 @@ internal object EngineRuntime {
             check(nativeConfigureFiles(base, File(files.root, "assets").absolutePath)) { "Bot asset directory is unavailable" }
             // NativeActivity creates its own NativeCode. Its surface belongs
             // to the bot service and is never launched as a display task.
-            if (gameHost == null) gameHost = GameAndroidRuntime.create(app, files.game, files.root)
+            if (gameHost == null) gameHost = GameAndroidRuntime.create(app, files.game, files.root, mappedEngine)
             val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(120)
             var nextReport = 0L
             while (!nativeApplicationReady(base)) {
@@ -221,8 +276,9 @@ internal object EngineRuntime {
         client != 0L && nativeConfigureTurn(base, input)
     }
 
-    fun configureRevisionCheck(enabled: Boolean): Boolean = onRuntime {
-        client != 0L && nativeConfigureRevisionCheck(base, enabled)
+    internal fun configureServerSettings(settings: MatchServerSettings): Boolean = onRuntime {
+        client != 0L && nativeConfigureServerSettings(base, settings.revisionCheck,
+            settings.protocolOptions, settings.onlineOptions, settings.slowdownThresholds.toIntArray())
     }
 
     fun databaseDiagnostics(): String = onRuntime { nativeDatabaseDiagnostics(base) }
@@ -315,7 +371,7 @@ internal object EngineRuntime {
     }
 
     fun snapshot(passive: Boolean = false): LongArray = onRuntime {
-        if (base == 0L) LongArray(30) else nativeSnapshot(base, passive)
+        if (base == 0L) LongArray(34) else nativeSnapshot(base, passive)
     }
     fun advanceMatch(controllerAllowed: Boolean): Int = onRuntime {
         if (base == 0L) -1 else nativeAdvanceMatch(base, controllerAllowed)
@@ -323,17 +379,32 @@ internal object EngineRuntime {
     fun inputKey(code: Int, down: Boolean): Boolean = onRuntime {
         if (base == 0L) false else nativeInputKey(base, code, if (down) 0 else 1)
     }
+    fun halftimeConfirm(): Boolean = onRuntime { base != 0L && nativeHalftimeConfirm(base) }
+    fun playState(): BotPlayState? = onRuntime {
+        if (base == 0L) null else BotPlayState.decode(nativePlayState(base))
+    }
+    fun inputMotion(x: Float, y: Float, dash: Boolean): Boolean = onRuntime {
+        base != 0L && nativeInputMotion(base, x, y, if (dash) 1f else 0f)
+    }
     fun neutral() = onRuntime { if (base != 0L) nativeNeutralInput(base) }
     fun probeController(): Boolean = onRuntime { base != 0L && nativeProbeController(base) }
     fun journal(line: String) { if (nativeAvailable) nativeJournal(line) }
+    fun setupMemoryGroups(checkpoint: String): String = if (nativeAvailable) {
+        nativeSetupMemoryGroups(checkpoint == "baseline", checkpoint == "setup_followup")
+    } else "status=unavailable"
+    fun probeHeapRecording(): Boolean = nativeAvailable && nativeHeapRecordingProbe(BotHeapRecording.PROBE_BYTES)
+    fun reclaimMatchPool() {
+        val loaded = base
+        if (nativeAvailable && trimEngineCache && loaded != 0L) nativeReclaimMatchPool(loaded)
+    }
     fun releaseUnusedMemory(trigger: String) = onRuntime {
-        val before = android.os.Debug.getPss()
         val started = android.os.SystemClock.elapsedRealtime()
+        val engineCacheDropped = if (trimEngineCache) nativeReleaseEngineCache(base) else -3L
         val result = nativeReleaseUnusedMemory()
         val elapsed = android.os.SystemClock.elapsedRealtime() - started
-        val after = android.os.Debug.getPss()
+        // The sampler already measures PSS off this thread during loading.
         audit("BOT_MEMORY_RECLAIM trigger=$trigger eagerRelease=${result and 2 != 0} " +
-            "purgeAccepted=${result and 1 != 0} beforePssKiB=$before afterPssKiB=$after durationMs=$elapsed")
+            "purgeAccepted=${result and 1 != 0} durationMs=$elapsed engineCacheDroppedBytes=$engineCacheDropped")
     }
     fun probePreviewCallback(): Boolean = onRuntime { base != 0L && nativePreviewProbe(base) }
     fun stopPreview() = onRuntime { if (base != 0L) nativeStopPreview(base) }
@@ -352,7 +423,8 @@ internal object EngineRuntime {
     private external fun nativeBeginIntroduction(base: Long, peer: Long, connectingStart: Long): Boolean
     private external fun nativeTransportIoReady(base: Long): Int
     private external fun nativeConfigureTurn(base: Long, input: ByteArray): Boolean
-    private external fun nativeConfigureRevisionCheck(base: Long, enabled: Boolean): Boolean
+    private external fun nativeConfigureServerSettings(base: Long, revisionCheck: Boolean,
+        protocolOptions: String, onlineOptions: String, slowdownThresholds: IntArray): Boolean
     private external fun nativeDatabaseDiagnostics(base: Long): String
     private external fun nativeNetworkStartupDiagnostics(base: Long): String
     private external fun nativeLoadingDiagnostics(base: Long): String
@@ -369,7 +441,16 @@ internal object EngineRuntime {
     private external fun nativeSnapshot(base: Long, passive: Boolean): LongArray
     private external fun nativeAdvanceMatch(base: Long, controllerAllowed: Boolean): Int
     private external fun nativeReleaseUnusedMemory(): Int
+    private external fun nativeSetupMemoryGroups(baseline: Boolean, last: Boolean): String
+    private external fun nativeHeapRecordingProbe(bytes: Int): Boolean
+    private external fun nativeReleaseReadWindow(fd: Int, offset: Long, length: Long): Boolean
+    private external fun nativeReclaimMatchPool(base: Long)
+    private external fun nativeReleaseEngineCache(base: Long): Long
+    private external fun nativeReleaseVerifiedFileCache(path: String): Long
+    private external fun nativeHalftimeConfirm(base: Long): Boolean
     private external fun nativeInputKey(base: Long, code: Int, action: Int): Boolean
+    private external fun nativePlayState(base: Long): IntArray?
+    private external fun nativeInputMotion(base: Long, x: Float, y: Float, dash: Float): Boolean
     private external fun nativeNeutralInput(base: Long)
     private external fun nativeProbeController(base: Long): Boolean
     private external fun nativePreviewProbe(base: Long): Boolean

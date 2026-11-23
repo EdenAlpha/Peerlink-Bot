@@ -47,7 +47,31 @@ class EngineSnapshotTest {
         assertFalse(snapshot.canTestPass)
         assertEquals("Waiting for the match to be ready", snapshot.status())
     }
+    @Test fun aTransientInputWaitAfterKickoffKeepsTheGameplayStatus() {
+        val snapshot = EngineSnapshot(state().apply { this[29] = 0 })
+        assertFalse(snapshot.canTestPass)
+        assertEquals("Match in progress", snapshot.status(afterKickoff = true))
+    }
     @Test fun missingReadinessFromAnOlderOrIncompleteSnapshotCannotAuthorizePass() {
         assertFalse(EngineSnapshot(state().copyOf(29)).canTestPass)
+    }
+    @Test fun aConnectedHalftimeDoesNotAuthorizePassOrLookLikeMatchClosure() {
+        val values = state().apply { this[8] = 21; this[29] = 0 }
+        val snapshot = EngineSnapshot(values)
+        assertFalse(snapshot.canTestPass)
+        assertEquals("Match paused — waiting for play to resume", snapshot.status(afterKickoff = true))
+    }
+    @Test fun continueIsAvailableOnlyAtAConfirmedHalftimeMenu() {
+        val halftime = state().copyOf(33).apply { this[8] = 21 }
+        for (menu in 0L..6L) {
+            halftime[32] = menu
+            val snapshot = EngineSnapshot(halftime)
+            assertEquals(menu == 3L || menu == 5L, snapshot.halftimeCanConfirm)
+            assertFalse(snapshot.canTestPass)
+        }
+        halftime[32] = 5
+        assertFalse(EngineSnapshot(halftime.copyOf(32)).halftimeCanConfirm)
+        assertFalse(EngineSnapshot(halftime.copyOf().apply { this[8] = 17 }).halftimeCanConfirm)
+        assertFalse(EngineSnapshot(halftime.copyOf().apply { this[2] = 0 }).halftimeCanConfirm)
     }
 }

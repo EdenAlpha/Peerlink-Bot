@@ -4,6 +4,8 @@
 #include "../../app/src/main/jni/game/match_stop_diagnostics.cpp"
 #include <cassert>
 #include <cstring>
+#include <fstream>
+#include <iterator>
 #include <sys/wait.h>
 
 namespace {
@@ -12,10 +14,11 @@ unsigned request_calls, outgoing_calls, apply_calls;
 bool stop_on_outgoing, stop_on_apply;
 uintptr_t expected_checksum_root;
 unsigned checksum_helper_calls;
+uint32_t checksum_fixture_frame = 1;
 uint32_t match_checksum_fixture(uintptr_t root, uint32_t *sum, uint32_t *ordinal, uint32_t *frame) {
     assert(root == expected_checksum_root);
     ++checksum_helper_calls;
-    *sum += 100; ++*ordinal; *frame = 1;
+    *sum += 100; ++*ordinal; *frame = checksum_fixture_frame;
     return 1;
 }
 void ball_checksum_fixture(uintptr_t root, uint32_t *sum, uint32_t *ordinal) {
@@ -228,6 +231,54 @@ int main() {
         assert(details.find("players=22 playerPositionBits=[100,0,0,101,0,0,") != std::string::npos);
         peerlink_match_state_sample_initial();
         assert(checksum_helper_calls == 71 && checksum_root[0] == 55);
+        // Export the first compared frame while it is still live, even if
+        // the command controller has already advanced beyond that frame.
+        char directory[] = "/tmp/peerlink-match-frame-XXXXXX";
+        assert(mkdtemp(directory));
+        const std::string path = std::string(directory) + "/match.log";
+        assert(peerlink_open_diagnostic_journal(path.c_str()));
+        checksum_fixture_frame = 4212;
+        set_word(controller + 0x30, 4213);
+        peerlink_record_check_frame(4212, 3765);
+        peerlink_record_check_frame(4239, 32452);
+        assert(checksum_helper_calls == 213 && checksum_root[0] == 55);
+
+        alignas(uintptr_t) unsigned char checker[0x30]{}, comparison[0x20]{};
+        auto set_half = [](unsigned char *at, uint16_t value) { std::memcpy(at, &value, sizeof(value)); };
+        set_word(comparison + 8, 4212); set_word(comparison + 12, 4212);
+        set_half(comparison + 2, 3765); set_half(comparison + 4, 3780);
+        set_word(checker + 8, 1); set_word(checker + 12, 4212);
+        peerlink_record_check_comparison(reinterpret_cast<uintptr_t>(checker), reinterpret_cast<uintptr_t>(comparison));
+        set_word(comparison + 12, 4239);
+        peerlink_record_check_comparison(reinterpret_cast<uintptr_t>(checker), reinterpret_cast<uintptr_t>(comparison));
+
+        alignas(uintptr_t) unsigned char ball[0x60]{}, group[0x48]{}, transition[0x230]{}, flow[0x33ac]{};
+        const uint32_t target[] = {0, 0, 0x42c80000};
+        const uintptr_t ball_address = reinterpret_cast<uintptr_t>(ball);
+        const uintptr_t group_address = reinterpret_cast<uintptr_t>(group);
+        const uintptr_t target_address = reinterpret_cast<uintptr_t>(target);
+        const uintptr_t transition_address = reinterpret_cast<uintptr_t>(transition);
+        const uintptr_t flow_address = reinterpret_cast<uintptr_t>(flow);
+        set_word(controller + 0x30, 4203);
+        transition[0x22e] = 1;
+        flow[0x333c] = 1;
+        peerlink_record_ball_park(ball_address, target_address, group_address, transition_address, flow_address);
+        set_pointer(group + 0x30, ball_address);
+        peerlink_record_ball_park(ball_address, target_address, group_address, transition_address, flow_address);
+        set_word(ball + 0x38, 0x42c80000);
+        peerlink_record_ball_park(ball_address, target_address, group_address, transition_address, flow_address);
+
+        std::ifstream file(path);
+        const std::string journal((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+        assert(journal.find("MATCH_CHECK_FRAME frame=4212 checkValue=3765 snapshotVerified=1 terms=71") != std::string::npos);
+        assert(journal.find(" partTerms=[1,1,1,1,1,") != std::string::npos);
+        assert(journal.find("MATCH_CHECK_FRAME frame=4239 checkValue=32452 snapshotVerified=0 observedFrame=4212 observedValue=3765") != std::string::npos);
+        assert(journal.find("MATCH_CHECK_COMPARE frame=4212 localValue=3765 peerValue=3780 equal=0") != std::string::npos);
+        assert(journal.find("MATCH_CHECK_COMPARE frame=4239") == std::string::npos);
+        const std::string park = "MATCH_ACTIVE_BALL_PARK commandFrame=4203 flow=1 transitionFlag=1 matchFlowFlag=0";
+        assert(journal.find(park) != std::string::npos && journal.find(park) == journal.rfind(park));
+        unlink(path.c_str());
+        rmdir(directory);
         _exit(0);
     }
     int snapshot_status = 0;

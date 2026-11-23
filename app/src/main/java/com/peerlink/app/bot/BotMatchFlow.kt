@@ -555,37 +555,14 @@ class BotMatchFlow(
             ),
         ))
 
-    /**
-     * The 11.1.0 antenna heartbeat: SET echo (mid-match statistical_data
-     * variant) + GET poll. This is the liveness signal the real client keeps
-     * pushing through the WHOLE match.
-     */
-    fun antennaBeat(
-        g: KgsGate, rid: Long, selfU: Long, oppU: Long, gs: Map<*, *>,
-    ): Pair<LinkedHashMap<String, Any?>, LinkedHashMap<String, Any?>> {
-        val set = g.step("CMD_SET_GAME_SESSION_CHECK_RES", linkedMapOf(
-            "game_sycom" to (gs["game_sycom"] as? String ?: ""),
-            "error_code" to "NOERR",
-            "gamerelay" to relayBlock(gs),
-            "failed_reason" to 0,
-            "is_lobby" to "YES",
-            "room_id" to linkedMapOf("id" to rid),
-            "statistical_data" to linkedMapOf(
-                "user_id_list" to listOf(selfU, oppU), "matching_num" to 2,
-                "answer" to "", "antenna_min" to asLong(gs["ping"]),
-                "error_code" to "NOERR", "link_type" to "",
-                "create_session_time" to asLong(gs["connecting_start_time"]),
-                "background_times" to "",
-            ),
-        ))
-        val get = g.step("CMD_GET_GAME_SESSION_CHECK_RES", linkedMapOf(
+    /** TaskMatchSession polls for completion of the room connection check. */
+    fun pollConnectionReport(g: KgsGate, rid: Long, selfU: Long, oppU: Long) =
+        g.step("CMD_GET_GAME_SESSION_CHECK_RES", linkedMapOf(
             "room_id" to linkedMapOf("id" to rid), "is_lobby" to "YES",
             "game_entry_user_list" to listOf(selfU, oppU),
         ))
-        return set to get
-    }
 
-    /** The gamerelay block both session-check bodies echo from the server. */
+    /** The reported relay assignment comes from the current server session. */
     private fun relayBlock(gs: Map<*, *>): LinkedHashMap<String, Any?> {
         val gr = gs["gamerelay"] as? Map<*, *> ?: emptyMap<String, Any?>()
         return linkedMapOf(

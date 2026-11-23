@@ -189,10 +189,19 @@ internal object GameResourcePacks {
         val temporary = File.createTempFile(".resource-", ".link", destination.parentFile)
         try {
             check(temporary.delete())
-            try {
+            val linked = try {
                 Files.createLink(temporary.toPath(), source.toPath())
-                check(temporary.renameTo(destination)) { "Cannot install match resource link" }
+                true
             } catch (_: java.io.IOException) {
+                false
+            } catch (_: UnsupportedOperationException) {
+                false
+            }
+            if (linked) {
+                check(temporary.renameTo(destination)) { "Cannot install match resource link" }
+            } else if (!destination.isFile || runCatching {
+                    destination.inputStream().use(GameFileIntegrity::fingerprint)
+                }.getOrNull() != fingerprint) {
                 source.inputStream().use { GameFileIntegrity(report).replace(it, destination, "native/${source.name}", fingerprint) }
             }
         } finally { temporary.delete() }
