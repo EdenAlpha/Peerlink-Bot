@@ -51,6 +51,36 @@ __attribute__((naked)) void observe_ball_placement() {
     __asm__ volatile("mov x3, x19\nmov x4, x27\nldr x5, [sp, #0x20]\nb peerlink_observe_ball_placement_impl");
 }
 
+// These call sites validate the final participant decision. Capture the
+// reducer's own eligible slots before its stack goes away, including channel 4.
+extern "C" __attribute__((used, noinline))
+uint32_t peerlink_observe_scene_agreement_impl(uint32_t result, uintptr_t record, uintptr_t slots) {
+    const uint32_t valid = native<uint32_t (*)(uint32_t)>(0x7320208)(result);
+    if (valid) {
+        const int saved = errno;
+        peerlink_record_scene_agreement(record, slots, result);
+        errno = saved;
+    }
+    return valid;
+}
+
+__attribute__((naked)) void observe_scene_agreement() {
+    __asm__ volatile("mov x1, x19\nmov x2, x22\nb peerlink_observe_scene_agreement_impl");
+}
+
+extern "C" __attribute__((used, noinline))
+uint32_t peerlink_observe_scene_decision_impl(uint32_t channel, uintptr_t scene) {
+    const uint32_t result = native<uint32_t (*)(uint32_t)>(0x73203a8)(channel);
+    const int saved = errno;
+    peerlink_record_scene_decision(scene, channel, result);
+    errno = saved;
+    return result;
+}
+
+__attribute__((naked)) void observe_scene_decision() {
+    __asm__ volatile("mov x1, x20\nb peerlink_observe_scene_decision_impl");
+}
+
 struct Thunk {
     uint32_t load = 0x58000050;   // ldr x16, [pc, #8]
     uint32_t branch = 0xd61f0200; // br x16
@@ -67,6 +97,61 @@ uint32_t branch_link(uintptr_t from, uintptr_t to) {
 
 bool original_call(uintptr_t at, uintptr_t target) {
     return *reinterpret_cast<const uint32_t *>(image_base + at) == branch_link(at, target);
+}
+
+// All calls in a group target one original function and occupy at most two
+// neighboring pages. Replace the group's instruction span in one operation.
+template <size_t Words, size_t N>
+bool observe_scene_calls(const std::array<uintptr_t, N> &calls, uintptr_t original, uintptr_t thunk,
+                         peerlink::CodePatchFailure &failure) {
+    std::array<uint32_t, Words> words;
+    if ((calls.back() - calls.front()) / sizeof(uint32_t) + 1 != Words) return false;
+    const uintptr_t start = image_base + calls.front();
+    std::memcpy(words.data(), reinterpret_cast<const void *>(start), sizeof(words));
+    for (const auto call : calls) {
+        uint32_t replacement = branch_link(image_base + call, thunk);
+        if (!replacement || !original_call(call, original)) return false;
+        words[(call - calls.front()) / sizeof(uint32_t)] = replacement;
+    }
+    return peerlink::replace_executable_bytes(start, words.data(), sizeof(words), &failure);
+}
+
+void install_scene_observers(uintptr_t base, long page_size) {
+    constexpr std::array<uintptr_t, 5> agreement{0x7320ea8, 0x7320f44, 0x7320fe0, 0x732107c, 0x7321118};
+    constexpr std::array<uintptr_t, 2> decision{0x6fe85b8, 0x6fe8804};
+    constexpr uintptr_t range = 1U << 27;
+    bool agreement_installed = false, decision_installed = false;
+    peerlink::CodePatchFailure agreement_error{"instruction_check", 0, 0};
+    peerlink::CodePatchFailure decision_error{"instruction_check", 0, 0};
+    if (page_size >= 4096 && page_size <= 65536) {
+        const uintptr_t last = base + agreement.back();
+        void *page = peerlink::reserve_writable_page(last >= range ? last - range : 0x10000,
+            base + decision.front() + range, static_cast<size_t>(page_size));
+        if (page != MAP_FAILED) {
+            const std::array<Thunk, 2> thunks{{
+                {0x58000050, 0xd61f0200, reinterpret_cast<uintptr_t>(&observe_scene_agreement)},
+                {0x58000050, 0xd61f0200, reinterpret_cast<uintptr_t>(&observe_scene_decision)},
+            }};
+            std::memcpy(page, thunks.data(), sizeof(thunks));
+            if (mprotect(page, page_size, PROT_READ | PROT_EXEC) == 0) {
+                __builtin___clear_cache(static_cast<char *>(page), static_cast<char *>(page) + sizeof(thunks));
+                const uintptr_t entry = reinterpret_cast<uintptr_t>(page);
+                peerlink_match_state_begin(base);
+                agreement_installed = observe_scene_calls<(agreement.back() - agreement.front()) / 4 + 1>(
+                    agreement, 0x7320208, entry, agreement_error);
+                decision_installed = observe_scene_calls<(decision.back() - decision.front()) / 4 + 1>(
+                    decision, 0x73203a8, entry + sizeof(Thunk), decision_error);
+            } else {
+                agreement_error = decision_error = {"observer_execute", errno, static_cast<size_t>(page_size)};
+            }
+            if (!agreement_installed && !decision_installed) munmap(page, page_size);
+        } else {
+            agreement_error = decision_error = {"observer_mapping", errno, static_cast<size_t>(page_size)};
+        }
+    }
+    peerlink_journal("MATCH_SCENE_OBSERVERS agreement=%u decision=%u agreementOperation=%s agreementErrno=%d decisionOperation=%s decisionErrno=%d",
+        unsigned(agreement_installed), unsigned(decision_installed), agreement_error.operation, agreement_error.error,
+        decision_error.operation, decision_error.error);
 }
 } // namespace
 #endif
@@ -135,6 +220,7 @@ void peerlink_observe_match_frames(uintptr_t base) {
     peerlink_journal("MATCH_FRAME_OBSERVERS checksum=%u ballPark=%u checksumCallSitesVerified=%u ballCallSiteVerified=%u operation=%s errno=%d",
         unsigned(checks_installed), unsigned(ball_installed), unsigned(check_verified), unsigned(ball_verified),
         failure.operation, failure.error);
+    install_scene_observers(base, page_size);
     errno = saved_errno;
 #else
     (void)base;

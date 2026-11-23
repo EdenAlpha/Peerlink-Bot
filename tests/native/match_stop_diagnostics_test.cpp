@@ -25,6 +25,10 @@ void ball_checksum_fixture(uintptr_t root, uint32_t *sum, uint32_t *ordinal) {
     assert(root == expected_checksum_root);
     ++checksum_helper_calls; *sum += 2; ++*ordinal;
 }
+uintptr_t ball_history_fixture(uintptr_t record, uint32_t slot) {
+    assert(slot == 0);
+    return record;
+}
 void object_checksum_fixture(uintptr_t root, uint32_t *sum, uint32_t *ordinal, uint32_t index) {
     assert(root == expected_checksum_root && index < 3);
     ++checksum_helper_calls; *sum += 10 + index; ++*ordinal;
@@ -198,11 +202,14 @@ int main() {
         install_helper(0x6b00048, reinterpret_cast<uintptr_t>(match_checksum_fixture));
         install_helper(0x6b00474, reinterpret_cast<uintptr_t>(ball_checksum_fixture));
         install_helper(0x6b0050c, reinterpret_cast<uintptr_t>(object_checksum_fixture));
+        install_helper(0x72d9980, reinterpret_cast<uintptr_t>(ball_history_fixture));
         for (uintptr_t offset : {0x6b00650U,0x6b00794U,0x6b00908U})
             install_helper(offset, reinterpret_cast<uintptr_t>(player_checksum_fixture));
         const long page = sysconf(_SC_PAGESIZE);
         const uintptr_t page_start = (base + 0x6b00000) & ~(static_cast<uintptr_t>(page) - 1);
         assert(mprotect(reinterpret_cast<void *>(page_start), page, PROT_READ | PROT_EXEC) == 0);
+        const uintptr_t ball_page = (base + 0x72d9980) & ~(static_cast<uintptr_t>(page) - 1);
+        assert(mprotect(reinterpret_cast<void *>(ball_page), page, PROT_READ | PROT_EXEC) == 0);
         alignas(uintptr_t) unsigned char service[0x20]{}, inner[0xe0]{}, match[0x300]{}, core[0x3ca0]{};
         alignas(uintptr_t) unsigned char actors[22][0x650]{};
         uint32_t checksum_root[4]{55};
@@ -239,6 +246,10 @@ int main() {
         assert(peerlink_open_diagnostic_journal(path.c_str()));
         checksum_fixture_frame = 4212;
         set_word(controller + 0x30, 4213);
+        alignas(uintptr_t) unsigned char history_owner[0x78]{};
+        const uint32_t history_ball[7]{11, 12, 13, 21, 22, 23, 24};
+        set_pointer(reinterpret_cast<unsigned char *>(base + 0xa58de28), reinterpret_cast<uintptr_t>(history_owner));
+        set_pointer(history_owner + 0x70, reinterpret_cast<uintptr_t>(history_ball));
         peerlink_record_check_frame(4212, 3765);
         peerlink_record_check_frame(4239, 32452);
         assert(checksum_helper_calls == 213 && checksum_root[0] == 55);
@@ -260,6 +271,23 @@ int main() {
         const uintptr_t transition_address = reinterpret_cast<uintptr_t>(transition);
         const uintptr_t flow_address = reinterpret_cast<uintptr_t>(flow);
         set_word(controller + 0x30, 4203);
+        alignas(uintptr_t) unsigned char scene[16]{};
+        unsigned char eligible[24]{};
+        constexpr uint32_t channel = 1;
+        const auto agreement = base + 0xa590478 + channel * 0xd8;
+        unsigned char *choices = reinterpret_cast<unsigned char *>(agreement + 0x10);
+        set_word(choices, 1); set_word(choices + 4, 2); set_word(choices + 8, 2);
+        eligible[0] = 1; eligible[1] = 1;
+        peerlink_record_scene_agreement(agreement, reinterpret_cast<uintptr_t>(eligible), 2);
+        eligible[1] = 0;
+        peerlink_record_scene_agreement(agreement, reinterpret_cast<uintptr_t>(eligible), 1);
+        peerlink_record_scene_agreement(agreement + 1, reinterpret_cast<uintptr_t>(eligible), 1);
+        set_word(scene + 4, 4); set_word(scene + 8, 12);
+        peerlink_record_scene_decision(reinterpret_cast<uintptr_t>(scene), channel, 2);
+        peerlink_record_scene_decision(reinterpret_cast<uintptr_t>(scene), channel, 2);
+        peerlink_record_scene_decision(reinterpret_cast<uintptr_t>(scene), channel, 0);
+        peerlink_record_scene_decision(reinterpret_cast<uintptr_t>(scene), channel, 1);
+        assert(choices[0] == 1 && choices[4] == 2 && choices[8] == 2 && eligible[1] == 0 && scene[4] == 4);
         transition[0x22e] = 1;
         flow[0x333c] = 1;
         peerlink_record_ball_park(ball_address, target_address, group_address, transition_address, flow_address);
@@ -272,6 +300,13 @@ int main() {
         const std::string journal((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
         assert(journal.find("MATCH_CHECK_FRAME frame=4212 checkValue=3765 snapshotVerified=1 terms=71") != std::string::npos);
         assert(journal.find(" partTerms=[1,1,1,1,1,") != std::string::npos);
+        assert(journal.find(" ballBits=[11,12,13,21,22,23,24]") != std::string::npos);
+        const std::string agreement1 = "MATCH_SCENE_AGREEMENT commandFrame=4203 channel=1 result=1 eligibleMask=1 choiceOneMask=1 choiceTwoMask=0";
+        assert(journal.find(agreement1) != std::string::npos && journal.find(agreement1) == journal.rfind(agreement1));
+        assert(journal.find("channel=1 result=2 eligibleMask=3 choiceOneMask=1 choiceTwoMask=2") != std::string::npos);
+        const std::string decision2 = "MATCH_SCENE_DECISION commandFrame=4203 sceneId=12 step=4 channel=1 result=2";
+        assert(journal.find(decision2) != std::string::npos && journal.find(decision2) == journal.rfind(decision2));
+        assert(journal.find("sceneId=12 step=4 channel=1 result=1") != std::string::npos);
         assert(journal.find("MATCH_CHECK_FRAME frame=4239 checkValue=32452 snapshotVerified=0 observedFrame=4212 observedValue=3765") != std::string::npos);
         assert(journal.find("MATCH_CHECK_COMPARE frame=4212 localValue=3765 peerValue=3780 equal=0") != std::string::npos);
         assert(journal.find("MATCH_CHECK_COMPARE frame=4239") == std::string::npos);

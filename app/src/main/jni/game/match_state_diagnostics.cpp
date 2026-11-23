@@ -178,7 +178,9 @@ void peerlink_record_check_frame(uint32_t frame, uint32_t value) {
     details += "parts="; append_array(details, check.parts);
     details += " partTerms="; append_array(details, check.part_terms);
     if (ball) {
-        std::array<uint32_t, 6> bits{};
+        // 6b00d20 reads XYZ. 6b00d80 hashes all four rotation components.
+        // Keep the six-word live position/velocity snapshot in capture() separate.
+        std::array<uint32_t, 7> bits{};
         std::memcpy(bits.data(), reinterpret_cast<const void *>(ball), sizeof(bits));
         details += " ballBits="; append_array(details, bits);
     }
@@ -194,6 +196,46 @@ void peerlink_record_check_comparison(uintptr_t checker, uintptr_t context) {
     peerlink_journal("MATCH_CHECK_COMPARE frame=%u localValue=%u peerValue=%u equal=%u verdict=%u mismatchCount=%u firstMismatchFrame=%u",
         frame, local_second ? current : stored, local_second ? stored : current,
         unsigned(stored == current), word(context + 16), word(checker + 8), word(checker + 12));
+}
+
+void peerlink_record_scene_agreement(uintptr_t record, uintptr_t eligible_slots, uint32_t result) {
+    if (!engine || !eligible_slots || (result != 1 && result != 2)) return;
+    // 73202b8 selects one of five records. The reducer at 7320794 reads
+    // these 24 eligibility bytes and the corresponding decoded input values.
+    const uintptr_t first = engine + 0xa590478;
+    constexpr uintptr_t stride = 0xd8;
+    if (record < first || record - first >= 5 * stride || (record - first) % stride) return;
+    const uintptr_t controller = command_controller();
+    const uint32_t frame = controller ? word(controller + 0x30) : 0;
+    if (!frame) return;
+    uint32_t eligible = 0, one = 0, two = 0;
+    for (unsigned slot = 0; slot < 24; ++slot) {
+        if (!byte(eligible_slots + slot)) continue;
+        const uint32_t bit = 1U << slot;
+        eligible |= bit;
+        const uint32_t choice = word(record + 0x10 + slot * 4);
+        if (choice == 1) one |= bit;
+        if (choice == 2) two |= bit;
+    }
+    peerlink_journal("MATCH_SCENE_AGREEMENT commandFrame=%u channel=%u result=%u eligibleMask=%u choiceOneMask=%u choiceTwoMask=%u",
+        frame, unsigned((record - first) / stride), result, eligible, one, two);
+}
+
+void peerlink_record_scene_decision(uintptr_t scene, uint32_t channel, uint32_t result) {
+    // Only the two decision reads in scene steps 3 and 4 call here. The same
+    // result can persist on successive ticks while a presentation is pending.
+    struct Seen { uintptr_t scene; uint32_t frame, step, channel, result; };
+    static thread_local Seen last{};
+    if (!scene || (result != 1 && result != 2)) { last = {}; return; }
+    const uintptr_t controller = command_controller();
+    const uint32_t frame = controller ? word(controller + 0x30) : 0;
+    if (!frame) return;
+    const uint32_t step = word(scene + 4);
+    const bool repeated = last.scene == scene && last.step == step && last.channel == channel &&
+        last.result == result && frame - last.frame <= 1;
+    last = {scene, frame, step, channel, result};
+    if (!repeated) peerlink_journal("MATCH_SCENE_DECISION commandFrame=%u sceneId=%u step=%u channel=%u result=%u",
+        frame, word(scene + 8), step, channel, result);
 }
 
 void peerlink_record_ball_park(uintptr_t ball, uintptr_t position, uintptr_t group,
