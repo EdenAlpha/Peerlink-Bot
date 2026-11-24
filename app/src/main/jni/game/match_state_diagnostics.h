@@ -23,6 +23,7 @@ struct PeerLinkSceneStartSample {
 PeerLinkSceneStartSample peerlink_sample_scene_start(uintptr_t scene, uintptr_t transition);
 void peerlink_record_scene_start(const char *stage, const PeerLinkSceneStartSample &before,
                                  const PeerLinkSceneStartSample &after);
+void peerlink_record_scene_clock_source(uint32_t scene_id, bool timeline_loaded);
 void peerlink_record_ball_park(uintptr_t ball, uintptr_t position, uintptr_t group,
                               uintptr_t transition, uintptr_t flow);
 void peerlink_match_state_sample_initial();

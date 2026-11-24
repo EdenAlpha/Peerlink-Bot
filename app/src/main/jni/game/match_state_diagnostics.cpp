@@ -285,6 +285,13 @@ void peerlink_record_scene_start(const char *stage, const PeerLinkSceneStartSamp
         unsigned(before.manager_finishes_early), unsigned(after.manager_finishes_early));
 }
 
+void peerlink_record_scene_clock_source(uint32_t scene_id, bool timeline_loaded) {
+    const uintptr_t controller = command_controller();
+    if (!controller) return;
+    peerlink_journal("MATCH_SCENE_CLOCK_SOURCE commandFrame=%u sceneId=%u source=%s",
+        word(controller + 0x30), scene_id, timeline_loaded ? "game_timeline" : "fallback_no_timeline");
+}
+
 void peerlink_record_ball_park(uintptr_t ball, uintptr_t position, uintptr_t group,
                               uintptr_t transition, uintptr_t flow) {
     if (ptr(group + 0x30) != ball || word(position) != 0 || word(position + 8) != 0x42c80000 ||

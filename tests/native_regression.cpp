@@ -94,6 +94,37 @@ int main() {
         sample.elapsed = sample.relative = elapsed;
         sample.timer = 2;
         check("a different timer cannot inherit the prior count", !clock.advance(sample, elapsed));
+
+        peerlink::FallbackCutClocks clocks;
+        std::array<peerlink::CutClockSample, 2> pair{{
+            {1, 0, 0, 0, duration(11), 1, 27},
+            {2, 0, 0, 0, duration(12), 1, 27},
+        }};
+        uint32_t ticks;
+        bool independent = true;
+        for (uint32_t tick = 1; tick <= 11; ++tick) {
+            for (auto &cut : pair) {
+                independent &= clocks.advance(cut, elapsed, ticks) && ticks == tick &&
+                    elapsed == duration(static_cast<int>(tick));
+                cut.elapsed = cut.relative = elapsed;
+            }
+        }
+        check("interleaved fallback cuts keep their own tick counts", independent);
+        clocks.forget(pair[0].timer);
+        check("forgetting one cut leaves another cut's timeline intact",
+              clocks.advance(pair[1], elapsed, ticks) && ticks == 12 && elapsed == pair[1].duration);
+
+        pair[0].elapsed = pair[0].relative = 0;
+        pair[1].elapsed = pair[1].relative = 0;
+        check("both timelines can restart at zero",
+              clocks.advance(pair[0], elapsed, ticks) && ticks == 1 &&
+              clocks.advance(pair[1], elapsed, ticks) && ticks == 1);
+        pair[0].elapsed = pair[0].relative = elapsed;
+        pair[1].elapsed = pair[1].relative = elapsed;
+        clocks.forget(pair[1].timer);
+        check("forgetting an active cut clears only its own correction",
+              !clocks.advance(pair[1], elapsed, ticks) &&
+              clocks.advance(pair[0], elapsed, ticks) && ticks == 2);
     }
     {
         using namespace peerlink_match_pool;

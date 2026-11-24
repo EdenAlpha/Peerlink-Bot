@@ -1,7 +1,9 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 
 namespace peerlink {
@@ -53,6 +55,7 @@ public:
         return true;
     }
 
+    uintptr_t timer() const { return timer_; }
     uint32_t ticks() const { return ticks_; }
 
 private:
@@ -64,6 +67,62 @@ private:
     float duration_ = 0;
     float elapsed_ = 0;
     uint32_t ticks_ = 0;
+};
+
+class FallbackCutClocks {
+public:
+    bool advance(const CutClockSample &sample, float &elapsed, uint32_t &ticks) {
+        if (!sample.timer) return false;
+        auto index = find(sample.timer);
+        FallbackCutClock starting_clock;
+        auto &clock = index < count_ ? entries_[index].clock : starting_clock;
+        if (!clock.advance(sample, elapsed)) {
+            remove(index);
+            return false;
+        }
+        ticks = clock.ticks();
+        if (elapsed == sample.duration) {
+            remove(index);
+            return true;
+        }
+        if (index == count_) {
+            if (count_ < entries_.size()) {
+                ++count_;
+            } else {
+                const auto oldest = std::min_element(entries_.begin(), entries_.end(),
+                    [](const Entry &a, const Entry &b) { return a.last_use < b.last_use; });
+                index = static_cast<std::size_t>(oldest - entries_.begin());
+            }
+            entries_[index].clock = starting_clock;
+        }
+        entries_[index].last_use = ++sequence_;
+        return true;
+    }
+
+    void forget(uintptr_t timer) { remove(find(timer)); }
+
+private:
+    struct Entry {
+        FallbackCutClock clock;
+        uint64_t last_use = 0;
+    };
+
+    std::size_t find(uintptr_t timer) const {
+        std::size_t index = 0;
+        while (index < count_ && entries_[index].clock.timer() != timer) ++index;
+        return index;
+    }
+
+    void remove(std::size_t index) {
+        if (index < count_) entries_[index] = entries_[--count_];
+    }
+
+    // One native scene uses byte-sized cut indices. The original update can
+    // visit several timers on the same thread. Reuse the oldest entry if
+    // interrupted cuts no longer visit the update to release their slots.
+    std::array<Entry, 256> entries_{};
+    std::size_t count_ = 0;
+    uint64_t sequence_ = 0;
 };
 
 void install_fallback_cut_clock(uintptr_t base);
