@@ -104,9 +104,13 @@ void peerlink_observe_scene_start_impl(uintptr_t actor, uintptr_t scene, uintptr
 
 extern "C" __attribute__((used, noinline))
 void peerlink_observe_scene_targets_impl(uintptr_t context, uintptr_t transition, uintptr_t scene) {
+    const int before_errno = errno;
     const auto before = peerlink_sample_scene_start(scene, transition);
+    peerlink_keeper_targets_enter(transition, before);
+    errno = before_errno;
     native<void (*)(uintptr_t, uintptr_t)>(0x6fe7494)(context, transition);
     const int saved_errno = errno;
+    peerlink_keeper_targets_leave();
     peerlink_record_scene_start("targets", before, peerlink_sample_scene_start(scene, transition));
     errno = saved_errno;
 }
@@ -135,6 +139,16 @@ uint32_t observe_keeper_scene(uintptr_t scene, uintptr_t context, uintptr_t tran
     peerlink_keeper_scene_leave(tick, scene, context, transition, (result & 1) != 0);
     errno = after_errno;
     return result;
+}
+
+// The verified direct callers use the three original integer arguments and
+// discard the result. Keep the setter's write and only record its outcome.
+__attribute__((noinline)) void observe_keeper_mode_write(uintptr_t transition, uint32_t player, uint32_t mode) {
+    const uintptr_t caller = reinterpret_cast<uintptr_t>(__builtin_return_address(0));
+    native<void (*)(uintptr_t, uint32_t, uint32_t)>(0x72e3974)(transition, player, mode);
+    const int saved_errno = errno;
+    peerlink_record_keeper_mode_write(transition, player, mode, caller - image_base - 4);
+    errno = saved_errno;
 }
 
 uint32_t observe_scene_clock_source(uintptr_t timeline_slot) {
@@ -272,29 +286,35 @@ void install_scene_observers(uintptr_t base, long page_size) {
     constexpr std::array<uintptr_t, 1> targets{0x6fe8630};
     constexpr std::array<uintptr_t, 1> clock_source{0x69f475c};
     constexpr std::array<uintptr_t, 1> keeper_scene{0x6fe6300};
+    constexpr std::array<uintptr_t, 2> target_modes{0x6fe90f0, 0x6fe9144};
+    constexpr std::array<uintptr_t, 3> handler_modes{0x6fecd24, 0x6fecdf8, 0x6fed078};
     constexpr uintptr_t range = 1U << 27;
     bool agreement_installed = false, decision_installed = false;
     bool start_installed = false, targets_installed = false;
     bool clock_source_installed = false;
     bool keeper_scene_installed = false;
+    bool target_modes_installed = false, handler_modes_installed = false;
     peerlink::CodePatchFailure agreement_error{"instruction_check", 0, 0};
     peerlink::CodePatchFailure decision_error{"instruction_check", 0, 0};
     peerlink::CodePatchFailure start_error{"instruction_check", 0, 0};
     peerlink::CodePatchFailure targets_error{"instruction_check", 0, 0};
     peerlink::CodePatchFailure clock_source_error{"instruction_check", 0, 0};
     peerlink::CodePatchFailure keeper_error{"instruction_check", 0, 0};
+    peerlink::CodePatchFailure target_modes_error{"scene_observer_unavailable", 0, 0};
+    peerlink::CodePatchFailure handler_modes_error = target_modes_error;
     if (page_size >= 4096 && page_size <= 65536) {
         const uintptr_t last = base + agreement.back();
         void *page = peerlink::reserve_writable_page(last >= range ? last - range : 0x10000,
             base + clock_source.front() + range, static_cast<size_t>(page_size));
         if (page != MAP_FAILED) {
-            const std::array<Thunk, 6> thunks{{
+            const std::array<Thunk, 7> thunks{{
                 {0x58000050, 0xd61f0200, reinterpret_cast<uintptr_t>(&observe_scene_agreement)},
                 {0x58000050, 0xd61f0200, reinterpret_cast<uintptr_t>(&observe_scene_decision)},
                 {0x58000050, 0xd61f0200, reinterpret_cast<uintptr_t>(&observe_scene_start)},
                 {0x58000050, 0xd61f0200, reinterpret_cast<uintptr_t>(&observe_scene_targets)},
                 {0x58000050, 0xd61f0200, reinterpret_cast<uintptr_t>(&observe_scene_clock_source)},
                 {0x58000050, 0xd61f0200, reinterpret_cast<uintptr_t>(&observe_keeper_scene)},
+                {0x58000050, 0xd61f0200, reinterpret_cast<uintptr_t>(&observe_keeper_mode_write)},
             }};
             std::memcpy(page, thunks.data(), sizeof(thunks));
             if (mprotect(page, page_size, PROT_READ | PROT_EXEC) == 0) {
@@ -313,6 +333,13 @@ void install_scene_observers(uintptr_t base, long page_size) {
                     keeper_scene_installed = observe_scene_calls<1>(keeper_scene, 0x6fe83ec,
                         entry + 5 * sizeof(Thunk), keeper_error);
                 else keeper_error = {"journal_unavailable", 0, 0};
+                if (keeper_scene_installed && targets_installed) {
+                    target_modes_error = handler_modes_error = {"instruction_check", 0, 0};
+                    target_modes_installed = observe_scene_calls<(target_modes.back() - target_modes.front()) / 4 + 1>(
+                        target_modes, 0x72e3974, entry + 6 * sizeof(Thunk), target_modes_error);
+                    handler_modes_installed = observe_scene_calls<(handler_modes.back() - handler_modes.front()) / 4 + 1>(
+                        handler_modes, 0x72e3974, entry + 6 * sizeof(Thunk), handler_modes_error);
+                }
             } else {
                 agreement_error = decision_error = start_error = targets_error = clock_source_error = keeper_error =
                     {"observer_execute", errno, static_cast<size_t>(page_size)};
@@ -335,8 +362,11 @@ void install_scene_observers(uintptr_t base, long page_size) {
         unsigned(clock_source_installed), clock_source_error.operation, clock_source_error.error);
     peerlink_journal("KEEPER_SCENE_OBSERVER installed=%u operation=%s errno=%d",
         unsigned(keeper_scene_installed), keeper_error.operation, keeper_error.error);
-    peerlink_keeper_journal("KEEPER_SCENE_OBSERVER schema=2 installed=%u clockObserver=%u operation=%s errno=%d",
-        unsigned(keeper_scene_installed), unsigned(clock_source_installed), keeper_error.operation, keeper_error.error);
+    peerlink_keeper_journal("KEEPER_SCENE_OBSERVER schema=3 installed=%u clockObserver=%u operation=%s errno=%d "
+        "targetModes=%u targetModesOperation=%s targetModesErrno=%d handlerModes=%u handlerModesOperation=%s handlerModesErrno=%d",
+        unsigned(keeper_scene_installed), unsigned(clock_source_installed), keeper_error.operation, keeper_error.error,
+        unsigned(target_modes_installed), target_modes_error.operation, target_modes_error.error,
+        unsigned(handler_modes_installed), handler_modes_error.operation, handler_modes_error.error);
 }
 } // namespace
 #endif

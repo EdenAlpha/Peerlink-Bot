@@ -34,6 +34,9 @@ PeerLinkKeeperSceneTick peerlink_keeper_scene_enter(uintptr_t scene, uintptr_t c
 void peerlink_keeper_scene_leave(const PeerLinkKeeperSceneTick &tick, uintptr_t scene, uintptr_t context,
                                  uintptr_t transition, bool finished);
 void peerlink_keeper_clock_sample(uintptr_t timeline_slot, bool timeline_loaded);
+void peerlink_keeper_targets_enter(uintptr_t transition, const PeerLinkSceneStartSample &sample);
+void peerlink_keeper_targets_leave();
+void peerlink_record_keeper_mode_write(uintptr_t transition, uint32_t player, uint32_t mode, uintptr_t caller);
 void peerlink_record_ball_park(uintptr_t ball, uintptr_t position, uintptr_t group,
                               uintptr_t transition, uintptr_t flow);
 void peerlink_match_check_request(uintptr_t controller, uintptr_t checker,

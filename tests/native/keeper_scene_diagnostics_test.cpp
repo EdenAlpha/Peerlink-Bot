@@ -47,6 +47,7 @@ int main() {
     put(core + 0x3c98, balls); put(balls, base + 0x989a160); put(balls + 0x68, possession);
     put(possession + 0x28780, 2U); put(context + 0x680, balls + 0x58);
     put(base + 0xa58de28, simulation); put(simulation + 0x3030, roster0); put(simulation + 0x3080, roster1);
+    put(simulation + 0x390, transition);
     // Exercise a goalkeeper assigned to a different slot on each side.
     for (unsigned slot = 0; slot < 11; ++slot) {
         put(roster0 + 0x42b8 + slot * 4, slot == 2 ? 0U : 1U);
@@ -64,6 +65,13 @@ int main() {
     assert(!peerlink_keeper_scene_enter(scene + 4, context, transition).number);
     auto tick = peerlink_keeper_scene_enter(scene, context, transition);
     assert(tick.number == 1 && tick.frame == 100 && tick.sample);
+    peerlink_keeper_targets_enter(transition, peerlink_sample_scene_start(scene, transition));
+    put(transition + 0xc + 2 * 4, 2U);
+    put(transition + 0x88 + 2 * 12, 0xc2440000U);
+    peerlink_record_keeper_mode_write(transition, 2, 2, 0x6fe9144);
+    peerlink_record_keeper_mode_write(transition, 1, 1, 0x6fecd24);
+    peerlink_keeper_targets_leave();
+    peerlink_record_keeper_mode_write(transition, 2, 2, 0x6fecd24);
     // The original scene advances both the step and the local motion state.
     put(timer + 8, actor); put(timer + 0xb4, 0x40000000U);
     peerlink_keeper_clock_sample(timer + 0x18, true);
@@ -100,9 +108,14 @@ int main() {
     // attempt's missing track, stalled keeper, and first mismatch.
     const uintptr_t second = object(23), second_scene = second + 0x3f0;
     put(second_scene + 8, 197064U); put(second_scene + 4, 8U); put(command + 0x30, 300U);
+    put(second_scene + 0x280, actor);
     put(keeper0 + 0x5dc, 0xc2480000U); put(player_control + 0xa88, uintptr_t{0});
     tick = peerlink_keeper_scene_enter(second_scene, second, transition);
     assert(tick.number == 2 && tick.sample);
+    peerlink_keeper_targets_enter(transition, peerlink_sample_scene_start(second_scene, transition));
+    put(transition + 0xc + 2 * 4, 1U);
+    peerlink_record_keeper_mode_write(transition, 2, 1, 0x6fe90f0);
+    peerlink_keeper_targets_leave();
     put(second_scene + 4, 10U);
     peerlink_keeper_scene_leave(tick, second_scene, second, transition, false);
     put(comparison + 8, 324U); put(comparison + 12, 324U);
@@ -119,13 +132,18 @@ int main() {
     const auto before = find_line(log, "KEEPER_SCENE_STATE scene=1 sceneId=197064 stage=before commandFrame=100");
     assert(before.find("handlerOffset=0x6fecb50 ballContext=1 sameBallContext=1 ballOwnerPresent=1 ballOwner=2") != std::string::npos);
     const auto initial_position = "k0PositionBits=[" + std::to_string(0xc2480000U) + ",0,0]";
-    assert(before.find("k0Player=2 k0PlayerPresent=1 " + initial_position) != std::string::npos);
-    assert(before.find("k1Player=15 k1PlayerPresent=1") != std::string::npos);
+    assert(before.find("k0Player=2 k0SceneMode=0") != std::string::npos);
+    assert(before.find("k0PlayerPresent=1 k0ScenePlayerFlags=[0,0,0,0] " + initial_position) != std::string::npos);
+    assert(before.find("k1Player=15 k1SceneMode=0") != std::string::npos);
     const auto after = find_line(log, "KEEPER_SCENE_STATE scene=1 sceneId=197064 stage=after commandFrame=100");
     assert(after.find("step=10 finished=0") != std::string::npos);
     assert(after.find("clockReads=1 timelineLoaded=1 cutClockBits=[1073741824,0,0,0]") != std::string::npos);
     assert(after.find("k0TrackTimeBits=1073741824") != std::string::npos);
     assert(after.find("k0PositionBits=[" + std::to_string(0xc2440000U) + ",0,0]") != std::string::npos);
+    assert(after.find("k0SceneMode=2 k0SceneOverride=0 k0SceneTargetBits=[" + std::to_string(0xc2440000U)) != std::string::npos);
+    const auto assigned = find_line(log, "KEEPER_SCENE_MODE_WRITE scene=1 sceneId=197064 commandFrame=100 player=2");
+    assert(assigned.find("mode=2 storedMode=2 override=0 callerOffset=0x6fe9144") != std::string::npos);
+    assert(log.find("callerOffset=0x6fecd24") == std::string::npos);
     const auto moved_worker = find_line(log, "scene=1 sceneId=197064 stage=after commandFrame=101");
     assert(moved_worker.find("startFrame=100 playFrame=100") != std::string::npos);
     assert(moved_worker.find("clockReads=1 timelineLoaded=1 cutClockBits=[1077936128,0,0,0]") != std::string::npos);
@@ -134,6 +152,9 @@ int main() {
     const auto failed = find_line(log, "KEEPER_SCENE_STATE scene=2 sceneId=197064 stage=after commandFrame=300");
     assert(failed.find("k0TrackPresent=0") != std::string::npos);
     assert(failed.find(initial_position) != std::string::npos);
+    assert(failed.find("k0SceneMode=1") != std::string::npos && failed.find("k0SceneTargetBits") == std::string::npos);
+    const auto held = find_line(log, "KEEPER_SCENE_MODE_WRITE scene=2 sceneId=197064 commandFrame=300 player=2");
+    assert(held.find("mode=1 storedMode=1 override=0 callerOffset=0x6fe90f0") != std::string::npos);
     assert(find_line(log, "KEEPER_SCENE_COMPARE scene=2 sceneId=197064 frame=324").find("firstMismatchFrame=324") != std::string::npos);
     assert(log.find("FIRST_MISMATCH_PLAYERS frame=900 exactSnapshot=0") != std::string::npos);
     assert(log.find("scene=2 sceneId=197064 frame=900") == std::string::npos);
