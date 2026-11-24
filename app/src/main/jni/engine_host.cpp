@@ -904,7 +904,6 @@ JNIEXPORT jint JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeAdvanceMatc
                 entry<void (*)(uintptr_t, uint32_t)>(0x72ea4dc)(settings, 1);
         }
     }
-    peerlink_match_state_sample_initial();
     return peerlink_match_check_failed() ? -214 : g_match_stage;
 }
 

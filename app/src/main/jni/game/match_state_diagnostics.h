@@ -26,7 +26,6 @@ void peerlink_record_scene_start(const char *stage, const PeerLinkSceneStartSamp
 void peerlink_record_scene_clock_source(uint32_t scene_id, bool timeline_loaded);
 void peerlink_record_ball_park(uintptr_t ball, uintptr_t position, uintptr_t group,
                               uintptr_t transition, uintptr_t flow);
-void peerlink_match_state_sample_initial();
 void peerlink_match_check_request(uintptr_t controller, uintptr_t checker,
                                  uintptr_t context, uintptr_t caller);
 bool peerlink_match_check_failed();

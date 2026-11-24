@@ -92,13 +92,19 @@ bool read_checksum(Checksum &output, uintptr_t state, const char *kind = nullptr
     return true;
 }
 
-void capture(Snapshot &output, uintptr_t controller) {
+void capture(Snapshot &output, uintptr_t controller, const Checksum *verified = nullptr) {
     if (output.published.load(std::memory_order_acquire) || !engine) return;
     int expected = 0;
     if (!output.published.compare_exchange_strong(expected, 1, std::memory_order_acq_rel)) return;
     const char *kind = &output == &initial ? "initial" : "at_stop";
     output.command_frame = word(controller + 0x30);
-    if (!read_checksum(output.check, checksum_state(), kind, output.command_frame)) {
+    if (verified) {
+        // Reuse the snapshot already validated in the game's own checksum
+        // callback. Do not call game checksum helpers again from a host poll.
+        output.check = *verified;
+        peerlink_journal("MATCH_STATE_CAPTURE_BEGIN kind=%s commandFrame=%u stateFrame=%u",
+            kind, output.command_frame, output.check.state_frame);
+    } else if (!read_checksum(output.check, checksum_state(), kind, output.command_frame)) {
         output.published.store(0, std::memory_order_release);
         return;
     }
@@ -166,6 +172,23 @@ void peerlink_record_check_frame(uint32_t frame, uint32_t value) {
         peerlink_journal("MATCH_CHECK_FRAME frame=%u checkValue=%u snapshotVerified=0 observedFrame=%u observedValue=%u",
             frame, value, check.state_frame, check.value);
         return;
+    }
+    // The game's own checksum callback runs after its match state is ready.
+    // Sampling from the host's startup poll can race initialization or
+    // teardown and call a checksum helper with a missing simulation object.
+    if (!initial.published.load(std::memory_order_acquire)) {
+        const uintptr_t controller = command_controller();
+        const uintptr_t match_state = ptr(engine + 0xa533ec0);
+        const uintptr_t core = match_state ? ptr(match_state + 0x2f8) : 0;
+        bool players_ready = true;
+        for (unsigned player = 0; player < 22; ++player)
+            if (!ptr(engine + 0xa5909a0 + 0x170 + player * 8)) { players_ready = false; break; }
+        if (controller && match_state && byte(match_state + 0x138) == 17 &&
+            core && ptr(core) == engine + 0x9899d50 && word(core + 8) == 54 && players_ready) {
+            capture(initial, controller, &check);
+            if (initial.published.load(std::memory_order_acquire) == 2)
+                peerlink_journal("%s", peerlink_match_state_diagnostics().c_str());
+        }
     }
     // Native ball contributor 6b00474 -> 6b00d18 -> 72d9980. Its
     // history record is distinct from the ball object's live coordinates.
@@ -302,21 +325,6 @@ void peerlink_record_ball_park(uintptr_t ball, uintptr_t position, uintptr_t gro
     peerlink_journal("MATCH_ACTIVE_BALL_PARK commandFrame=%u flow=%u transitionFlag=%u matchFlowFlag=%u previousXBits=%u previousYBits=%u previousZBits=%u",
         frame, byte(flow + 0x333c), byte(transition + 0x22e), byte(flow + 0x33a8),
         word(ball + 0x30), word(ball + 0x34), word(ball + 0x38));
-}
-
-void peerlink_match_state_sample_initial() {
-    if (initial.published.load(std::memory_order_acquire)) return;
-    uintptr_t controller = command_controller();
-    if (!controller) return;
-    uintptr_t match = ptr(engine + 0xa533ec0);
-    if (!match || byte(match + 0x138) != 17) return;
-    uintptr_t core = ptr(match + 0x2f8);
-    if (!core || ptr(core) != engine + 0x9899d50 || word(core + 8) != 54) return;
-    for (unsigned player = 0; player < 22; ++player)
-        if (!ptr(engine + 0xa5909a0 + 0x170 + player * 8)) return;
-    capture(initial, controller);
-    if (initial.published.load(std::memory_order_acquire) == 2)
-        peerlink_journal("%s", peerlink_match_state_diagnostics().c_str());
 }
 
 void peerlink_match_check_request(uintptr_t controller, uintptr_t checker,

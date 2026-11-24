@@ -227,17 +227,27 @@ int main() {
             *reinterpret_cast<uintptr_t *>(base + 0xa5909a0 + 0x170 + i * 8) = reinterpret_cast<uintptr_t>(actors[i]);
             set_word(actors[i] + 0x5dc, 100 + i);
         }
-        peerlink_match_state_sample_initial();
-        assert(checksum_helper_calls == 0); // Not yet in live play.
+        // The first snapshot must come from a verified game checksum, not a
+        // separate host poll. A wrong checksum or incomplete player set must
+        // leave the snapshot unpublished and permit a later safe retry.
+        peerlink_record_check_frame(1, 3766);
+        assert(checksum_helper_calls == 71);
+        assert(peerlink_match_state_diagnostics().find("MATCH_STATE_INITIAL present=0") != std::string::npos);
         match[0x138] = 17;
-        peerlink_match_state_sample_initial();
-        assert(checksum_helper_calls == 71 && checksum_root[0] == 55);
+        *reinterpret_cast<uintptr_t *>(base + 0xa5909a0 + 0x170 + 21 * 8) = 0;
+        peerlink_record_check_frame(1, 3765);
+        assert(checksum_helper_calls == 142);
+        assert(peerlink_match_state_diagnostics().find("MATCH_STATE_INITIAL present=0") != std::string::npos);
+        *reinterpret_cast<uintptr_t *>(base + 0xa5909a0 + 0x170 + 21 * 8) = reinterpret_cast<uintptr_t>(actors[21]);
+        peerlink_record_check_frame(1, 3765);
+        assert(checksum_helper_calls == 213 && checksum_root[0] == 55);
         const std::string details = peerlink_match_state_diagnostics();
         assert(details.find("MATCH_STATE_INITIAL present=1 commandFrame=3 stateFrame=1") != std::string::npos);
         assert(details.find("terms=71 parts=[100,2,10,11,12,") != std::string::npos);
         assert(details.find("players=22 playerPositionBits=[100,0,0,101,0,0,") != std::string::npos);
-        peerlink_match_state_sample_initial();
-        assert(checksum_helper_calls == 71 && checksum_root[0] == 55);
+        peerlink_record_check_frame(1, 3765);
+        assert(checksum_helper_calls == 284 && checksum_root[0] == 55);
+        assert(peerlink_match_state_diagnostics() == details);
         // Export the first compared frame while it is still live, even if
         // the command controller has already advanced beyond that frame.
         char directory[] = "/tmp/peerlink-match-frame-XXXXXX";
@@ -252,7 +262,7 @@ int main() {
         set_pointer(history_owner + 0x70, reinterpret_cast<uintptr_t>(history_ball));
         peerlink_record_check_frame(4212, 3765);
         peerlink_record_check_frame(4239, 32452);
-        assert(checksum_helper_calls == 213 && checksum_root[0] == 55);
+        assert(checksum_helper_calls == 426 && checksum_root[0] == 55);
 
         alignas(uintptr_t) unsigned char checker[0x30]{}, comparison[0x20]{};
         auto set_half = [](unsigned char *at, uint16_t value) { std::memcpy(at, &value, sizeof(value)); };
