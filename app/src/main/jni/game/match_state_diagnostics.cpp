@@ -3,6 +3,8 @@
 #include <array>
 #include <atomic>
 #include <cstring>
+#include <mutex>
+#include <unistd.h>
 
 namespace {
 uintptr_t engine = 0;
@@ -41,22 +43,35 @@ constexpr uint32_t kLaterSceneStride = 9;
 struct KeeperScene {
     uintptr_t scene = 0, controller = 0;
     uint32_t number = 0, id = 0, start_frame = 0, play_frame = 0;
-    uint32_t last_frame = 0, last_logged = 0, last_step = 0;
-    bool complete = false, sample_clock = false;
-    unsigned clock_reads = 0;
-    bool timeline_loaded = false;
-    std::array<uint32_t, 4> clock_bits{};
+    uint32_t last_frame = 0, last_logged = 0, last_step = 0, slots_frame = 0;
+    bool complete = false;
     std::array<unsigned, 2> keepers{kUnknownPlayer, kUnknownPlayer};
 };
-thread_local KeeperScene keeper_scene;
+// The engine dispatches successive command frames on different workers.
+// Share scene identity and history. Keep clock reads scoped to the current
+// original dispatcher call on its worker.
+std::mutex keeper_scene_mutex;
+KeeperScene keeper_scene;
+struct KeeperClock {
+    uintptr_t actor = 0;
+    unsigned reads = 0;
+    bool timeline_loaded = false;
+    std::array<uint32_t, 4> bits{};
+};
+thread_local KeeperClock keeper_clock;
 struct RecentPlayers {
     uint32_t frame = 0, present_mask = 0;
     std::array<uint32_t, 66> positions{};
 };
 // Retain a few verified samples in case the peer's check arrives later.
-thread_local std::array<RecentPlayers, 8> recent_players;
-thread_local size_t recent_next = 0;
-thread_local uint32_t recent_latest = 0;
+struct PlayerHistory {
+    uintptr_t controller = 0;
+    std::array<RecentPlayers, 8> entries{};
+    size_t next = 0;
+    uint32_t latest = 0, waiting_for_mismatch = 0;
+};
+std::mutex recent_players_mutex;
+PlayerHistory recent_players;
 
 uintptr_t command_controller(uintptr_t *checker = nullptr) {
     if (!engine) return 0;
@@ -178,13 +193,42 @@ template<size_t N> std::array<uint32_t, N> copy_words(uintptr_t source) {
     return bits;
 }
 
-void remember_players(uint32_t frame) {
-    if (!peerlink_keeper_journal_active() || frame == recent_latest) return;
-    if (frame < recent_latest) { recent_players = {}; recent_next = 0; }
-    auto &sample = recent_players[recent_next];
-    recent_next = (recent_next + 1) % recent_players.size();
-    recent_latest = frame;
-    sample = {};
+void record_first_differing_players(uintptr_t controller, uint32_t frame, bool recovered = false) {
+    if (!peerlink_keeper_journal_active()) return;
+    RecentPlayers current, previous;
+    {
+        std::lock_guard<std::mutex> lock(recent_players_mutex);
+        auto &history = recent_players;
+        // A comparison can arrive on a different worker before the local
+        // checksum callback. Record it now and fill in the exact sample later.
+        if (history.controller != controller) {
+            history = {};
+            history.controller = controller;
+        }
+        for (const auto &sample : history.entries) {
+            if (sample.frame == frame) current = sample;
+            if (sample.frame < frame && sample.frame > previous.frame) previous = sample;
+        }
+        if (!current.frame && !recovered) history.waiting_for_mismatch = frame;
+    }
+    std::string details;
+    if (current.frame) {
+        details += " presentMask=" + std::to_string(current.present_mask) + " positionBits=";
+        append_array(details, current.positions);
+    }
+    if (previous.frame) {
+        details += " previousFrame=" + std::to_string(previous.frame) +
+            " previousPresentMask=" + std::to_string(previous.present_mask) + " previousPositionBits=";
+        append_array(details, previous.positions);
+    }
+    if (recovered) details += " recovered=1";
+    peerlink_keeper_journal("FIRST_MISMATCH_PLAYERS frame=%u exactSnapshot=%u%s", frame,
+        unsigned(current.frame != 0), details.c_str());
+}
+
+void remember_players(uintptr_t controller, uint32_t frame) {
+    if (!controller || !peerlink_keeper_journal_active()) return;
+    RecentPlayers sample;
     sample.frame = frame;
     for (unsigned player = 0; player < 22; ++player) {
         const uintptr_t object = ptr(engine + 0xa5909a0 + 0x170 + player * 8);
@@ -192,27 +236,22 @@ void remember_players(uint32_t frame) {
         std::memcpy(sample.positions.data() + player * 3, reinterpret_cast<const void *>(object + 0x5dc), 12);
         sample.present_mask |= 1U << player;
     }
-}
-
-void record_first_differing_players(uint32_t frame) {
-    if (!peerlink_keeper_journal_active()) return;
-    const RecentPlayers *current = nullptr, *previous = nullptr;
-    for (const auto &sample : recent_players) {
-        if (sample.frame == frame) current = &sample;
-        if (sample.frame && sample.frame < frame && (!previous || sample.frame > previous->frame)) previous = &sample;
+    bool recovered;
+    {
+        std::lock_guard<std::mutex> lock(recent_players_mutex);
+        auto &history = recent_players;
+        if (history.controller != controller || (frame == 27 && history.latest > 27 && word(controller + 0x30) <= 54)) {
+            history = {};
+            history.controller = controller;
+        }
+        for (const auto &entry : history.entries) if (entry.frame == frame) return;
+        history.entries[history.next] = sample;
+        history.next = (history.next + 1) % history.entries.size();
+        if (frame > history.latest) history.latest = frame;
+        recovered = frame == history.waiting_for_mismatch;
+        if (recovered) history.waiting_for_mismatch = 0;
     }
-    std::string details;
-    if (current) {
-        details += " presentMask=" + std::to_string(current->present_mask) + " positionBits=";
-        append_array(details, current->positions);
-    }
-    if (previous) {
-        details += " previousFrame=" + std::to_string(previous->frame) +
-            " previousPresentMask=" + std::to_string(previous->present_mask) + " previousPositionBits=";
-        append_array(details, previous->positions);
-    }
-    peerlink_keeper_journal("FIRST_MISMATCH_PLAYERS frame=%u exactSnapshot=%u%s", frame,
-        unsigned(current != nullptr), details.c_str());
+    if (recovered) record_first_differing_players(controller, frame, true);
 }
 
 void append_keeper(std::string &text, unsigned side, unsigned player) {
@@ -251,15 +290,14 @@ void append_keeper(std::string &text, unsigned side, unsigned player) {
     }
 }
 
-void record_keeper_sample(const char *stage, uint32_t frame, uintptr_t scene,
-                          uintptr_t context, uintptr_t transition, uint32_t step, bool finished) {
-    auto &trace = keeper_scene;
+void record_keeper_sample(const KeeperScene &trace, const KeeperClock &clock, const char *stage,
+                          uint32_t frame, uintptr_t context, uintptr_t transition, uint32_t step, bool finished) {
     const uintptr_t match = ptr(engine + 0xa533ec0);
     const unsigned outer = match ? byte(match + 0x138) : 0;
     const uintptr_t core = match ? ptr(match + 0x2f8) : 0;
     const bool core_valid = core && ptr(core) == engine + 0x9899d50;
     const unsigned core_state = core_valid ? word(core + 8) : 0;
-    const uintptr_t actor = ptr(scene + 0x280);
+    const uintptr_t actor = ptr(trace.scene + 0x280);
     const uintptr_t vtable = actor ? ptr(actor) : 0;
     const bool actor_valid = vtable >= engine + 0x8c5bab0 && vtable < engine + 0x9a16c50 - 0x28 &&
         ptr(vtable + 0x28) == engine + 0x69d25bc;
@@ -274,12 +312,12 @@ void record_keeper_sample(const char *stage, uint32_t frame, uintptr_t scene,
     std::array<unsigned, 2> keepers{kUnknownPlayer, kUnknownPlayer};
     if (outer == 17 && core_state == 54) {
         // 733d0f4 -> 72c4028 -> 72c19c0 gives the side roster.
-        // 733d148 then finds the first slot marked as goalkeeper at +0x42b8.
+        // 733d148 returns the first zero role at +0x42b8 (keeper).
         const uintptr_t simulation = ptr(engine + 0xa58de28);
         if (simulation) for (unsigned side = 0; side < keepers.size(); ++side) {
             const uintptr_t roster = ptr(simulation + 0x3030 + side * 0x50);
             if (!roster) continue;
-            for (unsigned slot = 0; slot < 11; ++slot) if (word(roster + 0x42b8 + slot * 4)) {
+            for (unsigned slot = 0; slot < 11; ++slot) if (word(roster + 0x42b8 + slot * 4) == 0) {
                 keepers[side] = side * 11 + slot;
                 break;
             }
@@ -298,19 +336,25 @@ void record_keeper_sample(const char *stage, uint32_t frame, uintptr_t scene,
 
     std::string details;
     details.reserve(1000);
-    details += "clockReads=" + std::to_string(trace.clock_reads);
-    if (trace.clock_reads) {
-        details += " timelineLoaded=" + std::to_string(trace.timeline_loaded) + " cutClockBits=";
-        append_array(details, trace.clock_bits);
+    details += "clockReads=" + std::to_string(clock.reads);
+    if (clock.reads) {
+        details += " timelineLoaded=" + std::to_string(clock.timeline_loaded) + " cutClockBits=";
+        append_array(details, clock.bits);
     }
     for (unsigned side = 0; side < keepers.size(); ++side) {
-        if (keepers[side] != kUnknownPlayer) trace.keepers[side] = keepers[side];
         append_keeper(details, side, keepers[side]);
+    }
+    {
+        std::lock_guard<std::mutex> lock(keeper_scene_mutex);
+        if (keeper_scene.number == trace.number && frame >= keeper_scene.slots_frame && outer == 17 && core_state == 54) {
+            keeper_scene.slots_frame = frame;
+            keeper_scene.keepers = keepers;
+        }
     }
     peerlink_keeper_journal("KEEPER_SCENE_STATE scene=%u sceneId=%u stage=%s commandFrame=%u startFrame=%u playFrame=%u step=%u "
         "finished=%u outer=%u core=%u transition=%u actorVerified=%u actorMode=%u binding=%u interrupted=%u "
         "handlerIndex=%u handlerOffset=0x%llx ballContext=%u sameBallContext=%u ballOwnerPresent=%u ballOwner=%u "
-        "missingMask=%u aheadMask=%u stopPending=%u %s",
+        "missingMask=%u aheadMask=%u stopPending=%u samplerTid=%d %s",
         trace.number, trace.id, stage, frame, trace.start_frame, trace.play_frame, step, unsigned(finished),
         outer, core_state, byte(transition + 0x22e), unsigned(actor_valid),
         actor_valid ? word(actor + 0x250) : 0, unsigned(actor_valid && ptr(actor + 0x228)),
@@ -318,14 +362,16 @@ void record_keeper_sample(const char *stage, uint32_t frame, uintptr_t scene,
         static_cast<unsigned long long>(handler_call >= engine + 0x2866500 && handler_call < engine + 0x8c57ab0
             ? handler_call - engine : 0), unsigned(ball_context != 0), unsigned(same_ball_context), unsigned(owner_present),
         owner_present ? owner : kUnknownPlayer, word(trace.controller + 0x28), word(trace.controller + 0x2c),
-        byte(trace.controller + 0x45), details.c_str());
+        byte(trace.controller + 0x45), gettid(), details.c_str());
 }
 
-bool near_keeper_scene(uint32_t frame) {
+KeeperScene keeper_scene_at(uintptr_t controller, uint32_t frame) {
+    std::lock_guard<std::mutex> lock(keeper_scene_mutex);
     const auto &trace = keeper_scene;
     // The state checksum can refer to the command frame immediately before the scene.
-    return trace.scene && frame && frame >= trace.start_frame - 1 &&
-        (frame <= trace.last_frame || frame - trace.last_frame <= kDenseSceneFrames);
+    if (trace.scene && trace.controller == controller && frame && frame >= trace.start_frame - 1 &&
+        (frame <= trace.last_frame || frame - trace.last_frame <= kDenseSceneFrames)) return trace;
+    return {};
 }
 
 void append_snapshot(std::string &text, const char *name, const Snapshot &state) {
@@ -354,60 +400,75 @@ PeerLinkKeeperSceneTick peerlink_keeper_scene_enter(uintptr_t scene, uintptr_t c
     const uint32_t frame = controller ? word(controller + 0x30) : 0;
     if (!frame) return {};
 
-    auto &trace = keeper_scene;
-    const bool new_scene = trace.scene != scene || trace.id != id || trace.controller != controller ||
-        frame < trace.last_frame || (trace.complete && frame > trace.last_frame && step <= 2);
-    if (new_scene) {
-        const uint32_t number = trace.number + 1;
-        trace = {};
-        trace.scene = scene;
-        trace.controller = controller;
-        trace.id = id;
-        trace.number = number;
-        trace.start_frame = frame;
+    KeeperScene before;
+    bool sample, new_scene;
+    {
+        std::lock_guard<std::mutex> lock(keeper_scene_mutex);
+        auto &trace = keeper_scene;
+        if (trace.controller == controller && frame < trace.last_frame) return {};
+        new_scene = trace.scene != scene || trace.id != id || trace.controller != controller ||
+            (trace.complete && frame > trace.last_frame && step <= 2);
+        if (new_scene) {
+            const uint32_t number = trace.number + 1;
+            trace = {};
+            trace.scene = scene;
+            trace.controller = controller;
+            trace.id = id;
+            trace.number = number;
+            trace.start_frame = frame;
+        }
+        if (trace.complete) return {};
+        if (step == 8 && !trace.play_frame) trace.play_frame = frame;
+        trace.last_frame = frame;
+        const uint32_t dense_from = trace.play_frame ? trace.play_frame : trace.start_frame;
+        sample = new_scene || step != trace.last_step || (frame != trace.last_logged &&
+            (frame - dense_from <= kDenseSceneFrames || frame - trace.last_logged >= kLaterSceneStride));
+        before = trace;
     }
-    if (trace.complete) return {};
-    if (step == 8 && !trace.play_frame) trace.play_frame = frame;
-    trace.last_frame = frame;
-    const uint32_t dense_from = trace.play_frame ? trace.play_frame : trace.start_frame;
-    const bool sample = new_scene || step != trace.last_step || (frame != trace.last_logged &&
-        (frame - dense_from <= kDenseSceneFrames || frame - trace.last_logged >= kLaterSceneStride));
-    trace.clock_reads = 0;
-    trace.sample_clock = sample;
+    keeper_clock = {};
+    if (sample) keeper_clock.actor = ptr(scene + 0x280);
     if (sample && (new_scene || step == 8))
-        record_keeper_sample("before", frame, scene, context, transition, step, false);
-    return {trace.number, frame, step, sample};
+        record_keeper_sample(before, keeper_clock, "before", frame, context, transition, step, false);
+    return {before.number, frame, step, sample};
 }
 
 void peerlink_keeper_scene_leave(const PeerLinkKeeperSceneTick &tick, uintptr_t scene, uintptr_t context,
                                  uintptr_t transition, bool finished) {
-    auto &trace = keeper_scene;
-    if (!tick.number || tick.number != trace.number || trace.scene != scene) return;
-    trace.sample_clock = false;
+    if (!tick.number) return;
+    const KeeperClock clock = keeper_clock;
+    keeper_clock = {};
     const uint32_t step = word(scene + 4);
-    if (tick.sample || step != tick.step || finished) {
+    const bool sample = tick.sample || step != tick.step || finished;
+    KeeperScene after;
+    {
+        std::lock_guard<std::mutex> lock(keeper_scene_mutex);
+        auto &trace = keeper_scene;
+        if (tick.number != trace.number || trace.scene != scene || tick.frame < trace.last_frame) return;
+        if (sample) trace.last_logged = tick.frame;
+        trace.last_step = step;
+        trace.complete = finished;
+        after = trace;
+    }
+    if (sample) {
         // A stop or reset inside the original call can release the controller.
         // Keep the final marker even if this snapshot is no longer available.
-        if (command_controller() == trace.controller) {
-            record_keeper_sample("after", tick.frame, scene, context, transition, step, finished);
-            trace.last_logged = tick.frame;
+        if (command_controller() == after.controller) {
+            record_keeper_sample(after, clock, "after", tick.frame, context, transition, step, finished);
         } else {
             peerlink_keeper_journal("KEEPER_SCENE_STATE_LOST scene=%u sceneId=%u commandFrame=%u finished=%u",
-                trace.number, trace.id, tick.frame, unsigned(finished));
+                after.number, after.id, tick.frame, unsigned(finished));
         }
     }
-    trace.last_step = step;
-    trace.complete = finished;
 }
 
-void peerlink_keeper_clock_sample(uintptr_t timer, bool timeline_loaded) {
-    auto &trace = keeper_scene;
-    if (!trace.sample_clock) return;
-    ++trace.clock_reads;
-    trace.timeline_loaded = timeline_loaded;
-    // The existing scene-clock observer has verified the timer's owner.
-    // Capture its position before the original clock update runs.
-    trace.clock_bits = {word(timer + 0xb4), word(timer + 0xd8), word(timer + 0xb8), word(timer + 0xa8)};
+void peerlink_keeper_clock_sample(uintptr_t timeline_slot, bool timeline_loaded) {
+    auto &clock = keeper_clock;
+    if (!clock.actor || !timeline_slot || ptr(timeline_slot - 0x10) != clock.actor) return;
+    ++clock.reads;
+    clock.timeline_loaded = timeline_loaded;
+    // The timer's owner was matched to the current dispatcher call on this worker.
+    const uintptr_t timer = timeline_slot - 0x18;
+    clock.bits = {word(timer + 0xb4), word(timer + 0xd8), word(timer + 0xb8), word(timer + 0xa8)};
 }
 
 void peerlink_record_check_frame(uint32_t frame, uint32_t value) {
@@ -418,12 +479,12 @@ void peerlink_record_check_frame(uint32_t frame, uint32_t value) {
             frame, value, check.state_frame, check.value);
         return;
     }
-    remember_players(frame);
+    const uintptr_t controller = command_controller();
+    remember_players(controller, frame);
     // The game's own checksum callback runs after its match state is ready.
     // Sampling from the host's startup poll can race initialization or
     // teardown and call a checksum helper with a missing simulation object.
     if (!initial.published.load(std::memory_order_acquire)) {
-        const uintptr_t controller = command_controller();
         const uintptr_t match_state = ptr(engine + 0xa533ec0);
         const uintptr_t core = match_state ? ptr(match_state + 0x2f8) : 0;
         bool players_ready = true;
@@ -455,8 +516,8 @@ void peerlink_record_check_frame(uint32_t frame, uint32_t value) {
     }
     peerlink_journal("MATCH_CHECK_FRAME frame=%u checkValue=%u snapshotVerified=1 terms=%u %s",
         frame, value, check.terms, details.c_str());
-    if (near_keeper_scene(frame)) {
-        const auto &trace = keeper_scene;
+    const auto trace = keeper_scene_at(controller, frame);
+    if (trace.scene) {
         std::string players;
         for (unsigned side = 0; side < trace.keepers.size(); ++side) {
             const unsigned player = trace.keepers[side];
@@ -465,8 +526,8 @@ void peerlink_record_check_frame(uint32_t frame, uint32_t value) {
             const size_t i = 5 + 3 * player;
             append_array(players, std::array<uint32_t, 3>{check.parts[i], check.parts[i + 1], check.parts[i + 2]});
         }
-        peerlink_keeper_journal("KEEPER_SCENE_CHECK scene=%u sceneId=%u frame=%u localValue=%u%s",
-            trace.number, trace.id, frame, value, players.c_str());
+        peerlink_keeper_journal("KEEPER_SCENE_CHECK scene=%u sceneId=%u frame=%u localValue=%u samplerTid=%d%s",
+            trace.number, trace.id, frame, value, gettid(), players.c_str());
     }
 }
 
@@ -479,12 +540,14 @@ void peerlink_record_check_comparison(uintptr_t checker, uintptr_t context) {
     peerlink_journal("MATCH_CHECK_COMPARE frame=%u localValue=%u peerValue=%u equal=%u verdict=%u mismatchCount=%u firstMismatchFrame=%u",
         frame, local_second ? current : stored, local_second ? stored : current,
         unsigned(stored == current), word(context + 16), word(checker + 8), first_mismatch);
-    if (stored != current && frame == first_mismatch) record_first_differing_players(frame);
-    if (near_keeper_scene(frame)) {
+    const uintptr_t controller = command_controller();
+    if (controller && stored != current && frame == first_mismatch) record_first_differing_players(controller, frame);
+    const auto trace = keeper_scene_at(controller, frame);
+    if (trace.scene) {
         peerlink_keeper_journal("KEEPER_SCENE_COMPARE scene=%u sceneId=%u frame=%u localValue=%u peerValue=%u "
-            "equal=%u verdict=%u mismatchCount=%u firstMismatchFrame=%u",
-            keeper_scene.number, keeper_scene.id, frame, local_second ? current : stored, local_second ? stored : current,
-            unsigned(stored == current), word(context + 16), word(checker + 8), first_mismatch);
+            "equal=%u verdict=%u mismatchCount=%u firstMismatchFrame=%u samplerTid=%d",
+            trace.number, trace.id, frame, local_second ? current : stored, local_second ? stored : current,
+            unsigned(stored == current), word(context + 16), word(checker + 8), first_mismatch, gettid());
     }
 }
 

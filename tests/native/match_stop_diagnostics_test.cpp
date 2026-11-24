@@ -6,6 +6,7 @@
 #include <cstring>
 #include <fstream>
 #include <iterator>
+#include <thread>
 #include <sys/wait.h>
 
 namespace {
@@ -275,9 +276,21 @@ int main() {
         set_word(comparison + 8, 4212); set_word(comparison + 12, 4212);
         set_half(comparison + 2, 3765); set_half(comparison + 4, 3780);
         set_word(checker + 8, 1); set_word(checker + 12, 4212);
-        peerlink_record_check_comparison(reinterpret_cast<uintptr_t>(checker), reinterpret_cast<uintptr_t>(comparison));
+        auto compare_on_another_worker = [&] {
+            std::thread worker([&] {
+                peerlink_record_check_comparison(reinterpret_cast<uintptr_t>(checker), reinterpret_cast<uintptr_t>(comparison));
+            });
+            worker.join();
+        };
+        compare_on_another_worker();
         set_word(comparison + 12, 4239);
         peerlink_record_check_comparison(reinterpret_cast<uintptr_t>(checker), reinterpret_cast<uintptr_t>(comparison));
+        // The comparison can precede its matching verified snapshot.
+        set_word(comparison + 8, 4266); set_word(comparison + 12, 4266); set_word(checker + 12, 4266);
+        compare_on_another_worker();
+        checksum_fixture_frame = 4266;
+        set_word(controller + 0x30, 4267);
+        peerlink_record_check_frame(4266, 3765);
 
         alignas(uintptr_t) unsigned char ball[0x60]{}, group[0x48]{}, transition[0x230]{}, flow[0x33ac]{};
         const uint32_t target[] = {0, 0, 0x42c80000};
@@ -332,6 +345,9 @@ int main() {
         const std::string keeper_log((std::istreambuf_iterator<char>(keeper_file)), std::istreambuf_iterator<char>());
         assert(keeper_log.find("FIRST_MISMATCH_PLAYERS frame=4212 exactSnapshot=1 presentMask=4194303 positionBits=[100,0,0,101,") != std::string::npos);
         assert(keeper_log.find("previousFrame=4185 previousPresentMask=4194303 previousPositionBits=[98,0,0,101,") != std::string::npos);
+        assert(keeper_log.find("FIRST_MISMATCH_PLAYERS frame=4266 exactSnapshot=0 previousFrame=4212") != std::string::npos);
+        assert(keeper_log.find("FIRST_MISMATCH_PLAYERS frame=4266 exactSnapshot=1") != std::string::npos);
+        assert(keeper_log.find(" recovered=1") != std::string::npos);
         unlink(path.c_str());
         unlink(keeper_path.c_str());
         rmdir(directory);

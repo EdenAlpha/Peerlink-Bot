@@ -5,6 +5,7 @@
 #include <cstring>
 #include <fstream>
 #include <string>
+#include <thread>
 #include <sys/mman.h>
 #include <unistd.h>
 
@@ -47,7 +48,10 @@ int main() {
     put(possession + 0x28780, 2U); put(context + 0x680, balls + 0x58);
     put(base + 0xa58de28, simulation); put(simulation + 0x3030, roster0); put(simulation + 0x3080, roster1);
     // Exercise a goalkeeper assigned to a different slot on each side.
-    put(roster0 + 0x42b8 + 2 * 4, 1U); put(roster1 + 0x42b8 + 4 * 4, 1U);
+    for (unsigned slot = 0; slot < 11; ++slot) {
+        put(roster0 + 0x42b8 + slot * 4, slot == 2 ? 0U : 1U);
+        put(roster1 + 0x42b8 + slot * 4, slot == 4 ? 0U : 1U);
+    }
     put(base + 0xa5909a0 + 0x170 + 2 * 8, keeper0); put(base + 0xa5909a0 + 0x170 + 15 * 8, keeper1);
     put(keeper0 + 0x5dc, 0xc2480000U); put(keeper0 + 0x7a8, player_control);
     put(player_control + 0xa88, track); put(track + 0x1e2, uint8_t{1}); put(track + 0x1e4, 0x3f800000U);
@@ -61,7 +65,8 @@ int main() {
     auto tick = peerlink_keeper_scene_enter(scene, context, transition);
     assert(tick.number == 1 && tick.frame == 100 && tick.sample);
     // The original scene advances both the step and the local motion state.
-    put(timer + 0xb4, 0x40000000U); peerlink_keeper_clock_sample(timer, true);
+    put(timer + 8, actor); put(timer + 0xb4, 0x40000000U);
+    peerlink_keeper_clock_sample(timer + 0x18, true);
     put(scene + 4, 10U); put(actor + 0x250, 6U);
     put(keeper0 + 0x5dc, 0xc2440000U); put(track + 0x1e4, 0x40000000U);
     peerlink_keeper_scene_leave(tick, scene, context, transition, false);
@@ -69,9 +74,14 @@ int main() {
     assert(tick.number == 1 && !tick.sample);
     peerlink_keeper_scene_leave(tick, scene, context, transition, false);
     put(command + 0x30, 101U);
-    tick = peerlink_keeper_scene_enter(scene, context, transition);
-    assert(tick.sample);
-    peerlink_keeper_scene_leave(tick, scene, context, transition, false);
+    std::thread next_worker([&] {
+        const auto next = peerlink_keeper_scene_enter(scene, context, transition);
+        assert(next.number == 1 && next.frame == 101 && next.sample);
+        put(timer + 0xb4, 0x40400000U);
+        peerlink_keeper_clock_sample(timer + 0x18, true);
+        peerlink_keeper_scene_leave(next, scene, context, transition, false);
+    });
+    next_worker.join();
     put(command + 0x30, 192U);
     tick = peerlink_keeper_scene_enter(scene, context, transition);
     assert(tick.sample);
@@ -83,7 +93,8 @@ int main() {
 
     put(comparison + 8, 194U); put(comparison + 12, 194U);
     put(comparison + 2, uint16_t{20}); put(comparison + 4, uint16_t{20});
-    peerlink_record_check_comparison(checker, comparison);
+    std::thread earlier_scene_comparison([&] { peerlink_record_check_comparison(checker, comparison); });
+    earlier_scene_comparison.join();
 
     // The same scene can run again. Keep the first attempt and the second
     // attempt's missing track, stalled keeper, and first mismatch.
@@ -115,6 +126,9 @@ int main() {
     assert(after.find("clockReads=1 timelineLoaded=1 cutClockBits=[1073741824,0,0,0]") != std::string::npos);
     assert(after.find("k0TrackTimeBits=1073741824") != std::string::npos);
     assert(after.find("k0PositionBits=[" + std::to_string(0xc2440000U) + ",0,0]") != std::string::npos);
+    const auto moved_worker = find_line(log, "scene=1 sceneId=197064 stage=after commandFrame=101");
+    assert(moved_worker.find("startFrame=100 playFrame=100") != std::string::npos);
+    assert(moved_worker.find("clockReads=1 timelineLoaded=1 cutClockBits=[1077936128,0,0,0]") != std::string::npos);
     assert(find_line(log, "stage=after commandFrame=193").find("finished=1") != std::string::npos);
     assert(find_line(log, "KEEPER_SCENE_COMPARE scene=1 sceneId=197064 frame=194").find("equal=1") != std::string::npos);
     const auto failed = find_line(log, "KEEPER_SCENE_STATE scene=2 sceneId=197064 stage=after commandFrame=300");

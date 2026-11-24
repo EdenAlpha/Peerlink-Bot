@@ -141,8 +141,8 @@ uint32_t observe_scene_clock_source(uintptr_t timeline_slot) {
     // The original return value chooses the loaded timeline or its fallback.
     // The timer's owning scene actor is stored at +8, before this slot (+0x18).
     const uint32_t loaded = native<uint32_t (*)(uintptr_t)>(0x69f2b64)(timeline_slot);
+    peerlink_keeper_clock_sample(timeline_slot, loaded != 0);
     if (scene_clock.actor && *reinterpret_cast<const uintptr_t *>(timeline_slot - 0x10) == scene_clock.actor) {
-        peerlink_keeper_clock_sample(timeline_slot - 0x18, loaded != 0);
         const unsigned source = loaded ? 2 : 1;
         if (!(scene_clock.observed_sources & source)) {
             scene_clock.observed_sources |= source;
@@ -335,7 +335,7 @@ void install_scene_observers(uintptr_t base, long page_size) {
         unsigned(clock_source_installed), clock_source_error.operation, clock_source_error.error);
     peerlink_journal("KEEPER_SCENE_OBSERVER installed=%u operation=%s errno=%d",
         unsigned(keeper_scene_installed), keeper_error.operation, keeper_error.error);
-    peerlink_keeper_journal("KEEPER_SCENE_OBSERVER schema=1 installed=%u clockObserver=%u operation=%s errno=%d",
+    peerlink_keeper_journal("KEEPER_SCENE_OBSERVER schema=2 installed=%u clockObserver=%u operation=%s errno=%d",
         unsigned(keeper_scene_installed), unsigned(clock_source_installed), keeper_error.operation, keeper_error.error);
 }
 } // namespace
