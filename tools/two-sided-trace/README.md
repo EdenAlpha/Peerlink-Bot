@@ -43,3 +43,12 @@ compares the emitted terms; initial matched-frame samples agreed. The separate
 `scene-target-observer.js` probes scene-target dispatch. These tools have not
 yet identified or verified a fix for the failure. Match captures and account
 information are deliberately excluded.
+
+`initial-snapshot-diagnostic-fix.patch` is an isolated candidate for a
+separate lab startup crash. It applies to Peerlink-Bot commit
+`2b748dc0afd82f473525c1fd8cd8a175f38e370d`, which is backed up on the
+`backup/peerlink-celebration-test-20261124` branch. The candidate removes the
+unsynchronized initial checksum read and captures the first verified native
+checksum instead. The native diagnostic fixture and original checksum
+verification pass; it has not been tested in an Android match or released.
+It is not a fix for the goalkeeper disagreement.

@@ -1,0 +1,143 @@
+diff --git a/app/src/main/jni/engine_host.cpp b/app/src/main/jni/engine_host.cpp
+index d87699d..4b638b6 100644
+--- a/app/src/main/jni/engine_host.cpp
++++ b/app/src/main/jni/engine_host.cpp
+@@ -904,7 +904,6 @@ JNIEXPORT jint JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeAdvanceMatc
+                 entry<void (*)(uintptr_t, uint32_t)>(0x72ea4dc)(settings, 1);
+         }
+     }
+-    peerlink_match_state_sample_initial();
+     return peerlink_match_check_failed() ? -214 : g_match_stage;
+ }
+ 
+diff --git a/app/src/main/jni/game/match_state_diagnostics.cpp b/app/src/main/jni/game/match_state_diagnostics.cpp
+index 0432de8..124dce1 100644
+--- a/app/src/main/jni/game/match_state_diagnostics.cpp
++++ b/app/src/main/jni/game/match_state_diagnostics.cpp
+@@ -92,13 +92,19 @@ bool read_checksum(Checksum &output, uintptr_t state, const char *kind = nullptr
+     return true;
+ }
+ 
+-void capture(Snapshot &output, uintptr_t controller) {
++void capture(Snapshot &output, uintptr_t controller, const Checksum *verified = nullptr) {
+     if (output.published.load(std::memory_order_acquire) || !engine) return;
+     int expected = 0;
+     if (!output.published.compare_exchange_strong(expected, 1, std::memory_order_acq_rel)) return;
+     const char *kind = &output == &initial ? "initial" : "at_stop";
+     output.command_frame = word(controller + 0x30);
+-    if (!read_checksum(output.check, checksum_state(), kind, output.command_frame)) {
++    if (verified) {
++        // Reuse the snapshot already validated in the game's own checksum
++        // callback. Do not call game checksum helpers again from a host poll.
++        output.check = *verified;
++        peerlink_journal("MATCH_STATE_CAPTURE_BEGIN kind=%s commandFrame=%u stateFrame=%u",
++            kind, output.command_frame, output.check.state_frame);
++    } else if (!read_checksum(output.check, checksum_state(), kind, output.command_frame)) {
+         output.published.store(0, std::memory_order_release);
+         return;
+     }
+@@ -167,6 +173,23 @@ void peerlink_record_check_frame(uint32_t frame, uint32_t value) {
+             frame, value, check.state_frame, check.value);
+         return;
+     }
++    // The game's own checksum callback runs after its match state is ready.
++    // Sampling from the host's startup poll can race initialization or
++    // teardown and call a checksum helper with a missing simulation object.
++    if (!initial.published.load(std::memory_order_acquire)) {
++        const uintptr_t controller = command_controller();
++        const uintptr_t match_state = ptr(engine + 0xa533ec0);
++        const uintptr_t core = match_state ? ptr(match_state + 0x2f8) : 0;
++        bool players_ready = true;
++        for (unsigned player = 0; player < 22; ++player)
++            if (!ptr(engine + 0xa5909a0 + 0x170 + player * 8)) { players_ready = false; break; }
++        if (controller && match_state && byte(match_state + 0x138) == 17 &&
++            core && ptr(core) == engine + 0x9899d50 && word(core + 8) == 54 && players_ready) {
++            capture(initial, controller, &check);
++            if (initial.published.load(std::memory_order_acquire) == 2)
++                peerlink_journal("%s", peerlink_match_state_diagnostics().c_str());
++        }
++    }
+     // Native ball contributor 6b00474 -> 6b00d18 -> 72d9980. Its
+     // history record is distinct from the ball object's live coordinates.
+     const uintptr_t match = ptr(engine + 0xa58de28);
+@@ -304,21 +327,6 @@ void peerlink_record_ball_park(uintptr_t ball, uintptr_t position, uintptr_t gro
+         word(ball + 0x30), word(ball + 0x34), word(ball + 0x38));
+ }
+ 
+-void peerlink_match_state_sample_initial() {
+-    if (initial.published.load(std::memory_order_acquire)) return;
+-    uintptr_t controller = command_controller();
+-    if (!controller) return;
+-    uintptr_t match = ptr(engine + 0xa533ec0);
+-    if (!match || byte(match + 0x138) != 17) return;
+-    uintptr_t core = ptr(match + 0x2f8);
+-    if (!core || ptr(core) != engine + 0x9899d50 || word(core + 8) != 54) return;
+-    for (unsigned player = 0; player < 22; ++player)
+-        if (!ptr(engine + 0xa5909a0 + 0x170 + player * 8)) return;
+-    capture(initial, controller);
+-    if (initial.published.load(std::memory_order_acquire) == 2)
+-        peerlink_journal("%s", peerlink_match_state_diagnostics().c_str());
+-}
+-
+ void peerlink_match_check_request(uintptr_t controller, uintptr_t checker,
+                                  uintptr_t context, uintptr_t caller) {
+     if (!engine || caller != engine + 0x70539e4 || !checker || !context) return;
+diff --git a/app/src/main/jni/game/match_state_diagnostics.h b/app/src/main/jni/game/match_state_diagnostics.h
+index fc2be52..ab93985 100644
+--- a/app/src/main/jni/game/match_state_diagnostics.h
++++ b/app/src/main/jni/game/match_state_diagnostics.h
+@@ -26,7 +26,6 @@ void peerlink_record_scene_start(const char *stage, const PeerLinkSceneStartSamp
+ void peerlink_record_scene_clock_source(uint32_t scene_id, bool timeline_loaded);
+ void peerlink_record_ball_park(uintptr_t ball, uintptr_t position, uintptr_t group,
+                               uintptr_t transition, uintptr_t flow);
+-void peerlink_match_state_sample_initial();
+ void peerlink_match_check_request(uintptr_t controller, uintptr_t checker,
+                                  uintptr_t context, uintptr_t caller);
+ bool peerlink_match_check_failed();
+diff --git a/tests/native/match_stop_diagnostics_test.cpp b/tests/native/match_stop_diagnostics_test.cpp
+index 7346dbb..b1c27c1 100644
+--- a/tests/native/match_stop_diagnostics_test.cpp
++++ b/tests/native/match_stop_diagnostics_test.cpp
+@@ -227,17 +227,27 @@ int main() {
+             *reinterpret_cast<uintptr_t *>(base + 0xa5909a0 + 0x170 + i * 8) = reinterpret_cast<uintptr_t>(actors[i]);
+             set_word(actors[i] + 0x5dc, 100 + i);
+         }
+-        peerlink_match_state_sample_initial();
+-        assert(checksum_helper_calls == 0); // Not yet in live play.
++        // The first snapshot must come from a verified game checksum, not a
++        // separate host poll. A wrong checksum or incomplete player set must
++        // leave the snapshot unpublished and permit a later safe retry.
++        peerlink_record_check_frame(1, 3766);
++        assert(checksum_helper_calls == 71);
++        assert(peerlink_match_state_diagnostics().find("MATCH_STATE_INITIAL present=0") != std::string::npos);
+         match[0x138] = 17;
+-        peerlink_match_state_sample_initial();
+-        assert(checksum_helper_calls == 71 && checksum_root[0] == 55);
++        *reinterpret_cast<uintptr_t *>(base + 0xa5909a0 + 0x170 + 21 * 8) = 0;
++        peerlink_record_check_frame(1, 3765);
++        assert(checksum_helper_calls == 142);
++        assert(peerlink_match_state_diagnostics().find("MATCH_STATE_INITIAL present=0") != std::string::npos);
++        *reinterpret_cast<uintptr_t *>(base + 0xa5909a0 + 0x170 + 21 * 8) = reinterpret_cast<uintptr_t>(actors[21]);
++        peerlink_record_check_frame(1, 3765);
++        assert(checksum_helper_calls == 213 && checksum_root[0] == 55);
+         const std::string details = peerlink_match_state_diagnostics();
+         assert(details.find("MATCH_STATE_INITIAL present=1 commandFrame=3 stateFrame=1") != std::string::npos);
+         assert(details.find("terms=71 parts=[100,2,10,11,12,") != std::string::npos);
+         assert(details.find("players=22 playerPositionBits=[100,0,0,101,0,0,") != std::string::npos);
+-        peerlink_match_state_sample_initial();
+-        assert(checksum_helper_calls == 71 && checksum_root[0] == 55);
++        peerlink_record_check_frame(1, 3765);
++        assert(checksum_helper_calls == 284 && checksum_root[0] == 55);
++        assert(peerlink_match_state_diagnostics() == details);
+         // Export the first compared frame while it is still live, even if
+         // the command controller has already advanced beyond that frame.
+         char directory[] = "/tmp/peerlink-match-frame-XXXXXX";
+@@ -252,7 +262,7 @@ int main() {
+         set_pointer(history_owner + 0x70, reinterpret_cast<uintptr_t>(history_ball));
+         peerlink_record_check_frame(4212, 3765);
+         peerlink_record_check_frame(4239, 32452);
+-        assert(checksum_helper_calls == 213 && checksum_root[0] == 55);
++        assert(checksum_helper_calls == 426 && checksum_root[0] == 55);
+ 
+         alignas(uintptr_t) unsigned char checker[0x30]{}, comparison[0x20]{};
+         auto set_half = [](unsigned char *at, uint16_t value) { std::memcpy(at, &value, sizeof(value)); };
