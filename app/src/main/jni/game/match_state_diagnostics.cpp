@@ -238,6 +238,53 @@ void peerlink_record_scene_decision(uintptr_t scene, uint32_t channel, uint32_t 
         frame, word(scene + 8), step, channel, result);
 }
 
+PeerLinkSceneStartSample peerlink_sample_scene_start(uintptr_t scene, uintptr_t transition) {
+    // Both probes run inside step 8 of the original scene dispatcher. The
+    // stage advances to 10 on return, so the probes do no per-frame polling.
+    if (!scene || !transition || word(scene + 4) != 8) return {};
+    const uintptr_t controller = command_controller();
+    if (!controller) return {};
+    PeerLinkSceneStartSample sample;
+    sample.command_frame = word(controller + 0x30);
+    sample.scene_id = word(scene + 8);
+    sample.transition_flag = byte(transition + 0x22e);
+    const uintptr_t actor = ptr(scene + 0x280);
+    const uintptr_t vtable = actor ? ptr(actor) : 0;
+    sample.actor_verified = vtable && ptr(vtable + 0x28) == engine + 0x69d25bc;
+    if (sample.actor_verified) {
+        sample.actor_mode = word(actor + 0x250);
+        sample.start_requested = byte(actor + 0x5f) != 0;
+        sample.binding_present = ptr(actor + 0x228) != 0;
+        sample.interrupted = byte(actor + 0x60) != 0;
+        // Read the existing singleton from 68f9324. Calling its accessor
+        // could create it before the actor does.
+        const uintptr_t manager = ptr(engine + 0xa531eb0);
+        sample.manager_present = manager != 0;
+        if (manager) {
+            sample.manager_finishes_early = byte(manager + 0x301e) != 0 ||
+                (byte(manager + 0x301f) != 0 && word(manager + 0x3010) == 0);
+        }
+    }
+    return sample;
+}
+
+void peerlink_record_scene_start(const char *stage, const PeerLinkSceneStartSample &before,
+                                 const PeerLinkSceneStartSample &after) {
+    if (!before.command_frame || after.command_frame != before.command_frame ||
+        after.scene_id != before.scene_id) return;
+    peerlink_journal("MATCH_SCENE_START stage=%s commandFrame=%u sceneId=%u "
+        "actorVerifiedBefore=%u actorVerifiedAfter=%u actorModeBefore=%u actorModeAfter=%u "
+        "startBefore=%u startAfter=%u bindingBefore=%u bindingAfter=%u transitionBefore=%u transitionAfter=%u "
+        "interruptedBefore=%u interruptedAfter=%u managerPresentBefore=%u managerPresentAfter=%u "
+        "managerFinishesEarlyBefore=%u managerFinishesEarlyAfter=%u",
+        stage, before.command_frame, before.scene_id, unsigned(before.actor_verified),
+        unsigned(after.actor_verified), before.actor_mode, after.actor_mode, unsigned(before.start_requested),
+        unsigned(after.start_requested), unsigned(before.binding_present), unsigned(after.binding_present),
+        before.transition_flag, after.transition_flag, unsigned(before.interrupted), unsigned(after.interrupted),
+        unsigned(before.manager_present), unsigned(after.manager_present),
+        unsigned(before.manager_finishes_early), unsigned(after.manager_finishes_early));
+}
+
 void peerlink_record_ball_park(uintptr_t ball, uintptr_t position, uintptr_t group,
                               uintptr_t transition, uintptr_t flow) {
     if (ptr(group + 0x30) != ball || word(position) != 0 || word(position + 8) != 0x42c80000 ||
