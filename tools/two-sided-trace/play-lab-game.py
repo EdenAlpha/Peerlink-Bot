@@ -191,7 +191,8 @@ with open(TRACE) as source:
         if not opponent_points or time.monotonic() - last_action < 0.85:
             continue
         if owner_valid and owner == selected:
-            goal = (52.5 * direction, 0.0)
+            # Lab only: aim towards the goalkeeper-side region seen in the saved failures.
+            goal = (52.5 * direction, -3.0)
             goal_distance = distance(player, goal)
             pressure = min(distance(player, x) for x in opponent_points)
             if goal_distance <= 23 and abs(player[1]) <= 20:

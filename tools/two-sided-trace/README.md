@@ -2,9 +2,9 @@
 
 These are **experimental lab tools** for comparing the original eFootball
 11.1.1 engine with PeerLink's bot in the same match. They do not change the
-PeerLink APK. Two live lab matches produced 194 and 379 verified full-game checks whose
-checksums and 71 contributors matched the bot through the first half. Both
-matches ended during the halftime transition; no goal was scored.
+PeerLink APK. Initial live lab matches produced 194 and 379 verified full-game
+checks whose checksums and 71 contributors matched the bot through the first
+half. Both ended during the halftime transition.
 
 `fullgame-observer.js` uses Frida to record the game's own checksum, its 71
 contributors, selected ball/player values, and scene-start flags. It verifies
@@ -17,10 +17,10 @@ disagreement; it does not by itself prove the root cause.
 `TouchInjector.java` is a lab-only Android shell utility that injects a held
 touch and a second action touch. Android accepted repeated test injections.
 `play-lab-game.py` uses verified observations and a fresh screenshot to control
-the full-game side; its shot and celebration pause were checked only with
-simulated data. The raw reported ball carrier remained stale during one live
-match, so the controller now also uses screen controls and proximity. The updated
-controller still needs live validation. It is not PeerLink's bot logic. The
+the full-game side. The raw reported ball carrier remained stale during one live
+match, so the controller also uses screen controls and proximity. Later live
+matches exercised the controller and produced different scenes; it cannot
+reliably trigger a particular scene. It is not PeerLink's bot logic. The
 screenshot-derived button templates and screenshots are not included here.
 
 The native offsets apply **only** to the original 11.1.1 `libUE4.so` with
@@ -35,6 +35,22 @@ differed by about 2.7 metres; this identifies the divergent state, not why
 the divergence occurred. The original game and bot matched on a preceding
 celebration.
 
+In that failing recording, the bot reported that the observed scene used its
+loaded game timeline. The full-game and bot scene-start flags agreed at the
+observed start; that does not prove every internal scene value was identical.
+The later detailed goalkeeper and target observers were not attached during
+this failure, so the saved record does not establish which earlier field or
+update caused the goalkeeper to diverge.
+
+A later 2–0 lab match had 289 shared verified checks with no differences,
+including two other scenes, then stalled during the halftime transition. A
+further match had 125 shared verified checks and 250 shared goalkeeper
+component records with no differences, including two other scenes. Neither
+reproduced scene 197064. These passes do not establish a fix. Missing player
+mesh data was observed on the bot in both passing tests; it is therefore not
+by itself proof of the failure's cause. The recorded actors are not yet mapped
+one-to-one to the target goalkeeper.
+
 `keeper-observer.js` and `run-keeper-observers.py` are experimental read-only
 Frida probes that break the goalkeeper's checksum into individual terms on
 both engines. `test-keeper-observer.js` checks the observer's filters and
@@ -43,6 +59,11 @@ compares the emitted terms; initial matched-frame samples agreed. The separate
 `scene-target-observer.js` probes scene-target dispatch. These tools have not
 yet identified or verified a fix for the failure. Match captures and account
 information are deliberately excluded.
+
+`watch-target-celebration.py` is a disposable-lab helper that saves a local
+snapshot when the observed scene 197064 occurs. Its hard-coded paths and
+container name are specific to the original lab. The snapshot contains match
+diagnostics and must be kept private; it is not part of this backup.
 
 `initial-snapshot-diagnostic-fix.patch` is an isolated candidate for a
 separate lab startup crash. It applies to Peerlink-Bot commit
