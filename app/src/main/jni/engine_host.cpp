@@ -368,6 +368,16 @@ JNIEXPORT jboolean JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeOpenJou
     return opened ? JNI_TRUE : JNI_FALSE;
 }
 
+JNIEXPORT jboolean JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeOpenKeeperJournal(
+        JNIEnv *env, jobject, jstring path) {
+    if (!path) return JNI_FALSE;
+    const char *value = env->GetStringUTFChars(path, nullptr);
+    if (!value) return JNI_FALSE;
+    const bool opened = peerlink_open_keeper_journal(value);
+    env->ReleaseStringUTFChars(path, value);
+    return opened ? JNI_TRUE : JNI_FALSE;
+}
+
 JNIEXPORT void JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeJournal(
         JNIEnv *env, jobject, jstring line) {
     if (!line) return;

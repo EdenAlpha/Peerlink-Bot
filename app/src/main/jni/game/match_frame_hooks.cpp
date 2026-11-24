@@ -92,7 +92,9 @@ __attribute__((naked)) void observe_scene_decision() {
 extern "C" __attribute__((used, noinline))
 void peerlink_observe_scene_start_impl(uintptr_t actor, uintptr_t scene, uintptr_t transition) {
     const auto before = peerlink_sample_scene_start(scene, transition);
-    scene_clock = before.actor_verified && before.command_frame && (before.scene_id >> 16) == 3
+    const uint32_t family = before.scene_id >> 16;
+    scene_clock = before.actor_verified && before.command_frame &&
+        (family == 3 || (family == 2 && peerlink_keeper_journal_active()))
         ? SceneClockObservation{actor, before.scene_id} : SceneClockObservation{};
     native<void (*)(uintptr_t)>(0x6a46c84)(actor);
     const int saved_errno = errno;
@@ -120,11 +122,27 @@ __attribute__((naked)) void observe_scene_targets() {
     __asm__ volatile("mov x2, x20\nb peerlink_observe_scene_targets_impl");
 }
 
+// 6fe6300 calls the scene dispatcher with these six pointers. Its caller
+// consumes only bit zero of the result and restores its own working state.
+uint32_t observe_keeper_scene(uintptr_t scene, uintptr_t context, uintptr_t transition,
+                              uintptr_t resources, uintptr_t update, uintptr_t message) {
+    const int before_errno = errno;
+    const auto tick = peerlink_keeper_scene_enter(scene, context, transition);
+    errno = before_errno;
+    using Dispatch = uint32_t (*)(uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t);
+    const uint32_t result = native<Dispatch>(0x6fe83ec)(scene, context, transition, resources, update, message);
+    const int after_errno = errno;
+    peerlink_keeper_scene_leave(tick, scene, context, transition, (result & 1) != 0);
+    errno = after_errno;
+    return result;
+}
+
 uint32_t observe_scene_clock_source(uintptr_t timeline_slot) {
     // The original return value chooses the loaded timeline or its fallback.
     // The timer's owning scene actor is stored at +8, before this slot (+0x18).
     const uint32_t loaded = native<uint32_t (*)(uintptr_t)>(0x69f2b64)(timeline_slot);
     if (scene_clock.actor && *reinterpret_cast<const uintptr_t *>(timeline_slot - 0x10) == scene_clock.actor) {
+        peerlink_keeper_clock_sample(timeline_slot - 0x18, loaded != 0);
         const unsigned source = loaded ? 2 : 1;
         if (!(scene_clock.observed_sources & source)) {
             scene_clock.observed_sources |= source;
@@ -253,26 +271,30 @@ void install_scene_observers(uintptr_t base, long page_size) {
     constexpr std::array<uintptr_t, 1> start{0x6fe8610};
     constexpr std::array<uintptr_t, 1> targets{0x6fe8630};
     constexpr std::array<uintptr_t, 1> clock_source{0x69f475c};
+    constexpr std::array<uintptr_t, 1> keeper_scene{0x6fe6300};
     constexpr uintptr_t range = 1U << 27;
     bool agreement_installed = false, decision_installed = false;
     bool start_installed = false, targets_installed = false;
     bool clock_source_installed = false;
+    bool keeper_scene_installed = false;
     peerlink::CodePatchFailure agreement_error{"instruction_check", 0, 0};
     peerlink::CodePatchFailure decision_error{"instruction_check", 0, 0};
     peerlink::CodePatchFailure start_error{"instruction_check", 0, 0};
     peerlink::CodePatchFailure targets_error{"instruction_check", 0, 0};
     peerlink::CodePatchFailure clock_source_error{"instruction_check", 0, 0};
+    peerlink::CodePatchFailure keeper_error{"instruction_check", 0, 0};
     if (page_size >= 4096 && page_size <= 65536) {
         const uintptr_t last = base + agreement.back();
         void *page = peerlink::reserve_writable_page(last >= range ? last - range : 0x10000,
             base + clock_source.front() + range, static_cast<size_t>(page_size));
         if (page != MAP_FAILED) {
-            const std::array<Thunk, 5> thunks{{
+            const std::array<Thunk, 6> thunks{{
                 {0x58000050, 0xd61f0200, reinterpret_cast<uintptr_t>(&observe_scene_agreement)},
                 {0x58000050, 0xd61f0200, reinterpret_cast<uintptr_t>(&observe_scene_decision)},
                 {0x58000050, 0xd61f0200, reinterpret_cast<uintptr_t>(&observe_scene_start)},
                 {0x58000050, 0xd61f0200, reinterpret_cast<uintptr_t>(&observe_scene_targets)},
                 {0x58000050, 0xd61f0200, reinterpret_cast<uintptr_t>(&observe_scene_clock_source)},
+                {0x58000050, 0xd61f0200, reinterpret_cast<uintptr_t>(&observe_keeper_scene)},
             }};
             std::memcpy(page, thunks.data(), sizeof(thunks));
             if (mprotect(page, page_size, PROT_READ | PROT_EXEC) == 0) {
@@ -287,15 +309,19 @@ void install_scene_observers(uintptr_t base, long page_size) {
                 targets_installed = observe_scene_calls<1>(targets, 0x6fe7494, entry + 3 * sizeof(Thunk), targets_error);
                 clock_source_installed = observe_scene_calls<1>(clock_source, 0x69f2b64,
                     entry + 4 * sizeof(Thunk), clock_source_error);
+                if (peerlink_keeper_journal_active())
+                    keeper_scene_installed = observe_scene_calls<1>(keeper_scene, 0x6fe83ec,
+                        entry + 5 * sizeof(Thunk), keeper_error);
+                else keeper_error = {"journal_unavailable", 0, 0};
             } else {
-                agreement_error = decision_error = start_error = targets_error = clock_source_error =
+                agreement_error = decision_error = start_error = targets_error = clock_source_error = keeper_error =
                     {"observer_execute", errno, static_cast<size_t>(page_size)};
             }
             if (!agreement_installed && !decision_installed && !start_installed && !targets_installed &&
-                !clock_source_installed)
+                !clock_source_installed && !keeper_scene_installed)
                 munmap(page, page_size);
         } else {
-            agreement_error = decision_error = start_error = targets_error = clock_source_error =
+            agreement_error = decision_error = start_error = targets_error = clock_source_error = keeper_error =
                 {"observer_mapping", errno, static_cast<size_t>(page_size)};
         }
     }
@@ -307,6 +333,10 @@ void install_scene_observers(uintptr_t base, long page_size) {
         targets_error.operation, targets_error.error);
     peerlink_journal("MATCH_SCENE_CLOCK_OBSERVER installed=%u operation=%s errno=%d",
         unsigned(clock_source_installed), clock_source_error.operation, clock_source_error.error);
+    peerlink_journal("KEEPER_SCENE_OBSERVER installed=%u operation=%s errno=%d",
+        unsigned(keeper_scene_installed), keeper_error.operation, keeper_error.error);
+    peerlink_keeper_journal("KEEPER_SCENE_OBSERVER schema=1 installed=%u clockObserver=%u operation=%s errno=%d",
+        unsigned(keeper_scene_installed), unsigned(clock_source_installed), keeper_error.operation, keeper_error.error);
 }
 } // namespace
 #endif

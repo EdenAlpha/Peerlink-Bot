@@ -403,6 +403,12 @@ class MainActivity : AppCompatActivity(), NsdDiscovery.NsdCallback {
                                     ?.sortedBy { it.name }?.takeLast(8)?.forEach { eventLog ->
                                         entries.add(ZipEntryData(name = "engine_events/${eventLog.name}", file = eventLog))
                                     }
+                                val keeperLogs = java.io.File(filesDir, "keeper-events").listFiles()
+                                    ?.filter { it.isFile && it.name.matches(Regex("[0-9]+-[0-9]+\\.log")) }
+                                    ?.sortedBy { it.name }?.takeLast(8).orEmpty()
+                                for (log in keeperLogs) {
+                                    entries.add(ZipEntryData(name = "keeper_events/${log.name}", file = log))
+                                }
                                 val fileAudit = com.peerlink.app.bot.GameAssets.auditReportFile(this@MainActivity)
                                 entries.add(ZipEntryData(name = "game_file_audit.txt", text =
                                     runCatching { fileAudit.readText() }.getOrDefault("No completed startup file audit is available.\n")))
@@ -453,6 +459,7 @@ class MainActivity : AppCompatActivity(), NsdDiscovery.NsdCallback {
                                             appendLine("- match_log.txt : full session log")
                                             appendLine("- engine_exit_report.txt : Android bot-process exit history queried at export, including retained earlier attempts")
                                             appendLine("- engine_events/ : native frame checks, ball transitions, match states, and process stop events")
+                                            if (keeperLogs.isNotEmpty()) appendLine("- keeper_events/ : goalkeeper and scene state around goals and replays, plus local player positions at the first frame check disagreement")
                                             if (heap.files.isNotEmpty() || heap.pending) appendLine("- bot_memory/ : requested bot allocation profiles and recording status")
                                             if (matchDiagnostics.files.isNotEmpty() || matchDiagnostics.pending)
                                                 appendLine("- scheduler_trace/ : RAM cleanup reports and scheduler trace for the latest recording attempt")

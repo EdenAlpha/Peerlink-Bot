@@ -144,12 +144,18 @@ internal object EngineRuntime {
         return try {
             val app = context.applicationContext ?: context
             val journalDirectory = File(app.filesDir, "engine-events").apply { mkdirs() }
-            val journalFile = File(journalDirectory, "${System.currentTimeMillis()}-${android.os.Process.myPid()}.log")
+            val journalName = "${System.currentTimeMillis()}-${android.os.Process.myPid()}.log"
+            val journalFile = File(journalDirectory, journalName)
             val journalOpened = nativeOpenJournal(journalFile.absolutePath)
-            audit("ENGINE_EVENT_JOURNAL opened=$journalOpened pid=${android.os.Process.myPid()}")
+            val keeperDirectory = File(app.filesDir, "keeper-events").apply { mkdirs() }
+            val keeperOpened = nativeOpenKeeperJournal(File(keeperDirectory, journalName).absolutePath)
+            audit("ENGINE_EVENT_JOURNAL opened=$journalOpened keeperTrace=$keeperOpened pid=${android.os.Process.myPid()}")
             if (journalOpened) {
                 journal("APP_BUILD version=${com.peerlink.app.BuildConfig.VERSION_NAME} source=${com.peerlink.app.BuildConfig.SOURCE_COMMIT}")
-                journalDirectory.listFiles()?.filter { it.isFile && it.name.matches(Regex("[0-9]+-[0-9]+\\.log")) }
+            }
+            for ((directory, opened) in listOf(journalDirectory to journalOpened, keeperDirectory to keeperOpened)) {
+                if (!opened) continue
+                directory.listFiles()?.filter { it.isFile && it.name.matches(Regex("[0-9]+-[0-9]+\\.log")) }
                     ?.sortedByDescending { it.name }?.drop(8)?.forEach { it.delete() }
             }
             val engine = File(app.filesDir, "engine/libUE4.so")
@@ -415,6 +421,7 @@ internal object EngineRuntime {
 
     private external fun nativeLoad(path: String): Long
     private external fun nativeOpenJournal(path: String): Boolean
+    private external fun nativeOpenKeeperJournal(path: String): Boolean
     private external fun nativeJournal(line: String)
     private external fun nativeEnableHeadless(base: Long, missingMatchResources: Boolean): Boolean
     private external fun nativeHeadlessState(base: Long): Int

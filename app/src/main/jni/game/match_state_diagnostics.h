@@ -24,6 +24,16 @@ PeerLinkSceneStartSample peerlink_sample_scene_start(uintptr_t scene, uintptr_t 
 void peerlink_record_scene_start(const char *stage, const PeerLinkSceneStartSample &before,
                                  const PeerLinkSceneStartSample &after);
 void peerlink_record_scene_clock_source(uint32_t scene_id, bool timeline_loaded);
+struct PeerLinkKeeperSceneTick {
+    uint32_t number = 0;
+    uint32_t frame = 0;
+    uint32_t step = 0;
+    bool sample = false;
+};
+PeerLinkKeeperSceneTick peerlink_keeper_scene_enter(uintptr_t scene, uintptr_t context, uintptr_t transition);
+void peerlink_keeper_scene_leave(const PeerLinkKeeperSceneTick &tick, uintptr_t scene, uintptr_t context,
+                                 uintptr_t transition, bool finished);
+void peerlink_keeper_clock_sample(uintptr_t timer, bool timeline_loaded);
 void peerlink_record_ball_park(uintptr_t ball, uintptr_t position, uintptr_t group,
                               uintptr_t transition, uintptr_t flow);
 void peerlink_match_check_request(uintptr_t controller, uintptr_t checker,

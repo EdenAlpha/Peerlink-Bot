@@ -253,7 +253,13 @@ int main() {
         char directory[] = "/tmp/peerlink-match-frame-XXXXXX";
         assert(mkdtemp(directory));
         const std::string path = std::string(directory) + "/match.log";
+        const std::string keeper_path = std::string(directory) + "/keeper.log";
         assert(peerlink_open_diagnostic_journal(path.c_str()));
+        assert(peerlink_open_keeper_journal(keeper_path.c_str()));
+        checksum_fixture_frame = 4185;
+        set_word(actors[0] + 0x5dc, 98);
+        peerlink_record_check_frame(4185, 3765);
+        set_word(actors[0] + 0x5dc, 100);
         checksum_fixture_frame = 4212;
         set_word(controller + 0x30, 4213);
         alignas(uintptr_t) unsigned char history_owner[0x78]{};
@@ -262,7 +268,7 @@ int main() {
         set_pointer(history_owner + 0x70, reinterpret_cast<uintptr_t>(history_ball));
         peerlink_record_check_frame(4212, 3765);
         peerlink_record_check_frame(4239, 32452);
-        assert(checksum_helper_calls == 426 && checksum_root[0] == 55);
+        assert(checksum_helper_calls == 497 && checksum_root[0] == 55);
 
         alignas(uintptr_t) unsigned char checker[0x30]{}, comparison[0x20]{};
         auto set_half = [](unsigned char *at, uint16_t value) { std::memcpy(at, &value, sizeof(value)); };
@@ -322,7 +328,12 @@ int main() {
         assert(journal.find("MATCH_CHECK_COMPARE frame=4239") == std::string::npos);
         const std::string park = "MATCH_ACTIVE_BALL_PARK commandFrame=4203 flow=1 transitionFlag=1 matchFlowFlag=0";
         assert(journal.find(park) != std::string::npos && journal.find(park) == journal.rfind(park));
+        std::ifstream keeper_file(keeper_path);
+        const std::string keeper_log((std::istreambuf_iterator<char>(keeper_file)), std::istreambuf_iterator<char>());
+        assert(keeper_log.find("FIRST_MISMATCH_PLAYERS frame=4212 exactSnapshot=1 presentMask=4194303 positionBits=[100,0,0,101,") != std::string::npos);
+        assert(keeper_log.find("previousFrame=4185 previousPresentMask=4194303 previousPositionBits=[98,0,0,101,") != std::string::npos);
         unlink(path.c_str());
+        unlink(keeper_path.c_str());
         rmdir(directory);
         _exit(0);
     }
