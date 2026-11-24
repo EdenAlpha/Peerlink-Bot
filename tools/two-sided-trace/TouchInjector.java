@@ -2,6 +2,8 @@ import android.os.SystemClock;
 import android.view.InputDevice;
 import android.view.InputEvent;
 import android.view.MotionEvent;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
 import java.lang.reflect.Method;
 
 /** Test-phone shell input: one held joystick finger and a second action finger. */
@@ -57,12 +59,27 @@ public final class TouchInjector {
     }
 
     public static void main(String[] args) throws Exception {
-        if (args.length != 7) throw new IllegalArgumentException("Expected stickStartX stickStartY stickEndX stickEndY buttonX buttonY holdMs");
+        if (args.length == 1 && "--stdin".equals(args[0])) {
+            BufferedReader reader = new BufferedReader(new InputStreamReader(System.in));
+            String line;
+            while ((line = reader.readLine()) != null) {
+                try { perform(line.trim().split("\\s+")); }
+                catch (Exception error) { System.err.println("Touch input failed: " + error.getClass().getSimpleName()); }
+            }
+            return;
+        }
+        perform(args);
+    }
+
+    private static void perform(String[] args) throws Exception {
+        if (args.length != 7 && args.length != 8) throw new IllegalArgumentException("Expected stickStartX stickStartY stickEndX stickEndY buttonX buttonY holdMs [actionHoldMs]");
         float x0 = Float.parseFloat(args[0]), y0 = Float.parseFloat(args[1]);
         float x1 = Float.parseFloat(args[2]), y1 = Float.parseFloat(args[3]);
         float buttonX = Float.parseFloat(args[4]), buttonY = Float.parseFloat(args[5]);
         int hold = Integer.parseInt(args[6]);
-        if (hold < 0 || hold > 5000) throw new IllegalArgumentException("holdMs out of range");
+        int actionHold = args.length == 8 ? Integer.parseInt(args[7]) : 120;
+        if (hold < 0 || hold > 5000 || actionHold < 0 || actionHold > 2000)
+            throw new IllegalArgumentException("hold duration out of range");
         TouchInjector t = new TouchInjector();
         t.point(0, x0, y0);
         t.send(MotionEvent.ACTION_DOWN, 1);
@@ -73,7 +90,7 @@ public final class TouchInjector {
         }
         t.point(1, buttonX, buttonY);
         t.send(MotionEvent.ACTION_POINTER_DOWN | (1 << MotionEvent.ACTION_POINTER_INDEX_SHIFT), 2);
-        SystemClock.sleep(120);
+        SystemClock.sleep(actionHold);
         t.send(MotionEvent.ACTION_POINTER_UP | (1 << MotionEvent.ACTION_POINTER_INDEX_SHIFT), 2);
         SystemClock.sleep(hold);
         t.send(MotionEvent.ACTION_UP, 1);

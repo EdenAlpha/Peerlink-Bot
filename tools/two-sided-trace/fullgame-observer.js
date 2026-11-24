@@ -13,6 +13,74 @@ const object = make(0x6b0050c, 'void', ['pointer', 'pointer', 'pointer', 'uint32
 const player = [0x6b00650, 0x6b00794, 0x6b00908].map(
   off => make(off, 'void', ['pointer', 'pointer', 'pointer', 'uint32', 'uint32']));
 const gameBall = make(0x72d9980, 'pointer', ['pointer', 'uint32']);
+const getRoot = make(0x7a87db8, 'pointer', []);
+const getContext = make(0x7a58998, 'pointer', ['pointer']);
+const getSimulation = make(0x698f7e0, 'pointer', []);
+const getCursors = make(0x698f7f0, 'pointer', ['pointer']);
+const getLocalPad = make(0x8223884, 'uint32', []);
+const getSlot = make(0x698f7f8, 'uint32', ['pointer', 'uint32']);
+const getCursor = make(0x698fac0, 'pointer', ['pointer', 'uint32']);
+const cursorPlayer = make(0x6a4eb78, 'uint32', ['pointer']);
+const directSelected = make(0x6b75188, 'uint32', []);
+const getPossession = make(0x72c3ddc, 'pointer', ['pointer']);
+const getPossessionFallback = make(0x72c745c, 'pointer', ['pointer']);
+const possessionIndex = make(0x6b60a00, 'pointer', ['pointer']);
+const getKeeper = make(0x733d0f4, 'uint32', ['pointer', 'uint32']);
+
+function controlState() {
+  const match = addr(0xa533ec0).readPointer();
+  if (match.isNull() || match.add(0x138).readU8() !== 17) return null;
+  const core = match.add(0x2f8).readPointer();
+  if (core.isNull() || !core.readPointer().equals(addr(0x9899d50)) || core.add(8).readU32() !== 54) return null;
+  const balls = core.add(0x3c98).readPointer();
+  if (balls.isNull() || !balls.readPointer().equals(addr(0x989a160))) return null;
+  const ball = balls.add(0x30).readPointer(), ballIndex = balls.add(0xc).readU32();
+  if (ball.isNull() || ballIndex >= 8 || !balls.add(0x38 + ballIndex * 8).readPointer().equals(ball)) return null;
+  const position = [0, 1, 2].map(i => ball.add(0x30 + i * 4).readFloat());
+  const velocity = [0, 1, 2].map(i => ball.add(0x3c + i * 4).readFloat());
+  if (position.some(v => !Number.isFinite(v) || Math.abs(v) > 80) ||
+      velocity.some(v => !Number.isFinite(v) || Math.abs(v) > 140)) return null;
+  const root = getRoot(), info = root.isNull() ? ptr(0) : root.add(0x20).readPointer();
+  const context = info.isNull() ? ptr(0) : getContext(info);
+  if (context.isNull()) return null;
+  const side = context.add(0x2c).readU32();
+  if (side > 1) return null;
+  const sim = getSimulation();
+  if (sim.isNull()) return null;
+  const cursors = getCursors(sim);
+  let selected = -1;
+  if (!cursors.isNull()) {
+    const slot = getSlot(cursors, getLocalPad());
+    if (slot < 24) {
+      const cursor = getCursor(cursors, slot);
+      if (!cursor.isNull()) {
+        const player = cursorPlayer(cursor);
+        if (player < 22 && Math.floor(player / 11) === side) selected = player;
+      }
+    }
+    if (selected < 0) {
+      const player = directSelected();
+      if (player < 22 && Math.floor(player / 11) === side) selected = player;
+    }
+  }
+  const ballContext = balls.add(0x58);
+  let possession = getPossession(ballContext);
+  if (possession.isNull()) possession = getPossessionFallback(sim);
+  let owner = -2;
+  if (!possession.isNull()) {
+    const index = possessionIndex(possession);
+    if (!index.isNull()) {
+      const value = index.readU32();
+      if (value < 22) owner = value;
+      else if (value === 255) owner = -1;
+    }
+  }
+  const ownKeeper = getKeeper(ballContext, side), opposingKeeper = getKeeper(ballContext, 1 - side);
+  return {side, selected, owner,
+    ownKeeper: ownKeeper < 22 && Math.floor(ownKeeper / 11) === side ? ownKeeper : -1,
+    opposingKeeper: opposingKeeper < 22 && Math.floor(opposingKeeper / 11) !== side ? opposingKeeper : -1,
+    position, velocity};
+}
 
 function frameState(frame, original) {
   const handle = addr(0xa5909a0).readPointer();
@@ -60,6 +128,8 @@ function frameState(frame, original) {
       }
     }
   } catch (_) { result.ballBitsUnavailable = true; }
+  try { result.control = controlState(); }
+  catch (_) { result.controlUnavailable = true; }
   return result;
 }
 
