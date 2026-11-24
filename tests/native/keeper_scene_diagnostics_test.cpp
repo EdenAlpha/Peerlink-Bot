@@ -40,6 +40,7 @@ int main() {
     const uintptr_t context = object(13), scene = context + 0x3f0, actor = object(14), transition = object(15);
     const uintptr_t balls = object(16), possession = object(17), handler = object(18), timer = object(19);
     const uintptr_t checker = object(20), comparison = object(21);
+    const uintptr_t player_transition = object(24);
     put(base + 0x9a6a020, service); put(service, base + 0x98ae9e0);
     put(service + 8, inner); put(inner + 0xa0, command); put(command, base + 0x98aedd0);
     put(base + 0xa533ec0, match); put(match + 0x138, uint8_t{17});
@@ -47,7 +48,11 @@ int main() {
     put(core + 0x3c98, balls); put(balls, base + 0x989a160); put(balls + 0x68, possession);
     put(possession + 0x28780, 2U); put(context + 0x680, balls + 0x58);
     put(base + 0xa58de28, simulation); put(simulation + 0x3030, roster0); put(simulation + 0x3080, roster1);
-    put(simulation + 0x390, transition);
+    // The phone trace showed two different transition objects. Model that
+    // layout so the original scene assignment cannot be discarded by alias checks.
+    put(simulation + 0x390, player_transition);
+    put(player_transition + 0x22e, uint8_t{1});
+    put(player_transition + 0x22f, uint8_t{1});
     // Exercise a goalkeeper assigned to a different slot on each side.
     for (unsigned slot = 0; slot < 11; ++slot) {
         put(roster0 + 0x42b8 + slot * 4, slot == 2 ? 0U : 1U);
@@ -68,7 +73,9 @@ int main() {
     peerlink_keeper_targets_enter(transition, peerlink_sample_scene_start(scene, transition));
     put(transition + 0xc + 2 * 4, 2U);
     put(transition + 0x88 + 2 * 12, 0xc2440000U);
+    put(player_transition + 0xc + 2 * 4, 1U);
     peerlink_record_keeper_mode_write(transition, 2, 2, 0x6fe9144);
+    peerlink_record_keeper_mode_write(player_transition, 2, 1, 0x6fecd24);
     peerlink_record_keeper_mode_write(transition, 1, 1, 0x6fecd24);
     peerlink_keeper_targets_leave();
     peerlink_record_keeper_mode_write(transition, 2, 2, 0x6fecd24);
@@ -141,6 +148,10 @@ int main() {
     assert(after.find("k0TrackTimeBits=1073741824") != std::string::npos);
     assert(after.find("k0PositionBits=[" + std::to_string(0xc2440000U) + ",0,0]") != std::string::npos);
     assert(after.find("k0SceneMode=2 k0SceneOverride=0 k0SceneTargetBits=[" + std::to_string(0xc2440000U)) != std::string::npos);
+    assert(after.find("updateTransitionPresent=1 transitionSameObject=0 updateTransition=1 updateTransitionLock=1") != std::string::npos);
+    assert(after.find("k0UpdateMode=1 k0UpdateOverride=0") != std::string::npos);
+    assert(after.find("playerUpdateModes=[0,0,1,") != std::string::npos);
+    assert(log.find("KEEPER_SCENE_TARGET_CAPTURE scene=1 sceneId=197064 commandFrame=100 k0Player=2 k1Player=15") != std::string::npos);
     const auto assigned = find_line(log, "KEEPER_SCENE_MODE_WRITE scene=1 sceneId=197064 commandFrame=100 player=2");
     assert(assigned.find("mode=2 storedMode=2 override=0 callerOffset=0x6fe9144") != std::string::npos);
     assert(log.find("callerOffset=0x6fecd24") == std::string::npos);

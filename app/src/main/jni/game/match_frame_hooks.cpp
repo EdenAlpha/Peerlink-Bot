@@ -362,7 +362,7 @@ void install_scene_observers(uintptr_t base, long page_size) {
         unsigned(clock_source_installed), clock_source_error.operation, clock_source_error.error);
     peerlink_journal("KEEPER_SCENE_OBSERVER installed=%u operation=%s errno=%d",
         unsigned(keeper_scene_installed), keeper_error.operation, keeper_error.error);
-    peerlink_keeper_journal("KEEPER_SCENE_OBSERVER schema=3 installed=%u clockObserver=%u operation=%s errno=%d "
+    peerlink_keeper_journal("KEEPER_SCENE_OBSERVER schema=4 installed=%u clockObserver=%u operation=%s errno=%d "
         "targetModes=%u targetModesOperation=%s targetModesErrno=%d handlerModes=%u handlerModesOperation=%s handlerModesErrno=%d",
         unsigned(keeper_scene_installed), unsigned(clock_source_installed), keeper_error.operation, keeper_error.error,
         unsigned(target_modes_installed), target_modes_error.operation, target_modes_error.error,

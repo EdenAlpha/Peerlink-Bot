@@ -260,25 +260,28 @@ void remember_players(uintptr_t controller, uint32_t frame) {
     if (recovered) record_first_differing_players(controller, frame, true);
 }
 
-void append_keeper(std::string &text, unsigned side, unsigned player, uintptr_t transition) {
+void append_keeper(std::string &text, unsigned side, unsigned player, uintptr_t transition,
+                   uintptr_t player_transition) {
     const char *prefix = side == 0 ? " k0" : " k1";
     auto field = [&](const char *name) -> std::string & { return text.append(prefix).append(name).append("="); };
     field("Player") += std::to_string(player);
     if (player >= 22 || player / 11 != side) return;
-    if (transition) {
-        const uint32_t mode = word(transition + 0xc + player * 4);
-        field("SceneMode") += std::to_string(mode);
-        field("SceneOverride") += std::to_string(byte(transition + 0x20c + player));
-        if (mode == 2) append_array(field("SceneTargetBits"), copy_words<3>(transition + 0x88 + player * 12));
+    const uint32_t scene_mode = word(transition + 0xc + player * 4);
+    field("SceneMode") += std::to_string(scene_mode);
+    field("SceneOverride") += std::to_string(byte(transition + 0x20c + player));
+    if (scene_mode == 2) append_array(field("SceneTargetBits"), copy_words<3>(transition + 0x88 + player * 12));
+    if (player_transition) {
+        const uint32_t mode = word(player_transition + 0xc + player * 4);
+        field("UpdateMode") += std::to_string(mode);
+        field("UpdateOverride") += std::to_string(byte(player_transition + 0x20c + player));
+        if (mode == 2) append_array(field("UpdateTargetBits"), copy_words<3>(player_transition + 0x88 + player * 12));
     }
     const uintptr_t object = ptr(engine + 0xa5909a0 + 0x170 + player * 8);
     field("PlayerPresent") += std::to_string(object != 0);
     if (!object) return;
-    if (transition) {
-        // These are the per-player flags written by the transition modes' consumers.
-        append_array(field("ScenePlayerFlags"), std::array<unsigned, 4>{
-            byte(object + 0x798), byte(object + 0x799), byte(object + 0x79a), byte(object + 0x79b)});
-    }
+    // These are the per-player flags written by the transition mode's consumers.
+    append_array(field("ScenePlayerFlags"), std::array<unsigned, 4>{
+        byte(object + 0x798), byte(object + 0x799), byte(object + 0x79a), byte(object + 0x79b)});
     // Use the same fields as the engine's player checksum contributors.
     // Keep their raw bit patterns so samples from different scenes can be compared exactly.
     append_array(field("PositionBits"), copy_words<3>(object + 0x5dc));
@@ -325,14 +328,17 @@ void record_keeper_sample(const KeeperScene &trace, const KeeperClock &clock, co
         ? ptr(handler_table + 0x38) : 0;
     const uintptr_t ball_context = ptr(context + 0x680);
     unsigned owner = kUnknownPlayer;
-    bool owner_present = false, same_ball_context = false, transition_verified = false;
+    bool owner_present = false, same_ball_context = false;
+    uintptr_t player_transition = 0;
     std::array<unsigned, 2> keepers{kUnknownPlayer, kUnknownPlayer};
     if (outer == 17 && core_state == 54) {
         // 733d0f4 -> 72c4028 -> 72c19c0 gives the side roster.
         // 733d148 returns the first zero role at +0x42b8 (keeper).
         const uintptr_t simulation = ptr(engine + 0xa58de28);
-        // 72c3e44 -> 6a89920 -> 6a4fe90 resolves the same transition used by the player update.
-        transition_verified = simulation && ptr(simulation + 0x390) == transition;
+        // The dispatcher passes its own transition to 6fe7494. Player updates
+        // resolve theirs through 72c3e44 -> 6a89920 -> 6a4fe90. Both are live
+        // transition objects and can be distinct. Capture each independently.
+        if (simulation) player_transition = ptr(simulation + 0x390);
         if (simulation) for (unsigned side = 0; side < keepers.size(); ++side) {
             const uintptr_t roster = ptr(simulation + 0x3030 + side * 0x50);
             if (!roster) continue;
@@ -360,14 +366,14 @@ void record_keeper_sample(const KeeperScene &trace, const KeeperClock &clock, co
         details += " timelineLoaded=" + std::to_string(clock.timeline_loaded) + " cutClockBits=";
         append_array(details, clock.bits);
     }
-    if (transition_verified) {
-        std::array<uint32_t, 22> modes{};
-        for (unsigned i = 0; i < modes.size(); ++i) modes[i] = word(transition + 0xc + i * 4);
-        details += " playerSceneModes=";
-        append_array(details, modes);
+    details += " playerSceneModes=";
+    append_array(details, copy_words<22>(transition + 0xc));
+    if (player_transition && player_transition != transition) {
+        details += " playerUpdateModes=";
+        append_array(details, copy_words<22>(player_transition + 0xc));
     }
     for (unsigned side = 0; side < keepers.size(); ++side) {
-        append_keeper(details, side, keepers[side], transition_verified ? transition : 0);
+        append_keeper(details, side, keepers[side], transition, player_transition);
     }
     {
         std::lock_guard<std::mutex> lock(keeper_scene_mutex);
@@ -377,12 +383,16 @@ void record_keeper_sample(const KeeperScene &trace, const KeeperClock &clock, co
         }
     }
     peerlink_keeper_journal("KEEPER_SCENE_STATE scene=%u sceneId=%u stage=%s commandFrame=%u startFrame=%u playFrame=%u step=%u "
-        "finished=%u outer=%u core=%u transition=%u transitionVerified=%u transitionLock=%u actorVerified=%u actorMode=%u binding=%u interrupted=%u "
+        "finished=%u outer=%u core=%u transition=%u transitionLock=%u "
+        "updateTransitionPresent=%u transitionSameObject=%u updateTransition=%u updateTransitionLock=%u "
+        "actorVerified=%u actorMode=%u binding=%u interrupted=%u "
         "handlerIndex=%u handlerOffset=0x%llx ballContext=%u sameBallContext=%u ballOwnerPresent=%u ballOwner=%u "
         "missingMask=%u aheadMask=%u stopPending=%u samplerTid=%d %s",
         trace.number, trace.id, stage, frame, trace.start_frame, trace.play_frame, step, unsigned(finished),
-        outer, core_state, byte(transition + 0x22e), unsigned(transition_verified),
-        transition_verified ? byte(transition + 0x22f) : 0, unsigned(actor_valid),
+        outer, core_state, byte(transition + 0x22e), byte(transition + 0x22f),
+        unsigned(player_transition != 0), unsigned(player_transition == transition),
+        player_transition ? byte(player_transition + 0x22e) : 0,
+        player_transition ? byte(player_transition + 0x22f) : 0, unsigned(actor_valid),
         actor_valid ? word(actor + 0x250) : 0, unsigned(actor_valid && ptr(actor + 0x228)),
         actor_valid ? byte(actor + 0x60) : 0, index,
         static_cast<unsigned long long>(handler_call >= engine + 0x2866500 && handler_call < engine + 0x8c57ab0
@@ -501,10 +511,10 @@ void peerlink_keeper_targets_enter(uintptr_t transition, const PeerLinkSceneStar
     keeper_targets = {};
     if (!engine || !sample.actor_verified || !sample.command_frame || !transition || !peerlink_keeper_journal_active()) return;
     const auto trace = keeper_scene_at(command_controller(), sample.command_frame);
-    const uintptr_t simulation = ptr(engine + 0xa58de28);
-    if (!trace.scene || trace.id != sample.scene_id || trace.play_frame != sample.command_frame ||
-        !simulation || ptr(simulation + 0x390) != transition) return;
+    if (!trace.scene || trace.id != sample.scene_id || trace.play_frame != sample.command_frame) return;
     keeper_targets = {transition, trace.number, trace.id, sample.command_frame, trace.keepers};
+    peerlink_keeper_journal("KEEPER_SCENE_TARGET_CAPTURE scene=%u sceneId=%u commandFrame=%u k0Player=%u k1Player=%u",
+        trace.number, trace.id, sample.command_frame, trace.keepers[0], trace.keepers[1]);
 }
 
 void peerlink_keeper_targets_leave() { keeper_targets = {}; }
