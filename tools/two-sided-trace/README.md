@@ -52,3 +52,13 @@ unsynchronized initial checksum read and captures the first verified native
 checksum instead. The native diagnostic fixture and original checksum
 verification pass; it has not been tested in an Android match or released.
 It is not a fix for the goalkeeper disagreement.
+
+`player-mesh-observer.js` is an experimental read-only probe for the game's
+original player readiness function. `mesh-options-probe.js` scans for selected
+component classes and reports aggregate visibility-based animation settings;
+object lifetime and matching still require validation. During one additional
+lab run, the bot process crashed inside the separate initial snapshot diagnostic
+before gameplay. `suppress-lab-initial-snapshot.js` is a version-checked,
+lab-only override of that diagnostic for further research. It does not modify
+the distributed APK and does not change the game simulation. The isolated
+source patch above is not yet proven on Android.
