@@ -18,6 +18,8 @@ from PIL import Image
 TRACE = os.environ.get('PEERLINK_LAB_TRACE', '/tmp/peerlink-observer/fullgame-state.jsonl')
 DEVICE = '127.0.0.1:15556'
 SCREENS = Path(os.environ.get('PEERLINK_LAB_SCREENS', '/tmp/peerlink-lab-control-screens'))
+TEMPLATE_FILE = os.environ.get('PEERLINK_LAB_BUTTON_TEMPLATES', '/tmp/peerlink-play-button-templates.json')
+BUTTON_TEMPLATES = {k: set(v) for k, v in json.loads(Path(TEMPLATE_FILE).read_text()).items()}
 SCREENS.mkdir(mode=0o700, exist_ok=True)
 touch_log = open(os.environ.get('PEERLINK_LAB_TOUCH_LOG', '/tmp/peerlink-lab-touch.log'), 'a', buffering=1)
 touch = subprocess.Popen([
@@ -56,18 +58,25 @@ def current_gameplay_screen(frame):
         data = subprocess.check_output(['adb', '-s', DEVICE, 'exec-out', 'screencap', '-p'], timeout=5)
         image = Image.open(io.BytesIO(data)).convert('RGB')
         if image.size != (640, 360):
-            return False
+            return None
         points = [(590, 185), (590, 195), (560, 210), (620, 210), (585, 278)]
         green = 0
         for point in points:
             r, g, b = image.getpixel(point)
             green += int(50 <= r <= 150 and 95 <= g <= 185 and g > r + 20 and g > b + 20)
         if green < 4:
-            return False
+            return None
+        button_pixels = image.crop((462, 291, 530, 327)).getdata()
+        button_mask = {i for i, (r, g, b) in enumerate(button_pixels) if r > 210 and g > 210 and b > 210}
+        scores = {name: len(button_mask & template) / max(1, len(button_mask | template))
+                  for name, template in BUTTON_TEMPLATES.items()}
+        mode = max(scores, key=scores.get)
+        if scores[mode] < 0.75:
+            return None
         (SCREENS / f'{frame}.png').write_bytes(data)
-        return True
+        return mode
     except (OSError, ValueError, subprocess.SubprocessError):
-        return False
+        return None
 
 
 last_frame = 0
@@ -75,6 +84,7 @@ last_action = 0.0
 last_event = time.monotonic()
 scene_pause_until = 0.0
 saw_match = False
+waiting_reported = False
 deadline = time.monotonic() + 600
 print('Lab control waiting for fresh verified match state.', flush=True)
 with open(TRACE) as source:
@@ -82,9 +92,9 @@ with open(TRACE) as source:
     while time.monotonic() < deadline:
         line = source.readline()
         if not line:
-            if saw_match and time.monotonic() - last_event > 8:
-                print('No fresh match checks; inputs stopped.', flush=True)
-                break
+            if saw_match and time.monotonic() - last_event > 8 and not waiting_reported:
+                print('No fresh match checks; waiting without sending inputs.', flush=True)
+                waiting_reported = True
             if touch.poll() is not None:
                 print('Touch injector stopped.', flush=True)
                 break
@@ -124,6 +134,9 @@ with open(TRACE) as source:
             continue
         last_event = time.monotonic()
         saw_match = True
+        if waiting_reported:
+            print('Fresh match checks resumed.', flush=True)
+            waiting_reported = False
         if abs(ball[0]) >= 52.61 and abs(ball[1]) < 4.0 and position[1] < 2.5:
             scene_pause_until = max(scene_pause_until, time.monotonic() + 15)
         if abs(ball[0]) > 54 or abs(ball[1]) > 36 or time.monotonic() < scene_pause_until:
@@ -141,14 +154,39 @@ with open(TRACE) as source:
         if not points[keeper] or not points[opposing_keeper]:
             continue
         direction = 1 if points[keeper][0] < points[opposing_keeper][0] else -1
+        # The engine can retain a previous carrier after the ball moves.
+        # Trust it only while that player is within reach; otherwise infer a
+        # carrier only for a slow, low ball with an unambiguous closest player.
+        raw_owner = owner
+        reported = points[owner] if isinstance(owner, int) and 0 <= owner < 22 else None
+        reach = 3.2 if owner in (keeper, opposing_keeper) else 2.8
+        if reported is None or distance(reported, ball) > reach:
+            velocity = control.get('velocity') or []
+            speed = math.hypot(velocity[0], velocity[2]) if len(velocity) == 3 else float('inf')
+            nearest = sorted((distance(point, ball), index) for index, point in enumerate(points) if point is not None)
+            if raw_owner == -1:
+                owner = -1
+            elif position[1] <= 1.35 and speed <= 7.5 and len(nearest) >= 2 and \
+                    nearest[0][0] <= 1.45 and nearest[1][0] - nearest[0][0] >= 0.65:
+                owner = nearest[0][1]
+            else:
+                owner = -2
         if selected not in own or points[selected] is None:
             available = [i for i in own if i != keeper and points[i] is not None]
             if not available:
                 continue
             selected = min(available, key=lambda i: distance(points[i], ball))
         player = points[selected]
+        screen_mode = current_gameplay_screen(frame)
+        if screen_mode is None:
+            continue
+        # The visible Pass/Switch label is the game's current input context.
+        # It prevents defensive touches from turning into Clear/Pass while
+        # our side actually has possession.
+        if screen_mode == 'attack' and distance(player, ball) <= 6:
+            owner = selected
         owner_is_own = owner in own if isinstance(owner, int) else False
-        owner_valid = owner_is_own and points[owner] is not None and distance(points[owner], ball) < 3.2
+        owner_valid = screen_mode == 'attack' and owner_is_own and points[owner] is not None and distance(points[owner], ball) < 6
         opponent_points = [points[i] for i in opponents if points[i] is not None]
         if not opponent_points or time.monotonic() - last_action < 0.85:
             continue
@@ -171,7 +209,7 @@ with open(TRACE) as source:
                     target, action, hold = goal, 'dash', 600
             else:
                 target, action, hold = goal, 'dash', 600
-        else:
+        elif screen_mode == 'defense':
             target = ball
             closest = min((i for i in own if i != keeper and points[i] is not None),
                           key=lambda i: distance(points[i], ball), default=selected)
@@ -181,8 +219,8 @@ with open(TRACE) as source:
                 action, hold = 'tackle', 160
             else:
                 action, hold = 'dash', 600
-        if not current_gameplay_screen(frame):
-            continue
+        else:
+            target, action, hold = ball, 'dash', 600
         try:
             command(player, target, action, hold)
             last_action = time.monotonic()
