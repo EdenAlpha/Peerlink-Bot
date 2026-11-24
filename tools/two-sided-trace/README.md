@@ -27,3 +27,19 @@ The native offsets apply **only** to the original 11.1.1 `libUE4.so` with
 SHA-256 `2cea0c85344d7d7f295aea1c2353621f02db78dbccd888a0a21a0508ac330659`.
 Use a disposable rooted test device and verify the file hash before attaching.
 Do not put credentials, account data, or match captures in this directory.
+
+A later lab match reproduced a recorded mismatch immediately after scene
+197064. Its first two differing contributions both belong to the bot team's
+goalkeeper. At adjacent final recorded frames the goalkeeper's positions
+differed by about 2.7 metres; this identifies the divergent state, not why
+the divergence occurred. The original game and bot matched on a preceding
+celebration.
+
+`keeper-observer.js` and `run-keeper-observers.py` are experimental read-only
+Frida probes that break the goalkeeper's checksum into individual terms on
+both engines. `test-keeper-observer.js` checks the observer's filters and
+checksum-delta recording with mocked Frida calls. `compare-keeper-details.py`
+compares the emitted terms; initial matched-frame samples agreed. The separate
+`scene-target-observer.js` probes scene-target dispatch. These tools have not
+yet identified or verified a fix for the failure. Match captures and account
+information are deliberately excluded.
