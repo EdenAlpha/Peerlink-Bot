@@ -85,7 +85,7 @@ last_event = time.monotonic()
 scene_pause_until = 0.0
 saw_match = False
 waiting_reported = False
-deadline = time.monotonic() + 600
+deadline = time.monotonic() + 900
 print('Lab control waiting for fresh verified match state.', flush=True)
 with open(TRACE) as source:
     source.seek(0, 2)
