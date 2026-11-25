@@ -166,7 +166,12 @@ function sceneState(scene, transition) {
 
 Interceptor.attach(addr(0x7053d8c), {
   onEnter(args) {
-    this.wanted = this.returnAddress.equals(addr(0x7053bbc));
+    // The stock client calls this directly. PeerLink's lab build wraps the
+    // same original checksum routine in its native host, whose return address
+    // therefore belongs to the host library instead of libUE4.so.
+    const caller = Process.findModuleByAddress(this.returnAddress);
+    this.wanted = this.returnAddress.equals(addr(0x7053bbc)) ||
+      (caller !== null && caller.name === 'libpeerlinkbackend.so');
     if (this.wanted) this.framePointer = args[2];
   },
   onLeave(ret) {

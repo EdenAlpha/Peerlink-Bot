@@ -14,6 +14,12 @@ each reconstructed checksum against the engine before marking it usable.
 `MATCH_CHECK_FRAME` log entries. A differing contributor helps locate a
 disagreement; it does not by itself prove the root cause.
 
+The 5.0.56 native bot journal stops after approximately 2 MiB per process. A
+long-lived lab process reached that cap, so `run-bot-check-observer.py` can
+record its verified checks independently and continuously to JSONL. Compare a
+single match window with `compare-match-checks.py --bot-jsonl`. The independent
+observer's effect on a live match still needs to be measured.
+
 `TouchInjector.java` is a lab-only Android shell utility that injects a held
 touch and a second action touch. Android accepted repeated test injections.
 `play-lab-game.py` uses verified observations and a fresh screenshot to control

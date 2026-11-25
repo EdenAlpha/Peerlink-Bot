@@ -67,8 +67,11 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('bot_log')
     parser.add_argument('game_jsonl')
+    parser.add_argument('--bot-jsonl', action='store_true',
+                        help='Read bot checks from the independent JSONL observer instead of its native journal')
     args = parser.parse_args()
-    bot, bot_ambiguous = unique(bot_records(args.bot_log))
+    bot_reader = game_records if args.bot_jsonl else bot_records
+    bot, bot_ambiguous = unique(bot_reader(args.bot_log))
     game, game_ambiguous = unique(game_records(args.game_jsonl))
     common = sorted(bot.keys() & game.keys())
     print(f'Verified shared frames: {len(common)}; ambiguous frames omitted: bot={bot_ambiguous}, game={game_ambiguous}')
