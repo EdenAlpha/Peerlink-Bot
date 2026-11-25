@@ -59,7 +59,7 @@ function fixture({advance, assignKeeper = true, gateReached = true, supported = 
  put(simulation + 0x3080, roster1);
  put(simulation + 0x390, updateTransition);
  put(roster1 + 0x42b8, 7); // The second keeper is slot 1, not slot 0.
- put(scene + 4, 8);
+ put(scene + 4, 5);
  put(scene + 8, 197064);
  put(scene + 0x280, actor);
  put(actor, 0x300000);
@@ -81,12 +81,17 @@ function fixture({advance, assignKeeper = true, gateReached = true, supported = 
  }
  frame(3837);
  put(sceneTransition + 0xc, 3);
+ put(scene + 4, 8);
+ invoke(0x6fe89b8, 0x6fe85e8, [scene, context, sceneTransition]);
+ assert(!events.some(event => event.type === 'keeper_scene_prepare'));
+ put(scene + 4, 5);
  invoke(0x6fe89b8, 0x6fe85e4, [scene, context, sceneTransition]);
  assert(!events.some(event => event.type === 'keeper_scene_prepare'));
  invoke(0x6fe89b8, 0x6fe85e8, [scene, context, sceneTransition], () => {
   put(sceneTransition + 0x20c, Number(assignKeeper));
  });
  frame(3840);
+ put(scene + 4, 8); // Playback occurs in state 8, after preparation in state 5.
  invoke(0x6fe7494, hostWrapper ? 'host' : 0x6fe8634, [context, sceneTransition], () => {
   if (assignKeeper) put(sceneTransition + 0xc, 0);
  });

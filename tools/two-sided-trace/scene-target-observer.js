@@ -107,7 +107,8 @@ Interceptor.attach(at(0x6fe89b8), {
   try {
    const scene = args[0];
    const frame = currentFrame();
-   if (!frame || scene.isNull() || args[2].isNull() || scene.add(4).readU32() !== 8) return;
+   // Scene preparation is called in state 5; state 8 is the later play call.
+   if (!frame || scene.isNull() || args[2].isNull() || scene.add(4).readU32() !== 5) return;
    const sceneId = scene.add(8).readU32();
    if ((sceneId >>> 16) !== 3) return;
    activeScene = null;
