@@ -86,7 +86,9 @@ source patch above is not yet proven on Android.
 
 The scene target observer records both keepers' assigned roles, the movement
 controller's advance decision, and the position used by the match. After a
-goal plays, it continues until another goal replaces the active goal record.
+verified scene plays, it continues until another verified scene replaces it.
+This includes restart scenes, not only celebrations. The 11.1.1 scene
+preparation call occurs in state 5; the later playback call uses state 8.
 The runner
 writes the same capture ID on both sides. Compare matching frames per capture
 with `python3 compare-keeper-handoff.py game.jsonl bot.jsonl`. The default scene

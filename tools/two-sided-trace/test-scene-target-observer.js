@@ -10,7 +10,7 @@ const vm = require('node:vm');
 const source = fs.readFileSync(path.join(__dirname, 'scene-target-observer.js'), 'utf8');
 const base = 0x100000000;
 
-function fixture({advance, assignKeeper = true, gateReached = true, supported = true, hostWrapper = false}) {
+function fixture({advance, assignKeeper = true, gateReached = true, supported = true, hostWrapper = false, sceneId = 197064}) {
  const words = new Map();
  const hooks = new Map();
  const events = [];
@@ -60,7 +60,7 @@ function fixture({advance, assignKeeper = true, gateReached = true, supported = 
  put(simulation + 0x390, updateTransition);
  put(roster1 + 0x42b8, 7); // The second keeper is slot 1, not slot 0.
  put(scene + 4, 5);
- put(scene + 8, 197064);
+ put(scene + 8, sceneId);
  put(scene + 0x280, actor);
  put(actor, 0x300000);
  put(0x300000 + 0x28, base + 0x69d25bc);
@@ -139,6 +139,8 @@ try {
  }
  const held = fixture({advance: false});
  fixture({advance: false, hostWrapper: true});
+ const restartScene = fixture({advance: false, sceneId: 131073});
+ assert(restartScene.some(event => event.type === 'keeper_scene_prepare' && event.sceneId === 131073));
  const advances = fixture({advance: true});
  const gate = compare(advances, held);
  assert.match(gate, /Assigned movement[^\n]*\n  Paired readings agree/);

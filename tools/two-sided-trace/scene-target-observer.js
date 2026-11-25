@@ -12,8 +12,8 @@ if (Process.arch !== 'arm64' || [...entryWords].some(([offset, word]) => at(offs
 }
 let activeScene = null;
 const evaluating = new Map();
-// Keep recording the last played goal's keeper decisions until another goal
-// replaces it. The role and gate record is not limited to a short window.
+// Keep recording the last verified scene's keeper decisions until a later
+// verified scene replaces it. Restarts as well as celebrations can desync.
 
 function currentFrame(){
  try {const s=at(0x9a6a020).readPointer();if(s.isNull()||!s.readPointer().equals(at(0x98ae9e0)))return 0;
@@ -110,7 +110,7 @@ Interceptor.attach(at(0x6fe89b8), {
    // Scene preparation is called in state 5; state 8 is the later play call.
    if (!frame || scene.isNull() || args[2].isNull() || scene.add(4).readU32() !== 5) return;
    const sceneId = scene.add(8).readU32();
-   if ((sceneId >>> 16) !== 3) return;
+   if (sceneId === 0) return;
    activeScene = null;
    const actor = scene.add(0x280).readPointer();
    const table = actor.isNull() ? ptr(0) : actor.readPointer();
