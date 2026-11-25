@@ -98,6 +98,13 @@ object BotRoomService : BotRoomBackend {
                     "-- the room-time report will retry")
             }
 
+            val usingSavedDatabase = EngineHost.usingSavedDatabaseUpdate
+            check(usingSavedDatabase == GameDatabaseUpdate.isImported(ctx)) {
+                "The selected eFootball data changed. Try creating a room again."
+            }
+            if (usingSavedDatabase) {
+                check(EngineHost.verifySavedDatabase()) { "The saved update was no longer active in the bot." }
+            }
             val r = gate.createRoom()
             if (r["result"] == "_NO_ENDPOINT") {
                 throw KgsGate.GateException("Bot endpoint not set -- bot mode must declare the fabricated " +

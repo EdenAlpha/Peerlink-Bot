@@ -7,7 +7,8 @@ import java.util.zip.ZipInputStream
 
 /** App-private working files; the installed game and its saved data remain read-only. */
 internal object GameAssets {
-    data class Prepared(val game: Context, val root: File, val missingMatchResources: Int = 0) {
+    data class Prepared(val game: Context, val root: File, val missingMatchResources: Int = 0,
+                        val savedDatabaseUpdate: Boolean = false) {
         val project get() = File(root, "project/PesMobile")
         val database get() = File(root, "database")
     }
@@ -50,8 +51,7 @@ internal object GameAssets {
         }
         val identity = installation()
         audit("[BOT-FILES] SOURCE installation=$identity")
-        audit("[BOT-FILES] SCOPE installed_APK_libraries_and_assets; downloaded/private_game_updates=NOT_CHECKED; " +
-            "copy_integrity_does_not_prove_same_live_database_as_running_game")
+        audit("[BOT-FILES] SCOPE installed_APK_libraries_and_assets plus optional owner_imported_database_update")
         var advisedFiles = 0
         var advisedBytes = 0L
         val integrity = GameFileIntegrity(audit, { file ->
@@ -176,14 +176,15 @@ internal object GameAssets {
             GameResourcePacks.link(source, File(nativePaks, name), fingerprint, audit)
         }
         val missingMatchResources = GameResourcePacks.verifyAndLink(owner, nativePaks, audit, allowMissingMatchResources)
+        val savedDatabaseUpdate = GameDatabaseUpdate.stage(owner, root, audit)
         check(installation() == identity) { "Installed game changed during verification; retry with the game update finished" }
         val cacheSaved = fingerprints.save()
         audit("[BOT-FILES] INSTALLATION_CACHE reusedSourceBytes=$reusedSourceBytes saved=$cacheSaved")
         audit("BOT_MEMORY_CACHE phase=verified_copies advisedFiles=$advisedFiles advisedBytes=$advisedBytes")
         audit("[BOT-FILES] SUMMARY result=PASS verified=${integrity.verified} repaired=${integrity.repaired} " +
             "cpk=${names.size} resources=${resources.size} nativeResources=${resources.size} databaseTables=$databaseTables nativeDatabaseTables=44 " +
-            "downloadedUpdates=NOT_CHECKED")
-        return prepared.copy(missingMatchResources = missingMatchResources)
+            "savedDatabaseUpdateStaged=$savedDatabaseUpdate")
+        return prepared.copy(missingMatchResources = missingMatchResources, savedDatabaseUpdate = savedDatabaseUpdate)
     }
 
     private fun resourceDestination(root: File, name: String): File {

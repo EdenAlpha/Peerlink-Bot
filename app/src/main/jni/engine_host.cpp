@@ -72,6 +72,8 @@ uintptr_t g_base = 0;
 uintptr_t g_client = 0;
 uint32_t g_uid = 0;
 bool g_core_ready = false;
+bool g_saved_database_attempted = false;
+bool g_saved_database_ready = false;
 std::string g_squad_path;
 std::string g_match_context_path;
 std::string g_room_rules_path;
@@ -216,6 +218,32 @@ struct TaskLock {
     }
     ~TaskLock() { if (manager) entry<void (*)(uintptr_t)>(0x82298d0)(manager); }
 };
+
+// Compare the active 11.1.1 database with the saved pack after the engine
+// finishes loading. The stock database has 24,203 records and different
+// parameter values for player key 15320.
+bool matches_saved_database(uintptr_t owner) {
+    if (!owner || *reinterpret_cast<const uint32_t *>(owner + 0x30) != 4) return false;
+    const auto work = *reinterpret_cast<const uintptr_t *>(owner + 0x40);
+    const auto edit = *reinterpret_cast<const uintptr_t *>(owner + 0x50);
+    const auto players = work ? *reinterpret_cast<const uint32_t *>(work + 0x2686098) : 0;
+    const auto appearances = edit ? *reinterpret_cast<const uint32_t *>(edit + 0x66b0c4) : 0;
+    constexpr uint32_t kExpectedPlayers = 47'370;
+    bool parameters_match = false;
+    if (players == kExpectedPlayers && appearances == kExpectedPlayers) {
+        struct PlayerIdentity { uint32_t id, padding; uint64_t key; };
+        const auto player = work + 29 * 0x1d0;
+        const auto identity = entry<PlayerIdentity (*)(uintptr_t)>(0x68fe720)(player);
+        const auto parameter = entry<uint32_t (*)(uintptr_t, uint32_t, uint32_t *)>(0x82a84d4);
+        uint32_t value0 = 0, value61 = 0;
+        parameters_match = identity.key == 15320 &&
+            parameter(player, 0, &value0) && value0 == 8 &&
+            parameter(player, 61, &value61) && value61 == 5;
+    }
+    peerlink_journal("SAVED_DATABASE_VERIFIED players=%u appearances=%u parametersMatch=%u",
+                     players, appearances, unsigned(parameters_match));
+    return parameters_match;
+}
 
 // Called under the original TaskLock. A constructed pitch can still be at
 // command frame zero waiting for its peer, so construction is not input-ready.
@@ -424,6 +452,7 @@ JNIEXPORT jboolean JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeApplica
 JNIEXPORT jboolean JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeLoadDatabase(
         JNIEnv *env, jobject, jlong base, jstring path) {
     if (!valid(base) || !g_core_ready || !path) return JNI_FALSE;
+    if (g_saved_database_attempted && !g_saved_database_ready) return JNI_FALSE;
     const char *directory = env->GetStringUTFChars(path, nullptr);
     if (!directory) return JNI_FALSE;
     long result = -6;
@@ -455,6 +484,88 @@ JNIEXPORT jboolean JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeLoadDat
     env->ReleaseStringUTFChars(path, directory);
     __android_log_print(ANDROID_LOG_INFO, TAG, "database startup result=%ld", result);
     return result == 44 ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT jint JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeApplySavedDatabase(
+        JNIEnv *, jobject, jlong base) {
+    if (!valid(base) || !g_core_ready || g_client || g_match_stage) return -1;
+    if (g_saved_database_ready) return 1;
+    if (g_saved_database_attempted) return -7;
+    g_saved_database_attempted = true;
+
+    // 11.1.1's live-data task registers the downloaded CPK (0x7a1a128),
+    // loads its data (0x7a1b828/0x7a1b860), then asks the original database
+    // owner to reload (0x7a1b890/0x7a1ba18). Use the same order before the
+    // client starts. The engine owns all mount and database completion flags.
+    constexpr uint32_t kLiveData = 1;
+    constexpr unsigned kComplete = 2;
+    constexpr uint32_t kDatabaseReady = 4;
+    enum class Phase { Register, WaitForArchive, WaitForData, WaitForDatabase };
+    Phase phase = Phase::Register;
+    uint32_t binding = 0;
+    const uint64_t deadline = monotonic_ms() + 45'000;
+    while (monotonic_ms() < deadline) {
+        {
+            TaskLock lock;
+            if (!lock.manager) return -1;
+            const auto owner = entry<uintptr_t (*)()>(0x82468d4)();
+            if (!owner) return -1;
+            const auto stage = *reinterpret_cast<const uint32_t *>(owner + 0x30);
+            switch (phase) {
+                case Phase::Register: {
+                    const auto binder = *reinterpret_cast<const uintptr_t *>(g_base + 0xa538680);
+                    if (stage != kDatabaseReady || !binder) return -1;
+                    binding = entry<uint32_t (*)(uintptr_t, const char *, const char *)>(0x8213804)(
+                        binder, "dt870", "dt870_mobile_and.cpk");
+                    peerlink_journal("SAVED_DATABASE_ARCHIVE binding=%u", binding);
+                    if (!binding) return -2;
+                    phase = Phase::WaitForArchive;
+                    break;
+                }
+                case Phase::WaitForArchive: {
+                    unsigned status = 0;
+                    const int result = entry<int (*)(uint32_t, unsigned *)>(0x8c1ca10)(binding, &status);
+                    if (result != 0 || status > kComplete) {
+                        peerlink_journal("SAVED_DATABASE_ARCHIVE rejected=%d status=%u", result, status);
+                        return -3;
+                    }
+                    if (status == kComplete) {
+                        entry<void (*)(uint32_t)>(0x81f0d6c)(kLiveData);
+                        entry<void (*)(uint32_t)>(0x81f0cb8)(kLiveData);
+                        phase = Phase::WaitForData;
+                    }
+                    break;
+                }
+                case Phase::WaitForData:
+                    if ((entry<uint32_t (*)(uint32_t)>(0x81f0e20)(kLiveData) & 1) != 0) {
+                        if (stage != kDatabaseReady ||
+                            (entry<uint32_t (*)(uintptr_t, uint32_t)>(0x82469e4)(owner, 0) & 1) == 0)
+                            return -4;
+                        peerlink_journal("SAVED_DATABASE_RELOAD accepted=1");
+                        phase = Phase::WaitForDatabase;
+                    }
+                    break;
+                case Phase::WaitForDatabase:
+                    if (stage != kDatabaseReady) break;
+                    if (!matches_saved_database(owner)) return -5;
+                    const auto consumer = entry<uintptr_t (*)()>(0x7b59768)();
+                    if (consumer) entry<void (*)(uintptr_t)>(0x7b59808)(consumer);
+                    g_saved_database_ready = true;
+                    return 1;
+            }
+        }
+        // The game and CRI workers may need the task lock to finish.
+        usleep(10'000);
+    }
+    peerlink_journal("SAVED_DATABASE_TIMEOUT phase=%u", static_cast<unsigned>(phase));
+    return -6;
+}
+
+JNIEXPORT jboolean JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeVerifySavedDatabase(
+        JNIEnv *, jobject, jlong base) {
+    if (!valid(base) || !g_saved_database_ready || !g_client || g_match_stage) return JNI_FALSE;
+    TaskLock lock;
+    return lock.manager && matches_saved_database(entry<uintptr_t (*)()>(0x82468d4)()) ? JNI_TRUE : JNI_FALSE;
 }
 
 JNIEXPORT jboolean JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeMergeEditRecords(

@@ -28,6 +28,8 @@ internal object EngineRuntime {
     var audit: (String) -> Unit = {}
     @Volatile var startupRetryable = true
         private set
+    var usingSavedDatabaseUpdate = false
+        private set
     @Volatile private var runtimeThread: Thread? = null
     private val runtime = ScheduledThreadPoolExecutor(1) { action ->
         Thread(action, "engine-runtime").apply {
@@ -136,13 +138,18 @@ internal object EngineRuntime {
     fun prepare(context: Context, uid: Long): Boolean {
         startupRetryable = true
         if (!nativeAvailable || uid !in 1..0xffffffffL) return false
+        val app = context.applicationContext ?: context
+        val useSavedUpdate = GameDatabaseUpdate.isImported(app)
         if (client != 0L) {
-            if (ownerUid == uid) return true
+            if (ownerUid == uid) {
+                if (usingSavedDatabaseUpdate == useSavedUpdate) return true
+                report("Restart the bot session to change its eFootball data.")
+                return false
+            }
             AppState.appendLog("[ENGINE-HOST] another account owns this runtime; restart the app before switching")
             return false
         }
         return try {
-            val app = context.applicationContext ?: context
             val journalDirectory = File(app.filesDir, "engine-events").apply { mkdirs() }
             val journalName = "${System.currentTimeMillis()}-${android.os.Process.myPid()}.log"
             val journalFile = File(journalDirectory, journalName)
@@ -226,14 +233,35 @@ internal object EngineRuntime {
                     error("Graphics-free bot did not initialize")
                 }
             }
+            check(files.savedDatabaseUpdate == useSavedUpdate) { "The selected update changed during startup. Try again." }
+            check(!usingSavedDatabaseUpdate || useSavedUpdate) { "Restart the bot session to change its eFootball data." }
             check(onRuntime { nativeLoadDatabase(base, files.database.absolutePath) }) { "Bot game database could not start" }
-            val editSupplement = stageEditSupplement(app)
-            try {
-                check(onRuntime { nativeMergeEditRecords(base, editSupplement.absolutePath) }) {
-                    "Bot player data could not be prepared"
+            if (files.savedDatabaseUpdate) {
+                report("Loading the saved eFootball update")
+                startupRetryable = false
+                val result = onRuntime { nativeApplySavedDatabase(base) }
+                audit("[BOT-FILES] SAVED_DATABASE_UPDATE result=$result")
+                check(result == 1) {
+                    when (result) {
+                        -2, -3 -> "The engine could not open the saved eFootball update."
+                        -4 -> "The engine could not reload its database."
+                        -5 -> "The engine loaded different player data from the saved update."
+                        -6 -> "The engine timed out loading the saved eFootball update."
+                        -7 -> "Restart the bot session before retrying the saved update."
+                        else -> "The bot's database was unavailable."
+                    }
                 }
-            } finally {
-                editSupplement.delete()
+                usingSavedDatabaseUpdate = true
+                startupRetryable = true
+            } else {
+                val editSupplement = stageEditSupplement(app)
+                try {
+                    check(onRuntime { nativeMergeEditRecords(base, editSupplement.absolutePath) }) {
+                        "Bot player data could not be prepared"
+                    }
+                } finally {
+                    editSupplement.delete()
+                }
             }
             // The original Java resume callback checks kernel phase == 1.
             // Framework onResume runs before our native window is attached;
@@ -288,6 +316,9 @@ internal object EngineRuntime {
     }
 
     fun databaseDiagnostics(): String = onRuntime { nativeDatabaseDiagnostics(base) }
+    fun verifySavedDatabase(): Boolean = onRuntime {
+        usingSavedDatabaseUpdate && nativeVerifySavedDatabase(base)
+    }
     fun networkStartupDiagnostics(): String = onRuntime {
         nativeNetworkStartupDiagnostics(base) + " " + (discovery?.diagnostics() ?: "localStunReady=false")
     }
@@ -443,6 +474,8 @@ internal object EngineRuntime {
     private external fun nativeApplicationReady(base: Long): Boolean
     private external fun nativeStartupInfo(base: Long): String
     private external fun nativeLoadDatabase(base: Long, path: String): Boolean
+    private external fun nativeApplySavedDatabase(base: Long): Int
+    private external fun nativeVerifySavedDatabase(base: Long): Boolean
     private external fun nativePrepareChannels(base: Long, peer: Long, home: Long, squad: String): Boolean
     private external fun nativeSetupMatch(base: Long, peer: Long, squad: String, context: String, roomRules: String): Boolean
     private external fun nativeSnapshot(base: Long, passive: Boolean): LongArray

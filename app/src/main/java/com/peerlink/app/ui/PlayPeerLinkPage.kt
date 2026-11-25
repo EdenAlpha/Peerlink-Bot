@@ -3,6 +3,8 @@ package com.peerlink.app.ui
 import android.content.Context
 import android.os.SystemClock
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -30,10 +32,14 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.peerlink.app.bot.BotPacketCounts
+import com.peerlink.app.bot.GameDatabaseUpdate
 import com.peerlink.app.play.PlayRoomController
 import com.peerlink.app.play.RoomState
 import java.text.NumberFormat
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /** The bot hosts; the player joins the displayed room in their own game. */
 @Composable
@@ -61,6 +67,30 @@ internal fun PlayPeerLinkContent(
     onExportLogs: () -> Unit,
 ) {
     var confirmEnd by rememberSaveable { mutableStateOf(false) }
+    var updateImported by remember(ctx) { mutableStateOf(GameDatabaseUpdate.isImported(ctx)) }
+    var editingUpdate by remember { mutableStateOf(false) }
+    var updateError by rememberSaveable { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
+    val chooseUpdate = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null && !editingUpdate) {
+            editingUpdate = true
+            updateError = null
+            scope.launch {
+                try {
+                    withContext(Dispatchers.IO) { GameDatabaseUpdate.import(ctx, uri) }
+                } catch (_: java.io.IOException) {
+                    updateError = "Android could not read the saved update."
+                } catch (_: SecurityException) {
+                    updateError = "Android could not read the saved update."
+                } catch (_: IllegalStateException) {
+                    updateError = "Choose the verified eFootball data pack from the match test."
+                } finally {
+                    updateImported = GameDatabaseUpdate.isImported(ctx)
+                    editingUpdate = false
+                }
+            }
+        }
+    }
     val openGame = {
         val launch = ctx.packageManager.getLaunchIntentForPackage("jp.konami.pesam")
         if (launch == null || runCatching { ctx.startActivity(launch) }.isFailure) {
@@ -82,7 +112,38 @@ internal fun PlayPeerLinkContent(
             }
         }
         item(key = "room") {
-            MatchRoomCard(room, ctx, openGame, onExportLogs, onEnd = { confirmEnd = true })
+            MatchRoomCard(room, ctx, openGame, onExportLogs, onEnd = { confirmEnd = true },
+                canCreate = !editingUpdate)
+        }
+        if (com.peerlink.app.BuildConfig.DEBUG &&
+            (room == RoomState.Idle || room is RoomState.Failed || room is RoomState.FilesNeeded)) {
+            item(key = "game-data") {
+                Column(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(PL.elevated)
+                        .border(1.dp, PL.line, RoundedCornerShape(24.dp)).padding(18.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Text("eFootball data", color = PL.ink, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        when {
+                            editingUpdate -> "Checking the selected file…"
+                            updateImported -> "Verified update ready for the bot’s next room."
+                            else -> "Use a saved 11.1.1 data pack for the bot’s next match."
+                        },
+                        color = PL.inkSoft, fontSize = 13.sp, lineHeight = 18.sp,
+                    )
+                    updateError?.let { Text(it, color = PL.red, fontSize = 13.sp) }
+                    MatchSecondaryButton(if (updateImported) "Choose another file" else "Choose saved update",
+                        Icons.Rounded.FolderOpen, enabled = !editingUpdate) {
+                        chooseUpdate.launch(arrayOf("*/*"))
+                    }
+                    if (updateImported) TextButton(enabled = !editingUpdate, onClick = {
+                        runCatching { GameDatabaseUpdate.remove(ctx) }
+                            .onSuccess { updateImported = false; updateError = null }
+                            .onFailure { updateError = it.message }
+                    }) { Text("Use installed data", color = PL.inkSoft) }
+                }
+            }
         }
         if (room is RoomState.Ready && botSession) {
             item(key = "traffic") { BotTrafficCard(traffic) }
@@ -145,6 +206,7 @@ private fun MatchRoomCard(
     onOpenGame: () -> Unit,
     onExportLogs: () -> Unit,
     onEnd: () -> Unit,
+    canCreate: Boolean,
 ) {
     val shape = RoundedCornerShape(28.dp)
     Column(
@@ -181,7 +243,8 @@ private fun MatchRoomCard(
                     fontWeight = FontWeight.Bold, letterSpacing = (-0.7).sp)
                 Text("Create a room here, then join it from eFootball on this phone.",
                     color = PL.inkSoft, fontSize = 14.sp, lineHeight = 20.sp)
-                MatchPrimaryButton("Create room", Icons.Rounded.ArrowForward, Modifier.testTag("bot-create-room")) {
+                MatchPrimaryButton("Create room", Icons.Rounded.ArrowForward, Modifier.testTag("bot-create-room"),
+                    enabled = canCreate) {
                     PlayRoomController.createRoom()
                 }
                 Text("Uses your installed game · No extra game download", color = PL.goldSoft,
@@ -205,7 +268,8 @@ private fun MatchRoomCard(
                 if (room.note.isNotBlank()) {
                     Text(roomStatusText(room.note), color = PL.goldSoft, fontSize = 12.sp, lineHeight = 17.sp)
                 }
-                MatchPrimaryButton("Open eFootball", Icons.Rounded.NorthEast, Modifier.testTag("bot-open-game"), onOpenGame)
+                MatchPrimaryButton("Open eFootball", Icons.Rounded.NorthEast, Modifier.testTag("bot-open-game"),
+                    onClick = onOpenGame)
                 MatchSecondaryButton("Copy room number", Icons.Rounded.ContentCopy) {
                     PlayRoomController.copyNumber(ctx, room.number)
                     Toast.makeText(ctx, "Room number copied", Toast.LENGTH_SHORT).show()
@@ -218,7 +282,7 @@ private fun MatchRoomCard(
                 Text("Couldn't read game files", color = PL.ink, fontSize = 22.sp, fontWeight = FontWeight.Bold)
                 Text("${room.missingFiles} files were missing or unreadable. Check that eFootball is installed, then try again.",
                     color = PL.inkSoft, fontSize = 13.sp, lineHeight = 19.sp)
-                MatchPrimaryButton("Check again", Icons.Rounded.Refresh) {
+                MatchPrimaryButton("Check again", Icons.Rounded.Refresh, enabled = canCreate) {
                     PlayRoomController.createRoom(recordMemory = room.recordMemoryOnRetry)
                 }
                 MatchSecondaryButton("Export diagnostics", Icons.Rounded.Download, onClick = onExportLogs)
@@ -226,7 +290,7 @@ private fun MatchRoomCard(
             is RoomState.Failed -> {
                 Text("Couldn't open the room", color = PL.ink, fontSize = 22.sp, fontWeight = FontWeight.Bold)
                 Text(room.reason, color = PL.inkSoft, fontSize = 13.sp, lineHeight = 19.sp)
-                MatchPrimaryButton("Try again", Icons.Rounded.Refresh) {
+                MatchPrimaryButton("Try again", Icons.Rounded.Refresh, enabled = canCreate) {
                     PlayRoomController.createRoom(recordMemory = room.recordMemoryOnRetry)
                 }
                 MatchSecondaryButton("Export diagnostics", Icons.Rounded.Download, onClick = onExportLogs)
@@ -240,9 +304,13 @@ private fun MatchRoomCard(
         }
         if (com.peerlink.app.BuildConfig.DEBUG && (room == RoomState.Idle || room is RoomState.Failed)) {
             if (room is RoomState.Failed && room.recordMemoryOnRetry) {
-                MatchSecondaryButton("Create room without recording", Icons.Rounded.ArrowForward) { PlayRoomController.createRoom() }
+                MatchSecondaryButton("Create room without recording", Icons.Rounded.ArrowForward, enabled = canCreate) {
+                    PlayRoomController.createRoom()
+                }
             } else {
-                MatchSecondaryButton("Record memory and create room", Icons.Rounded.Memory) { PlayRoomController.createRoom(recordMemory = true) }
+                MatchSecondaryButton("Record memory and create room", Icons.Rounded.Memory, enabled = canCreate) {
+                    PlayRoomController.createRoom(recordMemory = true)
+                }
                 Text("Closes background apps before play and records match diagnostics.",
                     color = PL.inkSoft, fontSize = 11.5.sp, lineHeight = 17.sp)
             }
@@ -317,8 +385,9 @@ private fun MatchStep(number: String, title: String, detail: String) {
 }
 
 @Composable
-private fun MatchPrimaryButton(label: String, icon: ImageVector, modifier: Modifier = Modifier, onClick: () -> Unit) {
-    Button(onClick = onClick, modifier = modifier.fillMaxWidth().heightIn(min = 52.dp),
+private fun MatchPrimaryButton(label: String, icon: ImageVector, modifier: Modifier = Modifier,
+                               enabled: Boolean = true, onClick: () -> Unit) {
+    Button(onClick = onClick, enabled = enabled, modifier = modifier.fillMaxWidth().heightIn(min = 52.dp),
         shape = RoundedCornerShape(16.dp), colors = ButtonDefaults.buttonColors(containerColor = PL.gold, contentColor = PL.bg)) {
         Text(label, modifier = Modifier.weight(1f), fontSize = 14.sp, fontWeight = FontWeight.Bold)
         Icon(icon, null, modifier = Modifier.size(19.dp))
@@ -326,8 +395,8 @@ private fun MatchPrimaryButton(label: String, icon: ImageVector, modifier: Modif
 }
 
 @Composable
-private fun MatchSecondaryButton(label: String, icon: ImageVector, onClick: () -> Unit) {
-    OutlinedButton(onClick = onClick, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+private fun MatchSecondaryButton(label: String, icon: ImageVector, enabled: Boolean = true, onClick: () -> Unit) {
+    OutlinedButton(onClick = onClick, enabled = enabled, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
         shape = RoundedCornerShape(15.dp), border = androidx.compose.foundation.BorderStroke(1.dp, PL.lineSoft),
         colors = ButtonDefaults.outlinedButtonColors(contentColor = PL.ink)) {
         Icon(icon, null, modifier = Modifier.size(17.dp))

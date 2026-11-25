@@ -133,6 +133,7 @@ class BotEngineService : Service() {
                     result.putBoolean("ok", EngineRuntime.prepare(this, args.getLong("uid")))
                     result.putInt("pid", Process.myPid())
                     result.putBoolean("retryable", EngineRuntime.startupRetryable)
+                    result.putBoolean("savedDatabaseUpdate", EngineRuntime.usingSavedDatabaseUpdate)
                     diagnostic("ENGINE_FOREGROUND state=$foregroundStatus pid=${Process.myPid()}")
                     if (!result.getBoolean("ok")) result.putString("reason", lastStatus.ifBlank { "Bot simulation could not start" })
                     if (result.getBoolean("ok")) diagnostic(EngineRuntime.networkStartupDiagnostics())
@@ -146,6 +147,8 @@ class BotEngineService : Service() {
                         addresses[0], ports[0], addresses[1], ports[1], nat[0],
                         addresses[2], ports[2], addresses[3], ports[3], nat[1]))
                 }
+                EngineProtocol.VERIFY_SAVED_DATABASE ->
+                    result.putBoolean("ok", EngineRuntime.verifySavedDatabase())
                 EngineProtocol.SET_PEERS -> result.putBoolean("ok", EngineRuntime.setPeers(requireNotNull(args.getByteArray("record"))))
                 EngineProtocol.OPEN_SESSION -> result.putBoolean("ok", EngineRuntime.openSession(args.getLong("peer"), args.getLong("connectingStart")))
                 EngineProtocol.BEGIN_INTRODUCTION -> result.putBoolean("ok", EngineRuntime.beginIntroduction(args.getLong("peer"), args.getLong("connectingStart")))

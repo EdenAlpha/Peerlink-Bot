@@ -103,7 +103,7 @@ internal object GameResourcePacks {
             "source=${if (allowDownload) "verified_local_copies_or_selected_download" else "verified_local_copies"}")
     }
 
-    private fun bounded(input: InputStream, limit: Long) = object : FilterInputStream(input) {
+    internal fun bounded(input: InputStream, limit: Long) = object : FilterInputStream(input) {
         private var count = 0L
         override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
             check(!Thread.currentThread().isInterrupted) { "Match resource preparation cancelled" }

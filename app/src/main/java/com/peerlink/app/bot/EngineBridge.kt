@@ -204,7 +204,10 @@ object EngineBridge {
         val loaded = EngineHost.isReady
         log("engine status: staged=$stagedBytes bytes loaded=$loaded")
 
-        if (loaded) return true
+        if (loaded) {
+            if (EngineHost.usingSavedDatabaseUpdate == GameDatabaseUpdate.isImported(context)) return true
+            EngineHost.stop("saved_database_update_changed")
+        }
         val stagedFingerprint = stageVerifiedEngine(context)
         if (stagedFingerprint == null) {
             log("the engine is not staged -- a game connection cannot start")

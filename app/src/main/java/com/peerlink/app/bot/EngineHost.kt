@@ -16,6 +16,8 @@ object EngineHost {
         private set
     @Volatile internal var startupRetryable = true
         private set
+    @Volatile internal var usingSavedDatabaseUpdate = false
+        private set
     @Volatile private var ownerUid = 0L
     @Volatile private var service: Messenger? = null
     private var context: Context? = null
@@ -89,6 +91,7 @@ object EngineHost {
         }
         service = null
         isReady = false
+        usingSavedDatabaseUpdate = false
         PeerSlot.engineAttached = false
         lastError = "Bot engine stopped — start a new room"
         PeerBotService.status(lastError)
@@ -149,7 +152,8 @@ object EngineHost {
         } finally { pending.remove(id) }
     }
     fun prepare(owner: Context, uid: Long): Boolean = synchronized(preparation) {
-        if (isReady) return ownerUid == uid
+        val useSavedUpdate = GameDatabaseUpdate.isImported(owner)
+        if (isReady) return ownerUid == uid && usingSavedDatabaseUpdate == useSavedUpdate
         try {
             startupRetryable = true
             stopRequestedAt = 0
@@ -161,10 +165,13 @@ object EngineHost {
             AppState.appendLog("[BOT-DIAG] ENGINE_PROCESS pid=$enginePid " +
                 "foreground=${process.getString("foreground")} importance=${process.getInt("importance")}")
             val result = request(EngineProtocol.PREPARE, Bundle().apply { putLong("uid", uid) }, 300)
-            isReady = result.getBoolean("ok")
             startupRetryable = result.getBoolean("retryable", true)
+            usingSavedDatabaseUpdate = result.getBoolean("savedDatabaseUpdate")
+            isReady = result.getBoolean("ok") && usingSavedDatabaseUpdate == useSavedUpdate
             if (isReady) ownerUid = uid
-            else lastError = result.getString("reason") ?: "The bot simulation did not start"
+            else lastError = result.getString("reason") ?: if (result.getBoolean("ok"))
+                "The selected eFootball data changed. Start a new bot session."
+            else "The bot simulation did not start"
             isReady
         } catch (error: Exception) {
             releaseService()
@@ -198,6 +205,8 @@ object EngineHost {
         }).getBoolean("ok")
     internal fun configureTurn(input: ByteArray): Boolean = request(EngineProtocol.CONFIGURE_TURN,
         Bundle().apply { putByteArray("input", input) }).getBoolean("ok")
+    internal fun verifySavedDatabase(): Boolean =
+        request(EngineProtocol.VERIFY_SAVED_DATABASE).getBoolean("ok")
     internal fun turnRequest(): ByteArray = requireNotNull(
         request(EngineProtocol.TURN_REQUEST).getByteArray("request")) { "The engine's transport account parameters are unavailable" }
     internal fun turnAddress(): ByteArray? = request(EngineProtocol.TURN_ADDRESS).getByteArray("address")
@@ -235,6 +244,7 @@ object EngineHost {
         PeerSlot.logFlow("engine_host_stop")
         runCatching { request(EngineProtocol.STOP) }
         isReady = false
+        usingSavedDatabaseUpdate = false
         ownerUid = 0
         releaseService()
     }
@@ -264,6 +274,7 @@ internal object EngineProtocol {
     const val PROBE_PREVIEW = 21
     const val PROCESS_INFO = 22
     const val HEAP_RECORDING_PROBE = 23
+    const val VERIFY_SAVED_DATABASE = 24
     const val STATUS = 100
     const val NATIVE_STATE = 101
     const val DIAGNOSTIC = 102
