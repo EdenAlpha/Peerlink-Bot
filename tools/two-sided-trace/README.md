@@ -84,9 +84,10 @@ lab-only override of that diagnostic for further research. It does not modify
 the distributed APK and does not change the game simulation. The isolated
 source patch above is not yet proven on Android.
 
-The scene target observer now records both keepers' assigned roles, the
-movement controller's advance decision, and the position used by the match
-through the first 56 command frames of a played goal celebration. The runner
+The scene target observer records both keepers' assigned roles, the movement
+controller's advance decision, and the position used by the match. After a
+goal plays, it continues until another goal replaces the active goal record.
+The runner
 writes the same capture ID on both sides. Compare matching frames per capture
 with `python3 compare-keeper-handoff.py game.jsonl bot.jsonl`. The default scene
 is 197064. Use `--scene` to compare one of the other celebrations and `--capture`
@@ -96,3 +97,12 @@ when the files contain multiple paired runs.
 fixture data for a role difference, a controller hold, and a missing reading.
 This covers the diagnostic logic. Live capture on a paired Android lab is
 still pending.
+
+`frame-timeline-observer.js` adds a read-only per-observed-command-frame
+snapshot of all 22 player positions and ball position/velocity in both
+engines. It uses the same player-update boundary on both sides, records gaps
+and rewinds, and never invents a missing frame. Availability, overhead, and
+the comparability of the boundary must still be verified in a live match;
+this is not a complete dump of every internal game variable. Its two-sided
+runner flushes events continuously, reconnects after engine restarts, and
+tags each side with the same capture ID.

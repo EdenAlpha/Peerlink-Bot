@@ -12,8 +12,8 @@ if (Process.arch !== 'arm64' || [...entryWords].some(([offset, word]) => at(offs
 }
 let activeScene = null;
 const evaluating = new Map();
-// The first two checks after play occur within 54 command frames.
-const framesAfterPlay = 56;
+// Keep recording the last played goal's keeper decisions until another goal
+// replaces it. The role and gate record is not limited to a short window.
 
 function currentFrame(){
  try {const s=at(0x9a6a020).readPointer();if(s.isNull()||!s.readPointer().equals(at(0x98ae9e0)))return 0;
@@ -152,8 +152,9 @@ function trackPosition(controller) {
 function observedKeeper(object, frame) {
  const scene = activeScene;
  if (!scene || frame < scene.frame) return null;
- const latest = scene.playFrame === null ? scene.frame + 12 : scene.playFrame + framesAfterPlay;
- if (frame > latest) {
+ // A prepared scene that never plays must not be treated as an active goal.
+ if (scene.playFrame === null && frame > scene.frame + 12) {
+  send({type: 'keeper_scene_play_missing', sceneId: scene.sceneId, preparedAt: scene.frame, frame});
   activeScene = null;
   return null;
  }

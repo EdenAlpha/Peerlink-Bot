@@ -112,10 +112,11 @@ function fixture({advance, assignKeeper = true, gateReached = true, supported = 
  assert(events.some(event => event.type === 'scene_target')); // Keep the original event.
  assert(events.some(event => event.type === 'keeper_scene_play'));
  const updates = events.filter(event => event.type === 'keeper_evaluate');
- assert.equal(updates.length, 1);
+ assert.equal(updates.length, 2);
  assert.equal(updates[0].updateMode.mode, assignKeeper ? 0 : 3);
  assert.equal(updates[0].gate?.advanced ?? null, gateReached ? advance : null);
  assert.deepEqual(updates[0].sourceAfter, [advance && gateReached ? 0xc23e8000 : 0, 0, 0]);
+ assert.equal(updates[1].frame, 3900); // still recording after the old 56-frame limit
  assert(!events.some(event => event.type.endsWith('_error')));
  return events.map(event => ({...event, captureId: 'paired-fixture'}));
 }
