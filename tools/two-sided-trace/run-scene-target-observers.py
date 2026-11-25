@@ -1,56 +1,120 @@
-"""Record scene setup and goalkeeper motion from the two disposable lab engines."""
-import datetime
+"""Continuously record keeper decisions from both disposable lab engines."""
+
+from datetime import datetime, timezone
 import json
+import os
 from pathlib import Path
 import subprocess
 import threading
-import time
 from uuid import uuid4
+
 import frida
 
-root=Path('/tmp/peerlink-scene-target')
-root.mkdir(mode=0o700,parents=True,exist_ok=True)
-source=(root/'scene-target-observer.js').read_text()
-device=frida.get_device_manager().add_remote_device('127.0.0.1:27042')
-sessions=[]
-outputs=[]
-ready=[]
-done=threading.Event()
-capture_id = uuid4().hex
-for label, package in [('game','jp.konami.pesam'),('bot','com.peerlink.app:botengine')]:
-    pid=int(subprocess.check_output(['adb','-s','127.0.0.1:15556','shell','pidof','-s',package],text=True).strip())
-    out=(root/(label+'.jsonl')).open('a',buffering=1)
-    session=device.attach(pid)
-    script=session.create_script(source)
-    def message_handler(label, out):
-        def on_message(message, data):
-            event=message.get('payload') if message.get('type')=='send' else {'type':'script_error','description':message.get('description','')}
-            if not isinstance(event,dict): event={'type':'invalid_event'}
-            event['captureId'] = capture_id
-            event['recordedAt']=datetime.datetime.now(datetime.timezone.utc).isoformat()
-            out.write(json.dumps(event,separators=(',',':'),allow_nan=False)+'\n')
-            out.flush()
-            if event.get('type')=='scene_target_observer_ready': ready.append(label)
-        return on_message
-    def detached_handler(out):
-        def on_detached(reason, crash):
-            out.write(json.dumps({'type':'detached','reason':str(reason)})+'\n')
-            out.flush()
-        return on_detached
-    session.on('detached',detached_handler(out))
-    script.on('message',message_handler(label,out))
-    script.load()
-    sessions.append((session,script))
-    outputs.append(out)
-    print(label+' observer attached',flush=True)
-deadline=time.monotonic()+5
-while sorted(ready)!=['bot','game'] and time.monotonic()<deadline:
-    time.sleep(0.05)
-if sorted(ready)!=['bot','game']:
-    raise SystemExit('Both keeper observers did not report ready')
-print('Both scene observers ready. Capture '+capture_id,flush=True)
-done.wait(1800)
-for session,_ in sessions:
-    try: session.detach()
-    except Exception: pass
-for out in outputs: out.close()
+
+ROOT = Path('/tmp/peerlink-scene-target')
+ADB_DEVICE = '127.0.0.1:15556'
+FRIDA_DEVICE = '127.0.0.1:27042'
+PACKAGES = [('game', 'jp.konami.pesam'), ('bot', 'com.peerlink.app:botengine')]
+CAPTURE_ID = uuid4().hex
+STOP = threading.Event()
+
+
+def process_id(package):
+    try:
+        result = subprocess.run(
+            ['adb', '-s', ADB_DEVICE, 'shell', 'pidof', '-s', package],
+            check=True, capture_output=True, text=True, timeout=5,
+        )
+        return int(result.stdout.strip())
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+
+
+def observe(label, package, source):
+    path = ROOT / (label + '.jsonl')
+    with path.open('a', buffering=1) as output:
+        lock = threading.Lock()
+
+        def record(event):
+            if not isinstance(event, dict):
+                event = {'type': 'invalid_event'}
+            event['captureId'] = CAPTURE_ID
+            event['recordedAt'] = datetime.now(timezone.utc).isoformat()
+            with lock:
+                output.write(json.dumps(event, separators=(',', ':'), allow_nan=False) + '\n')
+                output.flush()
+
+        last_pid = None
+        while not STOP.is_set():
+            pid = process_id(package)
+            if pid is None:
+                if last_pid is not None:
+                    record({'type': 'process_wait'})
+                    last_pid = None
+                STOP.wait(3)
+                continue
+            if pid != last_pid:
+                record({'type': 'process_found', 'pid': pid})
+                last_pid = pid
+
+            session = None
+            attached = threading.Event()
+            detached = threading.Event()
+
+            def on_message(message, data, attached=attached):
+                if message.get('type') == 'send':
+                    event = message.get('payload')
+                    if isinstance(event, dict) and event.get('type') == 'scene_target_observer_ready':
+                        attached.set()
+                else:
+                    event = {'type': 'script_error', 'description': message.get('description', '')}
+                record(event)
+
+            def on_detached(reason, crash, detached=detached):
+                record({'type': 'detached', 'reason': str(reason)})
+                detached.set()
+
+            try:
+                device = frida.get_device_manager().add_remote_device(FRIDA_DEVICE)
+                session = device.attach(pid)
+                session.on('detached', on_detached)
+                script = session.create_script(source)
+                script.on('message', on_message)
+                script.load()
+                if attached.wait(5):
+                    print(f'{label} recorder attached to process {pid}', flush=True)
+                    while not STOP.is_set() and not detached.wait(2):
+                        pass
+                else:
+                    record({'type': 'observer_not_ready', 'pid': pid})
+            except Exception as error:
+                record({'type': 'attach_error', 'class': type(error).__name__})
+            finally:
+                if session is not None:
+                    try:
+                        session.detach()
+                    except Exception:
+                        pass
+            STOP.wait(3)
+
+
+def main():
+    os.umask(0o077)
+    ROOT.mkdir(mode=0o700, parents=True, exist_ok=True)
+    source = (ROOT / 'scene-target-observer.js').read_text()
+    print('Keeper capture ' + CAPTURE_ID, flush=True)
+    threads = [threading.Thread(target=observe, args=(label, package, source), daemon=True)
+               for label, package in PACKAGES]
+    for thread in threads:
+        thread.start()
+    try:
+        for thread in threads:
+            thread.join()
+    except KeyboardInterrupt:
+        STOP.set()
+        for thread in threads:
+            thread.join(timeout=10)
+
+
+if __name__ == '__main__':
+    main()
