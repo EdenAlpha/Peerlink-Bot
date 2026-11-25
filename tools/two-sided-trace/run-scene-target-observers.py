@@ -19,6 +19,25 @@ CAPTURE_ID = uuid4().hex
 STOP = threading.Event()
 
 
+def make_callbacks(attached, detached, record):
+    # Frida inspects callback arity and supplies user_data to three-argument
+    # callbacks. Capture the events in a factory, never as default arguments.
+    def on_message(message, data):
+        if message.get('type') == 'send':
+            event = message.get('payload')
+            if isinstance(event, dict) and event.get('type') == 'scene_target_observer_ready':
+                attached.set()
+        else:
+            event = {'type': 'script_error', 'description': message.get('description', '')}
+        record(event)
+
+    def on_detached(reason, crash):
+        record({'type': 'detached', 'reason': str(reason)})
+        detached.set()
+
+    return on_message, on_detached
+
+
 def process_id(package):
     try:
         result = subprocess.run(
@@ -61,18 +80,7 @@ def observe(label, package, source):
             attached = threading.Event()
             detached = threading.Event()
 
-            def on_message(message, data, attached=attached):
-                if message.get('type') == 'send':
-                    event = message.get('payload')
-                    if isinstance(event, dict) and event.get('type') == 'scene_target_observer_ready':
-                        attached.set()
-                else:
-                    event = {'type': 'script_error', 'description': message.get('description', '')}
-                record(event)
-
-            def on_detached(reason, crash, detached=detached):
-                record({'type': 'detached', 'reason': str(reason)})
-                detached.set()
+            on_message, on_detached = make_callbacks(attached, detached, record)
 
             try:
                 device = frida.get_device_manager().add_remote_device(FRIDA_DEVICE)
