@@ -9,7 +9,7 @@ import threading
 import time
 
 TRACE = Path('/tmp/peerlink-scene-target/game.jsonl')
-OUT = Path('/tmp/peerlink-goal-screens')
+OUT = Path(os.environ.get('PEERLINK_GOAL_SCREENS', '/tmp/peerlink-goal-screens'))
 DEVICE = '127.0.0.1:15556'
 
 

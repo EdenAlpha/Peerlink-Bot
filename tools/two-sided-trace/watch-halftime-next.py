@@ -14,7 +14,7 @@ TEMPLATES = json.loads(Path('/tmp/peerlink-quickmatch-templates.json').read_text
 CLOCK = set(json.loads(Path('/tmp/peerlink-halftime-clock-template.json').read_text()))
 STATS = set(json.loads(Path('/tmp/peerlink-halftime-stats-template.json').read_text()))
 NEXT = set(TEMPLATES['next'])
-OUT = Path('/tmp/peerlink-halftime-watcher')
+OUT = Path(os.environ.get('PEERLINK_HALFTIME_SCREENS', '/tmp/peerlink-halftime-watcher'))
 
 
 def mask(image, box, predicate):
