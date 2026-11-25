@@ -12,6 +12,7 @@ DEVICE = '127.0.0.1:15556'
 TRACE = Path('/tmp/peerlink-observer/fullgame-state.jsonl')
 TEMPLATES = json.loads(Path('/tmp/peerlink-quickmatch-templates.json').read_text())
 CLOCK = set(json.loads(Path('/tmp/peerlink-halftime-clock-template.json').read_text()))
+STATS = set(json.loads(Path('/tmp/peerlink-halftime-stats-template.json').read_text()))
 NEXT = set(TEMPLATES['next'])
 OUT = Path('/tmp/peerlink-halftime-watcher')
 
@@ -29,8 +30,9 @@ def halftime_next(image):
     if image.size != (640, 360):
         return False
     clock = mask(image, (295, 12, 345, 32), lambda r, g, b: r > 180 and g > 180 and b < 100)
+    stats = mask(image, (291, 84, 349, 99), lambda r, g, b: r < 110 and g < 110 and b < 110)
     button = mask(image, (536, 325, 615, 354), lambda r, g, b: r > 200 and g > 200 and b > 200)
-    return similarity(clock, CLOCK) >= 0.8 and similarity(button, NEXT) >= 0.8
+    return (similarity(clock, CLOCK) >= 0.8 or similarity(stats, STATS) >= 0.8) and similarity(button, NEXT) >= 0.8
 
 
 def main():
@@ -65,7 +67,7 @@ def main():
                 image = Image.open(io.BytesIO(data))
                 if halftime_next(image):
                     (OUT / f'halftime-before-{presses + 1}.png').write_bytes(data)
-                    print('Confirmed 45:00 halftime screen and Next button; advancing.', flush=True)
+                    print('Confirmed a halftime screen and Next button; advancing.', flush=True)
                     subprocess.run(['adb', '-s', DEVICE, 'shell', 'input', 'swipe',
                                     '555', '339', '555', '339', '700'], check=True, timeout=8)
                     presses += 1
