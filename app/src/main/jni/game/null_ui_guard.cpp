@@ -67,6 +67,52 @@ bool set_code(Address offset, const uint8_t *bytes, size_t length) {
 bool set_factory(uint32_t instruction) {
     return set_code(kFactoryCall, reinterpret_cast<const uint8_t *>(&instruction), sizeof(instruction));
 }
+
+// The two manager outfit paths compare the current body mesh's name, recolor
+// its material, then call the same mesh updater. The no-pack host can have a
+// manager actor with no body mesh. Resume at the following actor update in
+// that case, including the original cleanup of the temporary strings.
+struct OutfitLookup {
+    Address start;
+    uint32_t original[6];
+    uint32_t checked[5];
+};
+constexpr OutfitLookup kManagerOutfits[] = {
+    {0x39d2520,
+     {0xf94c8268, 0x9100a3e0, 0x910283e1, 0xf9400d08, 0xf90017e8, 0x94290d65},
+     {0xf94c8260, 0xb4000720, 0xf8418c08, 0x910283e1, 0xf90017e8}},
+    {0x39d1f34,
+     {0xf94c8268, 0x910283e0, 0x9100a3e1, 0xf9400d08, 0xf90053e8, 0x94290ee0},
+     {0xf94c8260, 0xb4000720, 0xf8418c08, 0x9100a3e1, 0xf90053e8}},
+};
+
+bool install_manager_outfit_guards() {
+    constexpr uint32_t resume_actor[] = {0xf9400268, 0xaa1303e0};
+    for (const auto &site : kManagerOutfits) {
+        if (memcmp(reinterpret_cast<const void *>(engine + site.start), site.original, sizeof(site.original)) ||
+            memcmp(reinterpret_cast<const void *>(engine + site.start + 0xe8), resume_actor, sizeof(resume_actor))) {
+            record_error("operation=manager_outfit_verify result=unexpected_instructions");
+            return false;
+        }
+    }
+    // ldr x0,[actor,#body]; cbz x0,resume_actor; ldr x8,[x0,#name]!
+    // The remaining two instructions select the original FString output and
+    // save the same FName in its stack slot. The original ToString call takes
+    // a const FName reference and only reads this field on the GameThread.
+    size_t installed_count = 0;
+    for (const auto &site : kManagerOutfits) {
+        if (!set_code(site.start, reinterpret_cast<const uint8_t *>(site.checked), sizeof(site.checked))) {
+            while (installed_count) {
+                const auto &previous = kManagerOutfits[--installed_count];
+                set_code(previous.start, reinterpret_cast<const uint8_t *>(previous.original), sizeof(previous.checked));
+            }
+            return false;
+        }
+        ++installed_count;
+    }
+    return true;
+}
+
 bool install_graphics_guards() {
     static constexpr uint8_t factory_original[] = {
         0xfd,0x7b,0xbe,0xa9,0xf3,0x0b,0x00,0xf9,0xfd,0x03,0x00,0x91,0x00,0x2c,0x80,0x52
@@ -155,7 +201,10 @@ bool install_graphics_guards() {
             // This uses only the factory's unused 12-byte epilogue: the
             // next function at 4965a6c remains untouched.
             if (set_code(0x4965a60, texture_bind_cave, sizeof(texture_bind_cave))) {
-                if (set_code(0x5f46d78, texture_bind_branch, sizeof(texture_bind_branch))) return true;
+                if (set_code(0x5f46d78, texture_bind_branch, sizeof(texture_bind_branch))) {
+                    if (!skip_missing_mesh_wait || install_manager_outfit_guards()) return true;
+                    set_code(0x5f46d78, texture_bind_original, sizeof(texture_bind_original));
+                }
                 set_code(0x4965a60, texture_bind_cave_original, sizeof(texture_bind_cave_original));
             }
             if (skip_missing_mesh_wait) set_code(0x39d06f4, mesh_wait_original, sizeof(mesh_wait_original));

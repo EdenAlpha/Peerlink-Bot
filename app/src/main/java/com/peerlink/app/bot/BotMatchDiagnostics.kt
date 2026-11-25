@@ -6,14 +6,19 @@ import com.peerlink.app.core.PrimeGameplayTracker
 import java.io.File
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
+import java.util.concurrent.atomic.AtomicBoolean
 
 internal object BotMatchDiagnostics {
     private const val DIRECTORY = "bot-scheduler"
     private const val TRACE_LIMIT_BYTES = 48L * 1024 * 1024
     private val validId = Regex("[0-9]{13}-[a-f0-9]{12}")
 
-    private data class Recording(val id: String, val pid: Int)
+    private class Recording(val id: String, val pid: Int) {
+        val ending = AtomicBoolean(false)
+        var waitingForHeap = false
+    }
     @Volatile private var active: Recording? = null
+    private var lastHeapRelease: Pair<String, Int>? = null
 
     private fun directory(ctx: Context) = File(ctx.filesDir, DIRECTORY)
     private fun key(id: String) = "peerlink-scheduler-$id"
@@ -49,23 +54,46 @@ internal object BotMatchDiagnostics {
 
     @Synchronized fun startScheduler(ctx: Context, id: String, pid: Int): Boolean {
         require(validId.matches(id))
+        if (pid <= 0) return false
         return runCatching {
             val dir = directory(ctx)
             check(dir.isDirectory || dir.mkdirs()) { "Could not open the scheduler recording folder" }
+            val marker = File(dir, "$id.pending")
+            check(marker.createNewFile()) { "Scheduler recording already exists" }
+            val recording = Recording(id, pid)
+            active = recording
             check(BotPerfetto.shell("perfetto --query | grep -q 'linux.ftrace'").ok) {
                 "Android scheduler tracing is unavailable"
             }
+            attemptStart(ctx, recording)
+        }.getOrElse {
+            record(ctx, id, "Scheduler recording failed: ${it.message ?: it.javaClass.simpleName}")
+            false
+        }
+    }
+
+    private fun attemptStart(ctx: Context, recording: Recording): Boolean {
+        val id = recording.id
+        return runCatching {
+            check(!recording.ending.get() && EngineHost.isReady && EngineHost.enginePid == recording.pid) {
+                "The bot ended before the scheduler recording could start"
+            }
             val config = ctx.assets.open("bot-scheduler.pbtxt").bufferedReader().use { it.readText() } +
                 "\nunique_session_name: \"${key(id)}\"\n"
-            val marker = File(dir, "$id.pending")
-            check(marker.createNewFile()) { "Scheduler recording already exists" }
             val started = BotPerfetto.start(key(id), config)
-            check(started.ok) { "Perfetto start exit=${started.exitCode} ${started.output.take(350)}" }
-            check(BotPerfetto.shell("perfetto --is_detached=${key(id)} >/dev/null").ok) {
-                "Perfetto did not confirm the scheduler session"
+            if (!started.ok && lastHeapRelease != (id to recording.pid) &&
+                started.output.contains("too many concurrent tracing", ignoreCase = true)) {
+                // Android rejected this session. The user-requested heap profile
+                // owns a slot until the pitch loads. Its stop callback retries once.
+                recording.waitingForHeap = true
+                record(ctx, id, "Scheduler recording waiting for the bot memory recording to finish")
+            } else {
+                check(started.ok) { "Perfetto start exit=${started.exitCode} ${started.output.take(350)}" }
+                check(BotPerfetto.shell("perfetto --is_detached=${key(id)} >/dev/null").ok) {
+                    "Perfetto did not confirm the scheduler session"
+                }
+                record(ctx, id, "Scheduler recording started pid=${recording.pid}")
             }
-            active = Recording(id, pid)
-            record(ctx, id, "Scheduler recording started pid=$pid")
             true
         }.getOrElse {
             record(ctx, id, "Scheduler recording failed: ${it.message ?: it.javaClass.simpleName}")
@@ -73,8 +101,19 @@ internal object BotMatchDiagnostics {
         }
     }
 
+    // Called on the heap export worker after Perfetto confirms the stop.
+    @Synchronized fun heapStoppedAtPitch(ctx: Context, id: String, pid: Int) {
+        lastHeapRelease = id to pid
+        val recording = active ?: return
+        if (recording.id != id || recording.pid != pid || !recording.waitingForHeap ||
+            recording.ending.get() || !EngineHost.isReady || EngineHost.enginePid != pid) return
+        recording.waitingForHeap = false
+        attemptStart(ctx, recording)
+    }
+
     fun completed(ctx: Context, pid: Int, reason: String) {
         val recording = active?.takeIf { pid > 0 && it.pid == pid } ?: return
+        if (!recording.ending.compareAndSet(false, true)) return
         Thread({ runCatching { finish(ctx, recording.id, reason) } }, "bot-scheduler-save").start()
     }
 

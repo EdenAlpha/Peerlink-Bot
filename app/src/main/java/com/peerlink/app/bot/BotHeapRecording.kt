@@ -163,6 +163,10 @@ internal object BotHeapRecording {
         if (!marker.exists()) return true
         if (activeId == id) { recordingPid.set(0); activeId = null }
         if (!BotPerfetto.stop(key(id))) return false
+        if (reason == "pitch_loaded") {
+            val pid = marker.readText().trim().toIntOrNull()
+            if (pid != null) BotMatchDiagnostics.heapStoppedAtPitch(ctx, id, pid)
+        }
         val part = File(dir, "$id.part")
         try {
             if (copyPrefix(ctx, id, part)) {
@@ -176,7 +180,9 @@ internal object BotHeapRecording {
             if (!BotPerfetto.shell("rm -f ${remote(id)}").ok) return false
             marker.delete()
             return !marker.exists()
-        } finally { part.delete() }
+        } finally {
+            part.delete()
+        }
     }
 
     data class Export(val files: List<File>, val pending: Boolean, val starting: Boolean = false)

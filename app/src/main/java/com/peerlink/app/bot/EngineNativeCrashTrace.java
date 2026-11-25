@@ -29,10 +29,21 @@ public final class EngineNativeCrashTrace {
             if (root.field == 6 && root.wire == 0) tid = root.value;
             if (root.field == 10 && root.wire == 2) {
                 ProtoFields signal = root.message();
+                boolean hasFaultAddress = false;
+                long faultAddress = 0;
                 while (signal.next()) {
                     if (signal.field == 1 && signal.wire == 0) result.append("signalNumber=").append(signal.value).append(' ');
                     if ((signal.field == 2 || signal.field == 4) && signal.wire == 2)
                         result.append(signal.field == 2 ? "signal=" : "signalCode=").append(signal.text()).append(' ');
+                    if (signal.field == 8 && signal.wire == 0) hasFaultAddress = signal.value != 0;
+                    if (signal.field == 9 && signal.wire == 0) faultAddress = signal.value;
+                }
+                if (!hasFaultAddress) {
+                    result.append("faultNearNull=unavailable");
+                } else if (faultAddress >= 0 && faultAddress < 4096) {
+                    result.append("faultNearNull=true lowOffset=").append(faultAddress);
+                } else {
+                    result.append("faultNearNull=false");
                 }
                 result.append('\n');
             }
