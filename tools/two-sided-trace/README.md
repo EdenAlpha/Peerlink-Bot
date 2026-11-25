@@ -51,6 +51,16 @@ mesh data was observed on the bot in both passing tests; it is therefore not
 by itself proof of the failure's cause. The recorded actors are not yet mapped
 one-to-one to the target goalkeeper.
 
+A subsequent match reproduced a mismatch during a free kick. The observed
+22-player position snapshots matched through frame 7385 and only the bot-side
+goalkeeper differed from frame 7386. The checks first disagreed at frame 7398,
+and a stop request followed a second disagreement. During a 12-second window
+around the split, the packet capture showed 328 distinct packets in each
+direction at both local forwarding points, within 24 ms of one another. This
+does not prove socket delivery or explain why the keeper moved differently.
+The detailed keeper decision probe was attached after that failure, so these
+records do not identify which earlier controller decision caused the split.
+
 `keeper-observer.js` and `run-keeper-observers.py` are experimental read-only
 Frida probes that break the goalkeeper's checksum into individual terms on
 both engines. `test-keeper-observer.js` checks the observer's filters and
@@ -89,11 +99,16 @@ controller's advance decision, and the position used by the match. After a
 verified scene plays, it continues until another verified scene replaces it.
 This includes restart scenes, not only celebrations. The 11.1.1 scene
 preparation call occurs in state 5; the later playback call uses state 8.
+The two keeper movement decisions and raw checksum words are also sampled on
+observed command frames without requiring a scene to have been detected. The
+two words' meanings are not yet established. These additional continuous
+readings need an overhead measurement on the target Android device.
 The runner
 writes the same capture ID on both sides. Compare matching frames per capture
 with `python3 compare-keeper-handoff.py game.jsonl bot.jsonl`. The default scene
 is 197064. Use `--scene` to compare one of the other celebrations and `--capture`
 when the files contain multiple paired runs.
+Use `--scene all` to include samples outside a detected scene.
 
 `node test-scene-target-observer.js` exercises the recorder and comparison with
 fixture data for a role difference, a controller hold, and a missing reading.

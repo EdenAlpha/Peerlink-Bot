@@ -10,7 +10,8 @@ const vm = require('node:vm');
 const source = fs.readFileSync(path.join(__dirname, 'scene-target-observer.js'), 'utf8');
 const base = 0x100000000;
 
-function fixture({advance, assignKeeper = true, gateReached = true, supported = true, hostWrapper = false, sceneId = 197064}) {
+function fixture({advance, assignKeeper = true, gateReached = true, supported = true, hostWrapper = false,
+ sceneId = 197064, preSceneWord = 1233}) {
  const words = new Map();
  const hooks = new Map();
  const events = [];
@@ -25,6 +26,7 @@ function fixture({advance, assignKeeper = true, gateReached = true, supported = 
   readU32() { return (words.get(this.value) ?? 0) >>> 0; }
   readS32() { return this.readU32() | 0; }
   readU8() { return this.readU32() & 255; }
+  readU16() { return this.readU32() & 65535; }
   readPointer() { return new Pointer(words.get(this.value) ?? 0); }
  }
  const p = value => new Pointer(value);
@@ -70,6 +72,8 @@ function fixture({advance, assignKeeper = true, gateReached = true, supported = 
  put(keeper + 0x798, 1);
  put(keeper + 0x7a8, controller);
  put(controller + 0xa88, track);
+ put(controller + 0xae8, preSceneWord);
+ put(controller + 0xaea, 79);
  put(track + 0x198, pose);
 
  function invoke(offset, caller, args, body = () => {}) {
@@ -79,6 +83,13 @@ function fixture({advance, assignKeeper = true, gateReached = true, supported = 
   body();
   hooksForRoutine.onLeave.call(state);
  }
+ // Keeper data must also be available before a scene has been detected.
+ frame(3800);
+ invoke(0x725b0d0, 0, [keeper]);
+ const beforeScene = events.find(event => event.type === 'keeper_evaluate' && event.frame === 3800);
+ assert.equal(beforeScene.sceneId, null);
+ assert.equal(beforeScene.controllerWordsBefore.wordAE8, preSceneWord);
+ assert.equal(beforeScene.controllerWordsAfter.wordAEA, 79);
  frame(3837);
  put(sceneTransition + 0xc, 3);
  put(scene + 4, 8);
@@ -109,6 +120,15 @@ function fixture({advance, assignKeeper = true, gateReached = true, supported = 
  invoke(0x725b134, 0, [keeper], () => put(keeper + 0x5dc, words.get(pose + 0x40) ?? 0));
  frame(3900);
  invoke(0x725b0d0, 0, [keeper]);
+ // A scene that was prepared but never played must expire without disabling
+ // the independent keeper trace.
+ frame(3901);
+ put(scene + 4, 5);
+ invoke(0x6fe89b8, 0x6fe85e8, [scene, context, sceneTransition]);
+ frame(3914);
+ invoke(0x725b0d0, 0, [keeper]);
+ assert(events.some(event => event.type === 'keeper_scene_play_missing' && event.frame === 3914));
+ assert(events.some(event => event.type === 'keeper_evaluate' && event.frame === 3914 && event.sceneId === null));
 
  const prepared = events.find(event => event.type === 'keeper_scene_prepare');
  assert.equal(prepared.availableRoles, 3);
@@ -116,7 +136,7 @@ function fixture({advance, assignKeeper = true, gateReached = true, supported = 
  assert.equal(prepared.after[1].player, 12);
  assert(events.some(event => event.type === 'scene_target')); // Keep the original event.
  assert(events.some(event => event.type === 'keeper_scene_play'));
- const updates = events.filter(event => event.type === 'keeper_evaluate');
+ const updates = events.filter(event => event.type === 'keeper_evaluate' && event.sceneId === sceneId);
  assert.equal(updates.length, 2);
  assert.equal(updates[0].updateMode.mode, assignKeeper ? 0 : 3);
  assert.equal(updates[0].gate?.advanced ?? null, gateReached ? advance : null);
@@ -131,11 +151,12 @@ const fixtureDir = fs.mkdtempSync(path.join(os.tmpdir(), 'peerlink-keeper-test-'
 try {
  const game = path.join(fixtureDir, 'game.jsonl');
  const bot = path.join(fixtureDir, 'bot.jsonl');
- function compare(stockRecords, botRecords) {
+ function compare(stockRecords, botRecords, scene = '197064') {
   for (const [file, records] of [[game, stockRecords], [bot, botRecords]]) {
    fs.writeFileSync(file, records.map(record => JSON.stringify(record)).join('\n') + '\n');
   }
-  return execFileSync('python3', [path.join(__dirname, 'compare-keeper-handoff.py'), game, bot], {encoding: 'utf8'});
+  return execFileSync('python3', [path.join(__dirname, 'compare-keeper-handoff.py'), game, bot,
+   '--scene', scene], {encoding: 'utf8'});
  }
  const held = fixture({advance: false});
  fixture({advance: false, hostWrapper: true});
@@ -150,6 +171,8 @@ try {
  const missing = compare(fixture({advance: false, gateReached: false}), held);
  assert.match(missing, /Gate decision reached in 0 game rows and 1 bot rows/);
  assert.match(compare(held, held), /Position copied into the match[^\n]*\n  Paired readings agree/);
+ const noSceneDifference = compare(fixture({advance: false, preSceneWord: 1234}), held, 'all');
+ assert.match(noSceneDifference, /Motion controller raw words[^\n]*\n  First difference at frame 3800/);
 } finally {
  fs.rmSync(fixtureDir, {recursive: true, force: true});
 }

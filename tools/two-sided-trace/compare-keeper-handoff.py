@@ -9,6 +9,7 @@ STAGES = (
     ('keeper_scene_prepare', 'Scene preparation', ('rolesLoaded', 'loadedRoles', 'availableRoles', 'before', 'after')),
     ('keeper_scene_play', 'Assigned movement', ('preparedAt', 'assignments')),
     ('keeper_evaluate', 'Motion controller decision', ('player', 'active', 'updateMode', 'gate')),
+    ('keeper_evaluate', 'Motion controller raw words', ('controllerWordsBefore', 'controllerWordsAfter')),
     ('keeper_evaluate', 'Motion controller position', ('sourceBefore', 'sourceAfter')),
     ('keeper_position', 'Position copied into the match', ('player', 'positionBefore', 'sourceBefore', 'positionAfter')),
 )
@@ -20,7 +21,7 @@ def read_runs(path, scene_id):
     with open(path, encoding='utf-8') as lines:
         for line in lines:
             event = json.loads(line)
-            if event.get('sceneId') != scene_id or event.get('type') not in observed_types:
+            if (scene_id is not None and event.get('sceneId') != scene_id) or event.get('type') not in observed_types:
                 continue
             capture = event.pop('captureId', None)
             if capture is None:
@@ -73,11 +74,15 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('game_jsonl')
     parser.add_argument('bot_jsonl')
-    parser.add_argument('--scene', type=int, default=197064)
+    parser.add_argument('--scene', default='197064', help="Scene number, or 'all' to include non-scene frames")
     parser.add_argument('--capture')
     args = parser.parse_args()
-    game = read_runs(args.game_jsonl, args.scene)
-    bot = read_runs(args.bot_jsonl, args.scene)
+    try:
+        scene = None if args.scene == 'all' else int(args.scene)
+    except ValueError:
+        parser.error('--scene must be a scene number or all')
+    game = read_runs(args.game_jsonl, scene)
+    bot = read_runs(args.bot_jsonl, scene)
     common = sorted(game.keys() & bot.keys())
     if args.capture is None and len(common) == 1:
         args.capture = common[0]

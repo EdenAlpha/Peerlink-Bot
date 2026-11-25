@@ -185,34 +185,50 @@ function trackPosition(controller) {
  return pose.isNull() ? null : positionBits(pose.add(0x40));
 }
 
+// These are raw words used by the game's checksum. Their meanings are not
+// established, so retain their offsets rather than guessing what they mean.
+function controllerWords(controller) {
+ return controller.isNull() ? null : {
+  wordAE8: controller.add(0xae8).readU16(),
+  wordAEA: controller.add(0xaea).readU16(),
+ };
+}
+
+let keeperCacheFrame = null, keeperCache = [];
 function observedKeeper(object, frame) {
- const scene = activeScene;
- if (!scene || frame < scene.frame) return null;
- // A prepared scene that never plays must not be treated as an active goal.
- if (scene.playFrame === null && frame > scene.frame + 12) {
+ if (!frame || object.isNull()) return null;
+ let scene = activeScene;
+ // A prepared scene that never plays must not be treated as active, but it
+ // must not prevent the keeper trace from recording subsequent frames.
+ if (scene && scene.playFrame === null && frame > scene.frame + 12) {
   send({type: 'keeper_scene_play_missing', sceneId: scene.sceneId, preparedAt: scene.frame, frame});
   activeScene = null;
-  return null;
+  scene = null;
  }
- if (object.isNull()) return null;
  const player = object.add(0x18).readU32();
- const role = scene.slots.find(slot => slot.player === player);
- if (!role || !object.equals(at(0xa5909a0 + 0x170 + player * 8).readPointer())) return null;
- return {sceneId: scene.sceneId, frame, side: role.side, player};
+ if (player >= 22 || !object.equals(at(0xa5909a0 + 0x170 + player * 8).readPointer())) return null;
+ // Cache at most once per command frame; the hook runs for all 22 players.
+ if (frame !== keeperCacheFrame) {
+  keeperCacheFrame = frame;
+  keeperCache = keeperSlots();
+ }
+ const role = keeperCache.find(slot => slot.player === player);
+ if (!role) return null;
+ return {sceneId: scene && frame >= scene.frame ? scene.sceneId : null, frame, side: role.side, player};
 }
 
 function observeKeeper(offset, type, observesGate) {
  Interceptor.attach(at(offset), {
   onEnter(args) {
    if (offset === 0x725b0d0) recordTimelineFrame(args[0]);
-   if (!activeScene) return;
    try {
     const player = args[0];
     const record = observedKeeper(player, currentFrame());
     if (!record) return;
     const controller = player.add(0x7a8).readPointer();
     this.record = {type, ...record, active: player.add(0x798).readU8() !== 0,
-     positionBefore: positionBits(player.add(0x5dc)), sourceBefore: trackPosition(controller)};
+     positionBefore: positionBits(player.add(0x5dc)), sourceBefore: trackPosition(controller),
+     controllerWordsBefore: controllerWords(controller)};
     this.player = player;
     if (observesGate) {
      this.record.updateMode = playerUpdateMode(record.player);
@@ -225,7 +241,9 @@ function observeKeeper(offset, type, observesGate) {
    if (!this.record) return;
    if (evaluating.get(this.threadId) === this) evaluating.delete(this.threadId);
    try {
-    this.record.sourceAfter = trackPosition(this.player.add(0x7a8).readPointer());
+    const controller = this.player.add(0x7a8).readPointer();
+    this.record.sourceAfter = trackPosition(controller);
+    this.record.controllerWordsAfter = controllerWords(controller);
     this.record.positionAfter = positionBits(this.player.add(0x5dc));
     send(this.record);
    } catch (_) { send({type: 'keeper_observer_error', site: type + '_result'}); }
