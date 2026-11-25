@@ -127,3 +127,7 @@ the comparability of the boundary must still be verified in a live match;
 this is not a complete dump of every internal game variable. The two-sided
 runner flushes events continuously, reconnects after engine restarts, and
 tags each side with the same capture ID.
+`compare-frame-timelines.py` reports the first differing recorded player and
+ball values and excludes repeated frame numbers rather than silently mixing
+matches. A raw ball observation may temporarily reflect different sampling
+order; it is not by itself a verified checksum mismatch.
