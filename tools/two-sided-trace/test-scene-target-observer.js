@@ -10,7 +10,7 @@ const vm = require('node:vm');
 const source = fs.readFileSync(path.join(__dirname, 'scene-target-observer.js'), 'utf8');
 const base = 0x100000000;
 
-function fixture({advance, assignKeeper = true, gateReached = true, supported = true}) {
+function fixture({advance, assignKeeper = true, gateReached = true, supported = true, hostWrapper = false}) {
  const words = new Map();
  const hooks = new Map();
  const events = [];
@@ -35,7 +35,8 @@ function fixture({advance, assignKeeper = true, gateReached = true, supported = 
  ]) put(base + offset, word);
  const module = {base: p(base), name: 'libUE4.so'};
  vm.runInNewContext(source, {
-  Process: {arch: 'arm64', findModuleByName: () => module, findModuleByAddress: () => module},
+  Process: {arch: 'arm64', findModuleByName: () => module,
+   findModuleByAddress: pointer => pointer.value < base ? {name: 'libpeerlinkbackend.so'} : module},
   Interceptor: {attach: (pointer, callbacks) => hooks.set(pointer.value - base, callbacks)},
   ptr: p,
   send: event => events.push(JSON.parse(JSON.stringify(event))),
@@ -72,7 +73,7 @@ function fixture({advance, assignKeeper = true, gateReached = true, supported = 
  put(track + 0x198, pose);
 
  function invoke(offset, caller, args, body = () => {}) {
-  const state = {returnAddress: p(base + caller), threadId: 8};
+  const state = {returnAddress: p(caller === 'host' ? 0x450000 : base + caller), threadId: 8};
   const hooksForRoutine = hooks.get(offset);
   hooksForRoutine.onEnter.call(state, args.map(p));
   body();
@@ -86,7 +87,7 @@ function fixture({advance, assignKeeper = true, gateReached = true, supported = 
   put(sceneTransition + 0x20c, Number(assignKeeper));
  });
  frame(3840);
- invoke(0x6fe7494, 0x6fe8634, [context, sceneTransition], () => {
+ invoke(0x6fe7494, hostWrapper ? 'host' : 0x6fe8634, [context, sceneTransition], () => {
   if (assignKeeper) put(sceneTransition + 0xc, 0);
  });
  frame(3842);
@@ -109,6 +110,7 @@ function fixture({advance, assignKeeper = true, gateReached = true, supported = 
  assert.equal(prepared.after[0].override, assignKeeper);
  assert.equal(prepared.after[1].player, 12);
  assert(events.some(event => event.type === 'scene_target')); // Keep the original event.
+ assert(events.some(event => event.type === 'keeper_scene_play'));
  const updates = events.filter(event => event.type === 'keeper_evaluate');
  assert.equal(updates.length, 1);
  assert.equal(updates[0].updateMode.mode, assignKeeper ? 0 : 3);
@@ -130,6 +132,7 @@ try {
   return execFileSync('python3', [path.join(__dirname, 'compare-keeper-handoff.py'), game, bot], {encoding: 'utf8'});
  }
  const held = fixture({advance: false});
+ fixture({advance: false, hostWrapper: true});
  const advances = fixture({advance: true});
  const gate = compare(advances, held);
  assert.match(gate, /Assigned movement[^\n]*\n  Paired readings agree/);

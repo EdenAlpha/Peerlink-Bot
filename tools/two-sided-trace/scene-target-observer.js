@@ -113,7 +113,12 @@ Interceptor.attach(at(0x6fe7494),{
    const keeper=at(0xa5909a0+0x170).readPointer();
    this.record={type:'scene_target',frame,index,handler,targetPresent:!target.isNull(),targetIsKeeper:!keeper.isNull()&&target.equals(keeper),transitionFlag:transition.add(0x22e).readU8()};
    const scene = activeScene;
-   if (scene && this.returnAddress.equals(at(0x6fe8634)) && scene.playFrame === null &&
+   const caller = Process.findModuleByAddress(this.returnAddress);
+   // The stock game calls this directly. PeerLink's existing scene observer
+   // calls the same original routine through its native host instead.
+   const sceneCaller = this.returnAddress.equals(at(0x6fe8634)) ||
+       (caller && caller.name === 'libpeerlinkbackend.so');
+   if (scene && sceneCaller && scene.playFrame === null &&
        scene.scene.equals(context.add(0x3f0)) &&
        frame >= scene.frame && frame - scene.frame <= 12) {
     scene.playFrame = frame;
