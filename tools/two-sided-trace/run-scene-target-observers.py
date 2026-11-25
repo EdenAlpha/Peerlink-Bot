@@ -1,10 +1,11 @@
-"""Attach read-only checksum-detail observers to the two lab engines."""
+"""Record scene setup and goalkeeper motion from the two disposable lab engines."""
 import datetime
 import json
 from pathlib import Path
 import subprocess
 import threading
 import time
+from uuid import uuid4
 import frida
 
 root=Path('/tmp/peerlink-scene-target')
@@ -15,6 +16,7 @@ sessions=[]
 outputs=[]
 ready=[]
 done=threading.Event()
+capture_id = uuid4().hex
 for label, package in [('game','jp.konami.pesam'),('bot','com.peerlink.app:botengine')]:
     pid=int(subprocess.check_output(['adb','-s','127.0.0.1:15556','shell','pidof','-s',package],text=True).strip())
     out=(root/(label+'.jsonl')).open('a',buffering=1)
@@ -24,6 +26,7 @@ for label, package in [('game','jp.konami.pesam'),('bot','com.peerlink.app:boten
         def on_message(message, data):
             event=message.get('payload') if message.get('type')=='send' else {'type':'script_error','description':message.get('description','')}
             if not isinstance(event,dict): event={'type':'invalid_event'}
+            event['captureId'] = capture_id
             event['recordedAt']=datetime.datetime.now(datetime.timezone.utc).isoformat()
             out.write(json.dumps(event,separators=(',',':'),allow_nan=False)+'\n')
             out.flush()
@@ -45,7 +48,7 @@ while sorted(ready)!=['bot','game'] and time.monotonic()<deadline:
     time.sleep(0.05)
 if sorted(ready)!=['bot','game']:
     raise SystemExit('Both keeper observers did not report ready')
-print('Both keeper observers ready',flush=True)
+print('Both scene observers ready. Capture '+capture_id,flush=True)
 done.wait(1800)
 for session,_ in sessions:
     try: session.detach()

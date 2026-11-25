@@ -83,3 +83,16 @@ before gameplay. `suppress-lab-initial-snapshot.js` is a version-checked,
 lab-only override of that diagnostic for further research. It does not modify
 the distributed APK and does not change the game simulation. The isolated
 source patch above is not yet proven on Android.
+
+The scene target observer now records both keepers' assigned roles, the
+movement controller's advance decision, and the position used by the match
+through the first 56 command frames of a played goal celebration. The runner
+writes the same capture ID on both sides. Compare matching frames per capture
+with `python3 compare-keeper-handoff.py game.jsonl bot.jsonl`. The default scene
+is 197064. Use `--scene` to compare one of the other celebrations and `--capture`
+when the files contain multiple paired runs.
+
+`node test-scene-target-observer.js` exercises the recorder and comparison with
+fixture data for a role difference, a controller hold, and a missing reading.
+This covers the diagnostic logic. Live capture on a paired Android lab is
+still pending.
