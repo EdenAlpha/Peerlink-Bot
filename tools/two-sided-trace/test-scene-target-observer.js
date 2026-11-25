@@ -185,7 +185,14 @@ try {
  assert.match(noSceneDifference, /Motion controller raw words[^\n]*\n  First difference at frame 3800/);
  assert.match(noSceneDifference, /Keeper state setter[^\n]*\n  First difference at frame 3800/);
  const withoutSetter = held.filter(event => event.type !== 'keeper_state_request');
- assert.match(compare(held, withoutSetter, 'all'), /Keeper state setter — 0 paired, 1 game-only, 0 bot-only/);
+ const missingSetter = compare(held, withoutSetter, 'all');
+ assert.match(missingSetter, /Keeper state setter — 0 paired, 1 game-only, 0 bot-only/);
+ assert.match(missingSetter, /First game-only reading at frame 3800 for side 0/);
+ const extraWrite = {...held.find(event => event.type === 'keeper_state_request'),
+  before: 1265, requested: 1300, after: 1300};
+ const multipleWrites = compare([...held, extraWrite], held, 'all');
+ assert.match(multipleWrites, /Keeper state setter — 1 paired[^\n]*0 ambiguous\n  First difference at frame 3800/);
+ assert.match(multipleWrites, /"requested": 1300/);
 } finally {
  fs.rmSync(fixtureDir, {recursive: true, force: true});
 }

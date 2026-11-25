@@ -40,6 +40,11 @@ def project(records, kind, fields):
         if event_type != kind:
             continue
         values = [{field: entry.get(field) for field in fields} for entry in entries]
+        # A keeper can change state more than once in one frame. Preserve the
+        # recorded order instead of discarding that frame as ambiguous.
+        if kind == 'keeper_state_request':
+            comparable[frame, side] = {'sequence': values}
+            continue
         if any(value != values[0] for value in values[1:]):
             ambiguous += 1
             continue
@@ -54,6 +59,10 @@ def compare(game, bot):
         shared = sorted(stock.keys() & peer.keys())
         print(f'{label} — {len(shared)} paired, {len(stock) - len(shared)} game-only, '
               f'{len(peer) - len(shared)} bot-only, {stock_ambiguous + peer_ambiguous} ambiguous')
+        for name, keys in (('game-only', sorted(stock.keys() - peer.keys())),
+                           ('bot-only', sorted(peer.keys() - stock.keys()))):
+            if keys:
+                print(f'  First {name} reading at frame {keys[0][0]} for side {keys[0][1]}')
         if 'gate' in fields:
             print(f'  Gate decision reached in {sum(stock[k]["gate"] is not None for k in shared)} game rows '
                   f'and {sum(peer[k]["gate"] is not None for k in shared)} bot rows')
@@ -65,6 +74,10 @@ def compare(game, bot):
         frame, side = difference
         team = f' for side {side}' if side >= 0 else ''
         print(f'  First difference at frame {frame}{team}')
+        if kind == 'keeper_state_request':
+            print(f'    requests — game {json.dumps(stock[difference]["sequence"])}, '
+                  f'bot {json.dumps(peer[difference]["sequence"])}')
+            continue
         for field in fields:
             left, right = stock[difference][field], peer[difference][field]
             if left != right:
