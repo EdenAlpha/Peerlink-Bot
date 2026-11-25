@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
-const source = fs.readFileSync(path.join(__dirname, 'frame-timeline-observer.js'), 'utf8');
+const source = fs.readFileSync(path.join(__dirname, 'scene-target-observer.js'), 'utf8');
 const base = 0x100000000, words = new Map(), events = [], hooks = new Map();
 class Pointer {
   constructor(value) { this.value = value; }
@@ -15,7 +15,8 @@ class Pointer {
   readPointer() { return new Pointer(words.get(this.value) ?? 0); }
 }
 const p = value => new Pointer(value), put = (address, value) => words.set(address, value);
-put(base + 0x725b0d0, 0xa9be7bfd);
+for (const [offset, word] of [[0x6fe89b8, 0xd101c3ff], [0x6fe7494, 0xa9bd7bfd],
+ [0x725b0d0, 0xa9be7bfd], [0x725b114, 0x360000a0], [0x725b134, 0xfc1b0fe8]]) put(base + offset, word);
 put(base + 0x9a6a020, 0x200000); put(0x200000, base + 0x98ae9e0);
 put(0x200008, 0x210000); put(0x2100a0, 0x220000); put(0x220000, base + 0x98aedd0);
 for (let i = 0; i < 22; i++) {
@@ -28,7 +29,8 @@ vm.runInNewContext(source, {
   Interceptor: {attach: (pointer, callbacks) => hooks.set(pointer.value - base, callbacks)},
   send: event => events.push(JSON.parse(JSON.stringify(event))),
 });
-assert.equal(events[0].type, 'frame_timeline_ready');
+assert.equal(events[0].type, 'scene_target_observer_ready');
+assert.equal(events[0].frameTimeline, 1);
 const update = (frame, player) => {
   put(0x220030, frame);
   hooks.get(0x725b0d0).onEnter([p(player)]);

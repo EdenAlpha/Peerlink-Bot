@@ -22,6 +22,41 @@ function currentFrame(){
 }
 function engineOffset(p){try{const m=Process.findModuleByAddress(p);return m && m.name==='libUE4.so' ? p.sub(base).toUInt32():null;}catch(_){return null;}}
 
+// Use the existing player-update hook: adding a second independent hook here
+// changes the entry instruction and defeats the recorder's version check.
+let lastTimelineFrame = null, timelineSequence = 0;
+function timelineBallBits() {
+ const match = at(0xa533ec0).readPointer();
+ if (match.isNull() || match.add(0x138).readU8() !== 17) return null;
+ const core = match.add(0x2f8).readPointer();
+ if (core.isNull() || !core.readPointer().equals(at(0x9899d50)) || core.add(8).readU32() !== 54) return null;
+ const balls = core.add(0x3c98).readPointer();
+ if (balls.isNull() || !balls.readPointer().equals(at(0x989a160))) return null;
+ const ball = balls.add(0x30).readPointer(), index = balls.add(0xc).readU32();
+ if (ball.isNull() || index >= 8 || !balls.add(0x38 + index * 8).readPointer().equals(ball)) return null;
+ return Array.from({length: 6}, (_, i) => ball.add(0x30 + i * 4).readU32());
+}
+function recordTimelineFrame(object) {
+ try {
+  const anchor = at(0xa5909a0 + 0x170).readPointer();
+  if (anchor.isNull() || !object.equals(anchor)) return;
+  const frame = currentFrame();
+  if (!frame || frame === lastTimelineFrame) return;
+  const started = Date.now(), positions = [];
+  for (let i = 0; i < 22; i++) {
+   const player = at(0xa5909a0 + 0x170 + i * 8).readPointer();
+   positions.push(player.isNull() ? null : [player.add(0x5dc).readU32(), player.add(0x5e0).readU32(),
+    player.add(0x5e4).readU32(), player.add(0x798).readU8()]);
+  }
+  const ballBits = timelineBallBits(), previousFrame = lastTimelineFrame;
+  lastTimelineFrame = frame;
+  send({type: 'frame_state', sequence: ++timelineSequence, frame, previousFrame,
+   skippedFrames: previousFrame !== null && frame > previousFrame ? frame - previousFrame - 1 : null,
+   rewound: previousFrame !== null && frame < previousFrame,
+   positions, ballBits, captureMs: Date.now() - started});
+ } catch (error) { send({type: 'frame_observer_error', error: String(error)}); }
+}
+
 function keeperSlots() {
  const simulation = at(0xa58de28).readPointer();
  if (simulation.isNull()) return [];
@@ -168,6 +203,7 @@ function observedKeeper(object, frame) {
 function observeKeeper(offset, type, observesGate) {
  Interceptor.attach(at(offset), {
   onEnter(args) {
+   if (offset === 0x725b0d0) recordTimelineFrame(args[0]);
    if (!activeScene) return;
    try {
     const player = args[0];
@@ -213,4 +249,4 @@ Interceptor.attach(at(0x725b114), function () {
   };
  } catch (_) { send({type: 'keeper_observer_error', site: 'keeper_evaluate_gate'}); }
 });
-send({type:'scene_target_observer_ready', keeperHandoff: 1});
+send({type:'scene_target_observer_ready', keeperHandoff: 1, frameTimeline: 1});

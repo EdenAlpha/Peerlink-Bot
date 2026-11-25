@@ -98,11 +98,11 @@ fixture data for a role difference, a controller hold, and a missing reading.
 This covers the diagnostic logic. Live capture on a paired Android lab is
 still pending.
 
-`frame-timeline-observer.js` adds a read-only per-observed-command-frame
+The scene observer also records a read-only per-observed-command-frame
 snapshot of all 22 player positions and ball position/velocity in both
 engines. It uses the same player-update boundary on both sides, records gaps
 and rewinds, and never invents a missing frame. Availability, overhead, and
 the comparability of the boundary must still be verified in a live match;
-this is not a complete dump of every internal game variable. Its two-sided
+this is not a complete dump of every internal game variable. The two-sided
 runner flushes events continuously, reconnects after engine restarts, and
 tags each side with the same capture ID.
