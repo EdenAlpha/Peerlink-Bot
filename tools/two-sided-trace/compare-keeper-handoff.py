@@ -8,6 +8,7 @@ import json
 STAGES = (
     ('keeper_scene_prepare', 'Scene preparation', ('rolesLoaded', 'loadedRoles', 'availableRoles', 'before', 'after')),
     ('keeper_scene_play', 'Assigned movement', ('preparedAt', 'assignments')),
+    ('keeper_state_request', 'Keeper state setter', ('player', 'before', 'requested', 'after', 'callSite')),
     ('keeper_evaluate', 'Motion controller decision', ('player', 'active', 'updateMode', 'gate')),
     ('keeper_evaluate', 'Motion controller raw words', ('controllerWordsBefore', 'controllerWordsAfter')),
     ('keeper_evaluate', 'Motion controller position', ('sourceBefore', 'sourceAfter')),

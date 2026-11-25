@@ -17,6 +17,7 @@ class Pointer {
 const p = value => new Pointer(value), put = (address, value) => words.set(address, value);
 for (const [offset, word] of [[0x6fe89b8, 0xd101c3ff], [0x6fe7494, 0xa9bd7bfd],
  [0x725b0d0, 0xa9be7bfd], [0x725b114, 0x360000a0], [0x725b134, 0xfc1b0fe8]]) put(base + offset, word);
+put(base + 0x6d3f944, 0xa9bd7bfd);
 put(base + 0x9a6a020, 0x200000); put(0x200000, base + 0x98ae9e0);
 put(0x200008, 0x210000); put(0x2100a0, 0x220000); put(0x220000, base + 0x98aedd0);
 for (let i = 0; i < 22; i++) {

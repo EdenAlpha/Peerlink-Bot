@@ -103,6 +103,10 @@ The two keeper movement decisions and raw checksum words are also sampled on
 observed command frames without requiring a scene to have been detected. The
 two words' meanings are not yet established. These additional continuous
 readings need an overhead measurement on the target Android device.
+The recorder also observes a version-checked native setter that can change the
+first differing keeper checksum word, recording its caller and requested
+value. This setter is not necessarily the only possible writer, so a missing
+event does not exclude a different write path.
 The runner
 writes the same capture ID on both sides. Compare matching frames per capture
 with `python3 compare-keeper-handoff.py game.jsonl bot.jsonl`. The default scene

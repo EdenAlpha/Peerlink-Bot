@@ -34,6 +34,7 @@ function fixture({advance, assignKeeper = true, gateReached = true, supported = 
  for (const [offset, word] of [
   [0x6fe89b8, 0xd101c3ff], [0x6fe7494, 0xa9bd7bfd], [0x725b0d0, 0xa9be7bfd],
   [0x725b114, 0x360000a0], [0x725b134, supported ? 0xfc1b0fe8 : 0],
+  [0x6d3f944, 0xa9bd7bfd],
  ]) put(base + offset, word);
  const module = {base: p(base), name: 'libUE4.so'};
  vm.runInNewContext(source, {
@@ -90,6 +91,15 @@ function fixture({advance, assignKeeper = true, gateReached = true, supported = 
  assert.equal(beforeScene.sceneId, null);
  assert.equal(beforeScene.controllerWordsBefore.wordAE8, preSceneWord);
  assert.equal(beforeScene.controllerWordsAfter.wordAEA, 79);
+ // The engine's setter is observed for a keeper only, including its caller.
+ invoke(0x6d3f944, 0x6ebc768, [controller, 1265], () => put(controller + 0xae8, 1265));
+ const setter = events.find(event => event.type === 'keeper_state_request');
+ assert.deepEqual([setter.frame, setter.before, setter.requested, setter.after, setter.callSite],
+  [3800, preSceneWord, 1265, 1265, 0x6ebc764]);
+ invoke(0x6d3f944, 0x6ebc768, [controller, 1265]); // no change is not a new event
+ assert.equal(events.filter(event => event.type === 'keeper_state_request').length, 1);
+ invoke(0x6d3f944, 0x6ebc768, [0x2f0000, 1265]); // unrelated controller
+ assert.equal(events.filter(event => event.type === 'keeper_state_request').length, 1);
  frame(3837);
  put(sceneTransition + 0xc, 3);
  put(scene + 4, 8);
@@ -173,6 +183,9 @@ try {
  assert.match(compare(held, held), /Position copied into the match[^\n]*\n  Paired readings agree/);
  const noSceneDifference = compare(fixture({advance: false, preSceneWord: 1234}), held, 'all');
  assert.match(noSceneDifference, /Motion controller raw words[^\n]*\n  First difference at frame 3800/);
+ assert.match(noSceneDifference, /Keeper state setter[^\n]*\n  First difference at frame 3800/);
+ const withoutSetter = held.filter(event => event.type !== 'keeper_state_request');
+ assert.match(compare(held, withoutSetter, 'all'), /Keeper state setter — 0 paired, 1 game-only, 0 bot-only/);
 } finally {
  fs.rmSync(fixtureDir, {recursive: true, force: true});
 }

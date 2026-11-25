@@ -6,6 +6,7 @@ const base=lib.base, at=x=>base.add(x);
 const entryWords = new Map([
  [0x6fe89b8, 0xd101c3ff], [0x6fe7494, 0xa9bd7bfd],
  [0x725b0d0, 0xa9be7bfd], [0x725b114, 0x360000a0], [0x725b134, 0xfc1b0fe8],
+ [0x6d3f944, 0xa9bd7bfd],
 ]);
 if (Process.arch !== 'arm64' || [...entryWords].some(([offset, word]) => at(offset).readU32() !== word)) {
  throw new Error('Scene observer needs the pinned 11.1.1 ARM64 engine');
@@ -195,6 +196,14 @@ function controllerWords(controller) {
 }
 
 let keeperCacheFrame = null, keeperCache = [];
+function currentKeepers(frame) {
+ if (frame !== keeperCacheFrame) {
+  keeperCacheFrame = frame;
+  keeperCache = keeperSlots();
+ }
+ return keeperCache;
+}
+
 function observedKeeper(object, frame) {
  if (!frame || object.isNull()) return null;
  let scene = activeScene;
@@ -208,14 +217,45 @@ function observedKeeper(object, frame) {
  const player = object.add(0x18).readU32();
  if (player >= 22 || !object.equals(at(0xa5909a0 + 0x170 + player * 8).readPointer())) return null;
  // Cache at most once per command frame; the hook runs for all 22 players.
- if (frame !== keeperCacheFrame) {
-  keeperCacheFrame = frame;
-  keeperCache = keeperSlots();
- }
- const role = keeperCache.find(slot => slot.player === player);
+ const role = currentKeepers(frame).find(slot => slot.player === player);
  if (!role) return null;
  return {sceneId: scene && frame >= scene.frame ? scene.sceneId : null, frame, side: role.side, player};
 }
+
+// One identified native setter compares the current controller word at
+// +0xae8 with its requested value and writes it only when they differ.
+// Observe its caller for either keeper, without replacing its behavior. Other
+// code may write the same word through a different path; absence of this event
+// is therefore not proof that no write occurred.
+Interceptor.attach(at(0x6d3f944), {
+ onEnter(args) {
+  try {
+   const frame = currentFrame(), controller = args[0];
+   if (!frame || controller.isNull()) return;
+   for (const role of currentKeepers(frame)) {
+    const player = at(0xa5909a0 + 0x170 + role.player * 8).readPointer();
+    if (player.isNull() || !player.add(0x7a8).readPointer().equals(controller)) continue;
+    const before = controller.add(0xae8).readU16();
+    const requested = args[1].toUInt32() & 0xffff;
+    if (before === requested) return;
+    const offset = engineOffset(this.returnAddress);
+    const scene = activeScene;
+    this.record = {type: 'keeper_state_request', frame, side: role.side, player: role.player,
+     sceneId: scene && frame >= scene.frame ? scene.sceneId : null,
+     before, requested, callSite: offset === null ? null : offset - 4};
+    this.controller = controller;
+    return;
+   }
+  } catch (_) { send({type: 'keeper_observer_error', site: 'state_request'}); }
+ },
+ onLeave() {
+  if (!this.record) return;
+  try {
+   this.record.after = this.controller.add(0xae8).readU16();
+   send(this.record);
+  } catch (_) { send({type: 'keeper_observer_error', site: 'state_request_result'}); }
+ },
+});
 
 function observeKeeper(offset, type, observesGate) {
  Interceptor.attach(at(offset), {
