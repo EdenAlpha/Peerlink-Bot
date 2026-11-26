@@ -27,8 +27,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.heading
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.selection.toggleable
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -116,6 +114,9 @@ internal object PL {
     val indigo    = Color(0xFFB5A2FF)
     val indigoGlow= Color(0xFFD5C8FF)
     val red       = Color(0xFFFFA29A)
+    val paper     = Color(0xFFF0F2E9)
+    val paperInk  = Color(0xFF252B29)
+    val paperSoft = Color(0xFF525D55)
 }
 
 // Surfaces have tonal separation; outlines are reserved for actual controls.
@@ -289,18 +290,19 @@ fun PeerLinkScreen(
 
     Box(Modifier.fillMaxSize().background(PL.bg)) {
         Column(Modifier.fillMaxSize().statusBarsPadding().imePadding()) {
-            Row(Modifier.fillMaxWidth().padding(start = 18.dp, end = 12.dp, top = 4.dp, bottom = 4.dp),
+            Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 14.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Image(painterResource(R.drawable.peerlink_emblem), null, Modifier.size(34.dp).scale(1.35f))
+                horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Image(painterResource(R.drawable.peerlink_emblem), null, Modifier.size(42.dp).scale(1.4f))
                 Column(Modifier.weight(1f).pointerInput(actions.isAdmin) {
                     detectTapGestures(onLongPress = { if (!actions.isAdmin) adminUnlockOpen = true })
                 }) {
-                    Text("PeerLink", fontSize = 21.sp, fontWeight = FontWeight.Bold,
+                    Text("PeerLink", fontSize = 22.sp, fontWeight = FontWeight.Bold,
                         color = PL.ink, letterSpacing = (-0.6).sp)
+                    Text("Better together", fontSize = 12.sp, color = PL.muted)
                 }
-                if (pager.currentPage == 0 && sessionPhase != PeerSessionPhase.IDLE) StatusChip(sessionPhase)
                 DarkHeaderBtn(Icons.Rounded.Settings) { showGeneralSettings = true }
+                StatusChip(sessionPhase)
             }
 
             HorizontalPager(state = pager, modifier = Modifier.weight(1f)) { page ->
@@ -342,12 +344,11 @@ fun PeerLinkScreen(
                     onOpenPrime = actions.onSetupPrimeMode,
                 )
             }
-            HorizontalDivider(color = PL.line)
             NavigationBar(containerColor = PL.elevated, tonalElevation = 0.dp) {
                 NavigationBarItem(
                     selected = pager.currentPage == 0,
                     onClick = { uiScope.launch { pager.animateScrollToPage(0) } },
-                    icon = { Icon(Icons.Rounded.PeopleOutline, null) }, label = { Text("Nearby") },
+                    icon = { Icon(Icons.Rounded.SportsEsports, null) }, label = { Text("Play") },
                     colors = peerNavigationColors(),
                 )
                 NavigationBarItem(
@@ -359,7 +360,7 @@ fun PeerLinkScreen(
                 NavigationBarItem(
                     selected = pager.currentPage == 2,
                     onClick = { uiScope.launch { pager.animateScrollToPage(2) } },
-                    icon = { Icon(Icons.Rounded.SportsSoccer, null) }, label = { Text("Bot match") },
+                    icon = { Icon(Icons.Rounded.SportsSoccer, null) }, label = { Text("Play PeerLink") },
                     colors = peerNavigationColors(),
                 )
             }
@@ -395,8 +396,8 @@ fun PeerLinkScreen(
 
 @Composable
 private fun peerNavigationColors() = NavigationBarItemDefaults.colors(
-    selectedIconColor = PL.goldSoft, selectedTextColor = PL.goldSoft,
-    indicatorColor = PL.gold.copy(alpha = 0.13f),
+    selectedIconColor = PL.bg, selectedTextColor = PL.gold,
+    indicatorColor = PL.gold,
     unselectedIconColor = PL.muted, unselectedTextColor = PL.muted,
 )
 
@@ -421,8 +422,9 @@ private fun MainPage(
     LazyColumn(
         modifier = Modifier.fillMaxSize().testTag("home-list"),
         contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 4.dp, bottom = 24.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
+        verticalArrangement = Arrangement.spacedBy(22.dp),
     ) {
+        item(key = "identity") { NameRow(name, onName) }
         item(key = "connection") {
             ConnectionCore(connected, sessionPhase, sessionError, myIp, peerIp, since, botSession) {
                 val launch = ctx.packageManager.getLaunchIntentForPackage("jp.konami.pesam")
@@ -431,7 +433,6 @@ private fun MainPage(
                 } else Toast.makeText(ctx, "Open your game from your home screen", Toast.LENGTH_SHORT).show()
             }
         }
-        item(key = "identity") { NameRow(name, onName) }
         if (connected) {
             item(key = "traffic") {
                 if (botSession) BotTrafficCard(botTraffic)
@@ -469,15 +470,15 @@ private fun MainPage(
             Column(modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Icon(Icons.Rounded.Bolt, null, tint = PL.indigo, modifier = Modifier.size(22.dp))
-                    Text("Prime tools", color = PL.ink, fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
+                    Text("Make it your game", color = PL.ink, fontSize = 18.sp, fontWeight = FontWeight.SemiBold,
                         modifier = Modifier.weight(1f))
                     Text(if (primeActive) "Active" else if (primeReady) "Ready" else "Optional",
                         color = if (primeActive) PL.green else PL.muted, fontSize = 12.sp)
                 }
                 Spacer(Modifier.height(6.dp))
-                if (!primeReady) Text("Set up Prime Mode in Settings to use these controls.",
+                Text(if (primeReady) "Your match preferences, in one place." else "Set up Prime Mode in Settings for more control.",
                     color = PL.muted, fontSize = 13.sp, lineHeight = 19.sp)
-                Spacer(Modifier.height(9.dp))
+                Spacer(Modifier.height(14.dp))
                 PrimeDeck(primeReady, primeActive, callBlockOn, onToolToggle, ctx)
             }
         }
@@ -508,8 +509,7 @@ private fun DisconnectCard(peerName: String, onDisconnect: () -> Unit) {
 /* ─── Components ─── */
 @Composable private fun DarkHeaderBtn(icon: ImageVector, onClick: () -> Unit) {
     IconButton(onClick = onClick, modifier = Modifier.size(48.dp)) {
-        Icon(icon, contentDescription = if (icon == Icons.Rounded.Settings) "Settings" else "Open menu",
-            tint = PL.inkSoft, modifier = Modifier.size(21.dp))
+        Icon(icon, contentDescription = if (icon == Icons.Rounded.Settings) "Settings" else "Open menu", tint = PL.inkSoft)
     }
 }
 
@@ -523,11 +523,7 @@ private fun DisconnectCard(peerName: String, onDisconnect: () -> Unit) {
         PeerSessionPhase.ERROR -> "Retry" to PL.red
         PeerSessionPhase.IDLE -> "Ready" to PL.muted
     }
-    StatusBadge(label, color)
-}
-
-@Composable private fun StatusBadge(label: String, color: Color) {
-    Row(Modifier.clip(RoundedCornerShape(10.dp)).background(color.copy(alpha = 0.09f)).padding(9.dp, 6.dp),
+    Row(Modifier.clip(RoundedCornerShape(50)).background(color.copy(alpha = 0.10f)).padding(10.dp, 7.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         Box(Modifier.size(6.dp).background(color, CircleShape))
         Text(label, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = color)
@@ -548,13 +544,10 @@ private fun DisconnectCard(peerName: String, onDisconnect: () -> Unit) {
 @Composable private fun NameRow(name: String, onSave: (String) -> Unit) {
     var editing by rememberSaveable { mutableStateOf(false) }
     var draft by rememberSaveable(name) { mutableStateOf(name) }
-    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(PL.elevated)
-        .padding(start = 14.dp, end = 5.dp, top = 5.dp, bottom = 5.dp),
-        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
-        SettingsRowIcon(Icons.Rounded.PersonOutline)
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
-            Text("Player name", fontSize = 12.sp, color = PL.muted)
-            Text(name.ifBlank { "Choose your name" }, fontSize = 15.sp, color = PL.ink,
+            Text("PLAY AS", fontSize = 11.sp, letterSpacing = 1.4.sp, color = PL.indigo)
+            Text(name.ifBlank { "Choose your name" }, fontSize = 21.sp, color = PL.ink,
                 fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         IconButton(onClick = { draft = name; editing = true }) {
@@ -593,17 +586,17 @@ private fun DisconnectCard(peerName: String, onDisconnect: () -> Unit) {
             elapsed = "00:00"
         }
     }
-    val title = if (botSession && connected) "Bot session" else when (phase) {
-        PeerSessionPhase.IDLE -> "Local play"
-        PeerSessionPhase.PAIRING -> "Pairing with your player"
-        PeerSessionPhase.STARTING_TUNNEL -> "Starting the connection"
-        PeerSessionPhase.VERIFYING_PATH -> "Checking the connection"
-        PeerSessionPhase.ACTIVE -> "Ready to play"
-        PeerSessionPhase.STOPPING -> "Ending the connection"
-        PeerSessionPhase.ERROR -> "Connection interrupted"
+    val title = if (botSession && connected) "Your bot.\nYour match." else when (phase) {
+        PeerSessionPhase.IDLE -> "Good games.\nGreat company."
+        PeerSessionPhase.PAIRING -> "Meeting your player."
+        PeerSessionPhase.STARTING_TUNNEL -> "Preparing your link."
+        PeerSessionPhase.VERIFYING_PATH -> "Checking the connection."
+        PeerSessionPhase.ACTIVE -> "Your friend.\nYour next match."
+        PeerSessionPhase.STOPPING -> "Ending the connection."
+        PeerSessionPhase.ERROR -> "Let's reconnect."
     }
     val description = if (botSession && connected) "Open eFootball on this phone and join the bot's room." else when (phase) {
-        PeerSessionPhase.IDLE -> "Join the same Wi-Fi or hotspot, then choose a nearby player."
+        PeerSessionPhase.IDLE -> "Join the same Wi-Fi or hotspot. Find your friend below and connect."
         PeerSessionPhase.PAIRING -> "Keep PeerLink open on both phones while they pair."
         PeerSessionPhase.STARTING_TUNNEL -> "Allow the VPN request on each phone to continue."
         PeerSessionPhase.VERIFYING_PATH -> "Making sure both phones can exchange game traffic."
@@ -611,24 +604,35 @@ private fun DisconnectCard(peerName: String, onDisconnect: () -> Unit) {
         PeerSessionPhase.STOPPING -> "Closing this session before you connect again."
         PeerSessionPhase.ERROR -> error ?: "Check that both phones are on the same network, then try again."
     }
-    val heroColor = if (phase == PeerSessionPhase.ERROR) Color(0xFF302328) else Color(0xFF222834)
-    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp))
-        .background(Brush.linearGradient(listOf(heroColor, PL.elevated)))
-        .padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween) {
-            Icon(Icons.Rounded.Wifi, null, tint = PL.indigoGlow, modifier = Modifier.size(21.dp))
-            if (connected) Text(elapsed, color = PL.greenGlow, fontSize = 13.sp, fontFamily = FontFamily.Monospace)
+    val paper = if (phase == PeerSessionPhase.ERROR) Color(0xFFFFE4DE) else PL.paper
+    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(30.dp))
+        .background(Brush.linearGradient(listOf(paper, if (connected) Color(0xFFDDF1D3) else Color(0xFFE3E5F4))))
+        .padding(24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                Box(Modifier.size(7.dp).background(if (connected) Color(0xFF297353) else PL.paperSoft, CircleShape))
+                Text(if (connected) "LINK ACTIVE · $elapsed" else "PLAY SIDE BY SIDE", color = PL.paperSoft,
+                    fontSize = 11.sp, letterSpacing = 1.sp, fontWeight = FontWeight.SemiBold)
+            }
+            Box(Modifier.size(54.dp).background(PL.paperInk, CircleShape), contentAlignment = Alignment.Center) {
+                Image(painterResource(R.drawable.peerlink_emblem), null, Modifier.size(54.dp).scale(1.35f))
+            }
         }
-        Text(title, color = PL.ink, fontSize = 28.sp, lineHeight = 33.sp,
-            fontWeight = FontWeight.SemiBold, letterSpacing = (-0.65).sp, modifier = Modifier.semantics { heading() })
-        Text(description, color = PL.inkSoft, fontSize = 14.sp, lineHeight = 21.sp)
+        Text(title, color = PL.paperInk, fontSize = 32.sp, lineHeight = 36.sp,
+            fontWeight = FontWeight.Bold, letterSpacing = (-1).sp)
+        Text(description, color = PL.paperSoft, fontSize = 14.sp, lineHeight = 21.sp)
         if (connected) {
-            Button(onClick = onOpenGame, shape = RoundedCornerShape(15.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = PL.gold, contentColor = PL.bg),
+            Button(onClick = onOpenGame, shape = RoundedCornerShape(50),
+                colors = ButtonDefaults.buttonColors(containerColor = PL.paperInk, contentColor = PL.paper),
                 modifier = Modifier.fillMaxWidth().heightIn(min = 50.dp)) {
                 Text("Open eFootball", Modifier.weight(1f), fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                 Icon(Icons.Rounded.NorthEast, null, Modifier.size(19.dp))
+            }
+        } else if (phase == PeerSessionPhase.IDLE) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Icon(Icons.Rounded.Wifi, null, tint = PL.paperSoft, modifier = Modifier.size(18.dp))
+                Text("Same Wi-Fi. Ready when you are.", color = PL.paperSoft, fontSize = 12.sp)
             }
         }
     }
@@ -778,20 +782,21 @@ private data class Tool(val key: String, val label: String, val icon: ImageVecto
             .getString("username", "")?.trim().orEmpty().ifBlank { "You" }
     }
     val history = remember(stats.records) { stats.records.sortedByDescending { it.endedAtMs } }
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 24.dp),
-        verticalArrangement = Arrangement.spacedBy(13.dp)) {
-        Text("Your activity", color = PL.ink, fontSize = 28.sp, lineHeight = 33.sp,
-            fontWeight = FontWeight.SemiBold, letterSpacing = (-0.65).sp, modifier = Modifier.semantics { heading() })
+    Column(Modifier.fillMaxSize().padding(horizontal = 20.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(18.dp)) {
+        Spacer(Modifier.height(4.dp))
+        Text("Your activity", color = PL.ink, fontSize = 28.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.5).sp)
+        Text("Your matches and PeerCoins, together.", color = PL.inkSoft, fontSize = 14.sp)
+        Spacer(Modifier.height(2.dp))
         MatchHeroCard(live, me, history.firstOrNull())
-        Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp))
-            .background(Brush.linearGradient(listOf(Color(0xFF282536), PL.elevated)))
-            .padding(19.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp))
+            .background(Brush.linearGradient(listOf(Color(0xFF302C44), Color(0xFF242331))))
+            .padding(24.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text("PeerCoin balance", fontSize = 13.sp, color = PL.indigoGlow)
-                Text(formatCents(stats.balanceCents), fontSize = 36.sp, fontWeight = FontWeight.SemiBold, color = PL.ink, letterSpacing = (-0.8).sp)
+                Text("YOUR PEERCOINS", fontSize = 11.sp, fontWeight = FontWeight.Medium, color = PL.indigoGlow, letterSpacing = 1.4.sp)
+                Text(formatCents(stats.balanceCents), fontSize = 42.sp, fontWeight = FontWeight.Bold, color = PL.ink, letterSpacing = (-1.5).sp)
             }
-            Box(Modifier.size(40.dp).background(PL.indigo.copy(alpha = 0.13f), RoundedCornerShape(13.dp)), contentAlignment = Alignment.Center) {
-                Icon(Icons.Rounded.StarOutline, null, tint = PL.indigoGlow, modifier = Modifier.size(21.dp))
+            Box(Modifier.size(50.dp).background(PL.indigo, CircleShape), contentAlignment = Alignment.Center) {
+                Icon(Icons.Rounded.Star, null, tint = PL.bg, modifier = Modifier.size(26.dp))
             }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -1092,17 +1097,15 @@ private fun GeneralSettingsOverlay(
     ctx: Context,
 ) {
     Box(Modifier.fillMaxSize().background(PL.bg)) {
-        Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) {
+        Column(Modifier.fillMaxSize().statusBarsPadding()) {
             Row(
-                Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 4.dp).testTag("settings-screen"),
+                Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp).testTag("settings-screen"),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 IconButton(onClick = onBack) { Icon(Icons.Rounded.ArrowBack, "Back", tint = PL.ink) }
-                Text("Settings", color = PL.ink, fontSize = 22.sp, fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.semantics { heading() })
+                Text("Settings", color = PL.ink, fontSize = 18.sp, fontWeight = FontWeight.Bold)
             }
-            HorizontalDivider(color = PL.line)
-            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
+            Box(Modifier.weight(1f)) {
                 SettingsPage(
                     primeReady = primeReady,
                     primeActive = primeActive,
@@ -1139,50 +1142,87 @@ private fun SettingsPage(
     }
     var whistleOpen by rememberSaveable { mutableStateOf(false) }
     LazyColumn(
-        Modifier.widthIn(max = 560.dp).fillMaxSize().testTag("settings-list"),
-        contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 16.dp, bottom = 24.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        Modifier.fillMaxSize().testTag("settings-list"),
+        contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 32.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        item(key = "prime") {
-            SettingsGroup {
-                SettingsActionRow(Icons.Rounded.Bolt, "Prime Mode", when {
-                    primeActive -> "Active · Manage phone performance"
-                    primeReady -> "Paired · Ready to activate"
-                    else -> "Pair once to access memory and performance controls"
-                }, onSetupPrime, modifier = Modifier.testTag("settings-prime"))
+        item(key = "heading") {
+            Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                Text("YOUR EXPERIENCE", color = PL.indigoGlow, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.4.sp)
+                Text("Make it yours.", color = PL.ink, fontSize = 29.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.7).sp)
+                Text("A few thoughtful controls for the way you play.", color = PL.inkSoft, fontSize = 14.sp, lineHeight = 20.sp)
             }
         }
-        item(key = "phone-label") { SettingsSectionLabel("Gameplay") }
+        item(key = "prime") {
+            val shape = RoundedCornerShape(26.dp)
+            Column(
+                Modifier.fillMaxWidth().clip(shape)
+                    .background(Brush.linearGradient(listOf(Color(0xFF302C48), Color(0xFF242633), Color(0xFF222D29))))
+                    .border(1.dp, PL.indigo.copy(alpha = 0.25f), shape).padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Box(Modifier.size(46.dp).clip(RoundedCornerShape(15.dp)).background(PL.indigo.copy(alpha = 0.16f)),
+                        contentAlignment = Alignment.Center) {
+                        Icon(Icons.Rounded.AutoAwesome, null, tint = PL.indigoGlow, modifier = Modifier.size(23.dp))
+                    }
+                    Column(Modifier.weight(1f)) {
+                        Text("PRIME MODE", color = PL.indigoGlow, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp)
+                        Text(if (primeActive) "Active" else if (primeReady) "Ready to activate" else "Optional setup",
+                            color = PL.ink, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                }
+                Text("More control over your phone while you play.", color = PL.ink, fontSize = 18.sp,
+                    lineHeight = 23.sp, fontWeight = FontWeight.Bold)
+                Text("Pair once to access the controls supported by your phone.", color = PL.inkSoft, fontSize = 12.5.sp, lineHeight = 18.sp)
+                Button(onClick = onSetupPrime, modifier = Modifier.fillMaxWidth().heightIn(min = 50.dp).testTag("settings-prime"),
+                    shape = RoundedCornerShape(15.dp), colors = ButtonDefaults.buttonColors(containerColor = PL.gold, contentColor = PL.bg)) {
+                    Text(if (primeReady || primeActive) "Open Prime Mode" else "Set up Prime Mode",
+                        Modifier.weight(1f), fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    Icon(Icons.Rounded.ArrowForward, null, Modifier.size(18.dp))
+                }
+            }
+        }
+        item(key = "phone-label") { SettingsSectionLabel("ON YOUR PHONE") }
         item(key = "phone") {
             SettingsGroup {
-                SettingsActionRow(Icons.Rounded.BatterySaver, "Battery settings", "Keep PeerLink available in the background", onBatterySettings)
+                SettingsActionRow(Icons.Rounded.BatterySaver, "Battery settings", "Help PeerLink stay available in the background", onBatterySettings)
                 HorizontalDivider(color = PL.line, modifier = Modifier.padding(start = 62.dp))
-                Row(
-                    Modifier.fillMaxWidth().toggleable(value = markerEnabled, role = Role.Switch) {
-                        markerEnabled = it && android.provider.Settings.canDrawOverlays(ctx)
-                        onMatchMarker(it)
-                    }.padding(horizontal = 15.dp, vertical = 11.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
+                Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 11.dp), verticalAlignment = Alignment.CenterVertically) {
                     SettingsRowIcon(Icons.Rounded.SportsSoccer)
                     Column(Modifier.weight(1f).padding(start = 12.dp, end = 8.dp)) {
                         Text("Match markers", color = PL.ink, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                         Text("Show your side during a match", color = PL.muted, fontSize = 12.sp, lineHeight = 17.sp)
                     }
-                    Switch(checked = markerEnabled, onCheckedChange = null)
+                    Switch(checked = markerEnabled, onCheckedChange = {
+                        markerEnabled = it && android.provider.Settings.canDrawOverlays(ctx)
+                        onMatchMarker(it)
+                    })
                 }
-                HorizontalDivider(color = PL.line, modifier = Modifier.padding(start = 62.dp))
+            }
+        }
+        item(key = "match-label") { SettingsSectionLabel("MATCH EXPERIENCE") }
+        item(key = "match") {
+            SettingsGroup {
                 SettingsActionRow(Icons.Rounded.GraphicEq, "Whistle sounds", "Record and listen to a test", { whistleOpen = !whistleOpen },
                     if (whistleOpen) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore)
                 AnimatedVisibility(whistleOpen) {
                     Column(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 16.dp)) { WhistleSoundsBody(ctx) }
                 }
+                HorizontalDivider(color = PL.line, modifier = Modifier.padding(start = 62.dp))
+                Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.Top) {
+                    SettingsRowIcon(Icons.Rounded.Star)
+                    Column(Modifier.padding(start = 12.dp)) {
+                        Text("PeerCoins", color = PL.ink, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                        Text("Earn coins from matches verified on the eFootball result screen.", color = PL.muted, fontSize = 12.sp, lineHeight = 17.sp)
+                    }
+                }
             }
         }
-        item(key = "help-label") { SettingsSectionLabel("Support") }
+        item(key = "help-label") { SettingsSectionLabel("HELP & DIAGNOSTICS") }
         item(key = "help") {
             SettingsGroup {
-                SettingsActionRow(Icons.Rounded.Download, "Export match logs", "Save diagnostics to Downloads", onExportLogs)
+                SettingsActionRow(Icons.Rounded.Download, "Export match logs", "Save a copy to share when you need help", onExportLogs)
                 HorizontalDivider(color = PL.line, modifier = Modifier.padding(start = 62.dp))
                 SettingsActionRow(Icons.Rounded.Description, "Crash logs & advanced", "View crash reports and additional tools", onOpenDiagnostics)
             }
@@ -1191,12 +1231,13 @@ private fun SettingsPage(
 }
 
 @Composable private fun SettingsSectionLabel(label: String) {
-    Text(label, color = PL.inkSoft, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
-        modifier = Modifier.padding(start = 3.dp, top = 4.dp).semantics { heading() })
+    Text(label, color = PL.muted, fontSize = 10.sp, fontWeight = FontWeight.Bold,
+        letterSpacing = 1.3.sp, modifier = Modifier.padding(start = 3.dp, top = 2.dp))
 }
 
 @Composable private fun SettingsGroup(content: @Composable ColumnScope.() -> Unit) {
-    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(19.dp)).background(PL.elevated), content = content)
+    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp)).background(PL.elevated)
+        .border(1.dp, PL.line.copy(alpha = 0.8f), RoundedCornerShape(22.dp)), content = content)
 }
 
 @Composable private fun SettingsRowIcon(icon: ImageVector) {
@@ -1207,10 +1248,9 @@ private fun SettingsPage(
 
 @Composable private fun SettingsActionRow(
     icon: ImageVector, title: String, detail: String, onClick: () -> Unit,
-    trailing: ImageVector = Icons.Rounded.ChevronRight,
-    modifier: Modifier = Modifier,
+    trailing: ImageVector = Icons.Rounded.ArrowForward,
 ) {
-    Row(modifier.fillMaxWidth().clickable(role = Role.Button, onClick = onClick).padding(15.dp),
+    Row(Modifier.fillMaxWidth().clickable(role = Role.Button, onClick = onClick).padding(16.dp),
         verticalAlignment = Alignment.CenterVertically) {
         SettingsRowIcon(icon)
         Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
@@ -1574,42 +1614,48 @@ fun PrimeSetupScreen(
     var shellOk by remember { mutableStateOf<Boolean?>(null) }
     var shellBusy by remember { mutableStateOf(false) }
     val shellScope = rememberCoroutineScope()
-    val (primeTitle, statusColor) = when {
-        isActive -> "Prime is active" to PL.green
-        state == GodModeManager.State.PAIRED_IDLE && snap.bootstrapped -> "Ready to activate" to PL.green
-        state == GodModeManager.State.PAIRED_IDLE -> "Waiting for access" to PL.gold
-        pairingBusy -> "Pairing this phone" to PL.indigoGlow
-        activationBusy -> "Starting Prime Mode" to PL.indigoGlow
-        state == GodModeManager.State.ERROR -> "Setup interrupted" to PL.red
-        else -> "Set up Prime" to PL.indigoGlow
+    val (heroLabel, heroColor) = when {
+        isActive -> "Prime Mode Active" to PL.green
+        state == GodModeManager.State.PAIRED_IDLE && snap.bootstrapped -> "Prime Mode Ready" to PL.green
+        state == GodModeManager.State.PAIRED_IDLE -> "Paired — bootstrap pending" to PL.gold
+        pairingBusy -> "Pairing in progress" to PL.indigo
+        activationBusy -> "Starting Prime Mode" to PL.indigo
+        state == GodModeManager.State.ERROR -> "Prime Mode Error" to PL.red
+        else -> "Not set up" to PL.muted
     }
 
-    BackHandler(onBack = onBack)
-    Column(Modifier.fillMaxSize().background(PL.bg).statusBarsPadding().navigationBarsPadding().imePadding()
-        .testTag("prime-setup-screen")) {
-        Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+    Column(Modifier.fillMaxSize().background(PL.bg).statusBarsPadding().verticalScroll(rememberScrollState()).testTag("prime-setup-screen")) {
+        Row(Modifier.fillMaxWidth().padding(12.dp, 8.dp, 16.dp, 6.dp), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onBack) { Icon(Icons.Rounded.ArrowBack, "Back", tint = PL.ink) }
-            Text("Prime Mode", fontSize = 22.sp, fontWeight = FontWeight.SemiBold, color = PL.ink,
-                modifier = Modifier.semantics { heading() })
+            Text("Prime Mode", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = PL.ink)
         }
-        HorizontalDivider(color = PL.line)
-        Column(
-            Modifier.weight(1f).widthIn(max = 560.dp).fillMaxWidth().align(Alignment.CenterHorizontally)
-                .verticalScroll(rememberScrollState()).padding(start = 20.dp, end = 20.dp, top = 16.dp, bottom = 24.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Row(
-                Modifier.fillMaxWidth().clip(RoundedCornerShape(21.dp)).background(PL.elevated).padding(16.dp),
-                verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                SettingsRowIcon(Icons.Rounded.Bolt)
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(primeTitle, color = statusColor, fontSize = 19.sp, lineHeight = 24.sp,
-                        fontWeight = FontWeight.SemiBold)
-                    Text(status.ifBlank {
-                        if (isPaired) "Manage memory and performance controls for your matches."
-                        else "Pair this phone to use memory recording and performance controls."
-                    }, color = PL.inkSoft, fontSize = 13.sp, lineHeight = 19.sp)
+        Column(Modifier.padding(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+
+            // status hero
+            Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(26.dp))
+                .background(Brush.linearGradient(listOf(Color(0xFF302B49), Color(0xFF222C2C))))
+                .border(1.dp, PL.indigo.copy(alpha = 0.25f), RoundedCornerShape(26.dp)).padding(20.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(13.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.size(46.dp).clip(RoundedCornerShape(15.dp)).background(PL.indigo.copy(alpha = 0.17f)), contentAlignment = Alignment.Center) {
+                            Icon(if (isActive) Icons.Rounded.FlashOn else Icons.Rounded.AutoAwesome, null, tint = PL.indigoGlow, modifier = Modifier.size(23.dp))
+                        }
+                        Spacer(Modifier.width(13.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text("PRIME MODE", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = PL.indigoGlow, letterSpacing = 1.2.sp)
+                            Text(heroLabel, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = PL.ink)
+                        }
+                        Box(Modifier.size(8.dp).clip(CircleShape).background(heroColor))
+                    }
+                    Text(if (isActive) "Ready for your match." else if (isPaired) "Your controls, ready when you are." else "A little setup.\nMore control.",
+                        color = PL.ink, fontSize = 23.sp, lineHeight = 28.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.5).sp)
+                    Text(status.ifBlank { "Pair this phone once to use supported Prime controls." },
+                        fontSize = 12.sp, color = PL.inkSoft, lineHeight = 18.sp)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        PrimeStatusPill(Modifier.weight(1f), "PAIRED", isPaired)
+                        PrimeStatusPill(Modifier.weight(1f), "GRANT", snap.bootstrapped)
+                        PrimeStatusPill(Modifier.weight(1f), "ENGINE", snap.primeServerAlive)
+                    }
                 }
             }
 
@@ -1619,10 +1665,10 @@ fun PrimeSetupScreen(
                 }
             }
             if (!isPaired || isBusy || showPairingHelp) {
-                SettingsSectionLabel("Pair your phone")
+                SettingsSectionLabel("PAIR THIS PHONE")
                 PrimeSetupStep(
-                    "1", "Start in PeerLink",
-                    "Open the pairing notification. Allow notifications if Android asks.",
+                    "1", "Start pairing",
+                    "Start PeerLink's pairing notification first. Allow notifications if Android asks.",
                 ) {
                     GhostBtn(
                         when (state) {
@@ -1641,16 +1687,13 @@ fun PrimeSetupScreen(
                     }, fontSize = 11.sp, color = if (pairingBusy) PL.green else PL.muted, lineHeight = 16.sp)
                 }
                 PrimeSetupStep(
-                    "2", "Pair in Android settings",
+                    "2", "Open Wireless Debugging",
                     "Turn it on, choose “Pair device with pairing code”, then enter the 6-digit code in the PeerLink notification.",
                 ) {
                     GhostBtn("Open Developer Options", Icons.Rounded.Settings) { GodModeManager.openWirelessDebuggingSettings(ctx) }
                     Spacer(Modifier.height(7.dp))
-                    Text(when {
-                        android.os.Build.VERSION.SDK_INT < 30 -> "Android 11 or newer is required."
-                        wirelessDebugAvailable -> "Wireless Debugging is on."
-                        else -> "Turn on Wireless Debugging in Developer options."
-                    }, fontSize = 11.sp,
+                    Text(if (wirelessDebugAvailable) "Wireless Debugging detected."
+                        else "Android 11 or newer is required.", fontSize = 11.sp,
                         color = if (wirelessDebugAvailable) PL.green else PL.muted, lineHeight = 16.sp)
                 }
             }
@@ -1658,10 +1701,12 @@ fun PrimeSetupScreen(
             if (isPaired) {
                 Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(PL.surface).border(1.dp, PL.line, RoundedCornerShape(16.dp)).padding(16.dp)) {
                     Column {
+                        Text("Master switch", fontSize = 9.sp, fontWeight = FontWeight.ExtraBold, color = PL.muted, letterSpacing = 1.5.sp)
+                        Spacer(Modifier.height(8.dp))
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
-                                Text("Prime controls", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = PL.ink)
-                                Text("Enable the selected controls for your session", fontSize = 12.sp, lineHeight = 17.sp, color = PL.muted)
+                                Text("Prime Master", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = PL.ink)
+                                Text("Applies the selected verified controls for your session", fontSize = 11.sp, color = PL.muted)
                             }
                             Switch(
                                 checked = master,
@@ -1681,8 +1726,8 @@ fun PrimeSetupScreen(
                                 actionId = "activate",
                                 label = when {
                                     activationBusy -> "Connecting…"
-                                    !master -> "Enable Prime controls first"
-                                    else -> "Activate Prime Mode"
+                                    !master -> "Turn on Prime Master first"
+                                    else -> "Activate Now"
                                 },
                                 icon = Icons.Rounded.FlashOn,
                                 feedback = actionFeedback,
@@ -1767,7 +1812,7 @@ fun PrimeSetupScreen(
                     }
                     if (!snap.primeServerAlive) {
                         Spacer(Modifier.height(8.dp))
-                        Text("Activate Prime Mode to run commands.", fontSize = 11.sp, color = PL.muted)
+                        Text("Activate Prime first so the engine can run pm.", fontSize = 11.sp, color = PL.muted)
                     }
                     if (shellOutput.isNotBlank()) {
                         Spacer(Modifier.height(10.dp))
@@ -1780,6 +1825,15 @@ fun PrimeSetupScreen(
                         )
                     }
                 }
+
+                Text(
+                    "PRIME CONTROL CENTER · ANDROID ${capabilities.sdk}",
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = PL.gold,
+                    letterSpacing = 1.4.sp,
+                    modifier = Modifier.padding(top = 3.dp, start = 2.dp),
+                )
 
                 PrimeControlCard(
                     title = "Prime Memory",
@@ -2218,35 +2272,44 @@ private fun PrimeActionButton(
     }
 }
 
+@Composable private fun PrimeStatusPill(modifier: Modifier, label: String, on: Boolean) =
+    Box(modifier.clip(RoundedCornerShape(10.dp)).background(if (on) PL.green.copy(alpha = 0.14f) else PL.elevated).border(1.dp, if (on) PL.green.copy(alpha = 0.4f) else PL.line, RoundedCornerShape(10.dp)).padding(vertical = 8.dp), contentAlignment = Alignment.Center) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+            Box(Modifier.size(6.dp).clip(CircleShape).background(if (on) PL.green else PL.muted))
+            Text(label, fontSize = 9.sp, fontWeight = FontWeight.ExtraBold, color = if (on) PL.green else PL.muted, letterSpacing = 1.sp)
+        }
+    }
+
 @Composable private fun PrimeSetupStep(num: String, title: String, desc: String, action: @Composable ColumnScope.() -> Unit) {
     Box(
         Modifier.fillMaxWidth()
             .clip(RoundedCornerShape(22.dp))
             .background(PL.elevated)
+            .border(1.dp, PL.line, RoundedCornerShape(22.dp))
             .padding(18.dp)
     ) {
         Column {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(30.dp).background(PL.surface, RoundedCornerShape(10.dp)), contentAlignment = Alignment.Center) {
-                    Text(num, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = PL.indigoGlow)
+                Box(Modifier.size(30.dp).clip(RoundedCornerShape(10.dp)).background(PL.gold.copy(alpha = 0.12f)), contentAlignment = Alignment.Center) {
+                    Text(num, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = PL.gold)
                 }
                 Spacer(Modifier.width(10.dp))
-                Text(title, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = PL.ink)
+                Text(title, fontSize = 13.5.sp, fontWeight = FontWeight.Bold, color = PL.ink)
             }
             Spacer(Modifier.height(8.dp))
             Text(
                 desc,
-                fontSize = 13.sp,
-                color = PL.inkSoft,
-                lineHeight = 19.sp,
-                modifier = Modifier.padding(bottom = 10.dp),
+                fontSize = 11.5.sp,
+                color = PL.muted,
+                lineHeight = 16.sp,
+                modifier = Modifier.padding(start = 36.dp, bottom = 10.dp),
             )
             // IMPORTANT: setup actions contain multiple children (button, status,
             // input, etc.). A Box stacks children at the same origin, which caused
             // the overlap visible on real phones. A Column gives each child its own
             // measured vertical space and remains safe with larger font/display scales.
             Column(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().padding(start = 36.dp),
                 content = action,
             )
         }

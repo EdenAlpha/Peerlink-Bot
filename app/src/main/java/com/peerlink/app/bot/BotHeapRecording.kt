@@ -65,7 +65,7 @@ internal object BotHeapRecording {
             val entry = "recorder_preflight_failed exit=${ready.exitCode} detail=$detail"
             AppState.appendLog("[BOT-MEMORY] $entry")
             runCatching { File(dir, PREFLIGHT_ERROR_FILE).writeText("${System.currentTimeMillis()} $entry\n") }
-            if (ready.exitCode == -1) error("Activate Prime in Settings, then tap Record memory and create room.")
+            if (ready.exitCode == -1) error("Activate Prime in Settings, then tap Clear RAM and create room.")
             error("Could not start memory recording. $detail")
         }
         for (pending in pendingIds(dir)) {

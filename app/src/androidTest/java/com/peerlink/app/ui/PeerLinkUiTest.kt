@@ -71,7 +71,7 @@ class PeerLinkUiTest {
     @Test fun nearbyPlayerCanBeSelected() {
         var selected = 0
         show(connect = { selected++ })
-        compose.onNodeWithText("Local play").assertIsDisplayed()
+        compose.onNodeWithText("Good games.", substring = true).assertIsDisplayed()
         screenshot("home")
         compose.onNodeWithTag("home-list").performScrollToNode(hasText("Alex"))
         compose.onNodeWithText("Alex").performClick()
@@ -100,19 +100,69 @@ class PeerLinkUiTest {
         compose.onNodeWithText("Alex").assertIsDisplayed()
         compose.onNodeWithContentDescription("Settings").performClick()
         compose.onNodeWithTag("settings-screen").assertIsDisplayed()
-        compose.onNodeWithText("Settings").assertIsDisplayed()
+        compose.onNodeWithText("Make it yours.").assertIsDisplayed()
         screenshot("settings-large-text")
         compose.onNodeWithContentDescription("Back").performClick()
         compose.onNodeWithTag("home-list").assertIsDisplayed()
     }
 
-    @Test fun botPageHasOneClearRoomAction() {
+    @Test fun botPageShowsBothRoomActionsWithoutOpeningAMenu() {
         show()
-        compose.onNodeWithText("Bot match", useUnmergedTree = true).performClick()
+        compose.onNodeWithText("Play PeerLink", useUnmergedTree = true).performClick()
         compose.onNodeWithTag("bot-match-page").assertIsDisplayed()
         compose.onNodeWithTag("bot-create-room").assertIsDisplayed()
+        compose.onNodeWithTag("bot-clear-ram").assertIsDisplayed()
         compose.onAllNodesWithText("Create room").assertCountEquals(1)
         screenshot("bot-match")
+    }
+
+    @Test fun roomButtonsRequestTheRightModeAndRespectDataVerification() {
+        val primeActive = androidx.compose.runtime.mutableStateOf(false)
+        val data = androidx.compose.runtime.mutableStateOf(BotDataState())
+        val pack = com.peerlink.app.bot.GameDatabaseUpdate.current
+        val requested = mutableListOf<Boolean>()
+        compose.setContent {
+            PeerLinkTheme {
+                PlayPeerLinkContent(context, RoomState.Idle, primeReady = primeActive.value,
+                    primeActive = primeActive.value, botSession = false, traffic = BotPacketCounts(),
+                    onExportLogs = {}, data = data.value, onCreateRoom = { requested.add(it) })
+            }
+        }
+        val create = compose.onNodeWithTag("bot-create-room")
+        val clear = compose.onNodeWithTag("bot-clear-ram")
+        create.assertIsDisplayed().performClick()
+        clear.assertIsDisplayed().assertTextEquals("Clear RAM and create room").performClick()
+        compose.runOnIdle { primeActive.value = true }
+        clear.assertIsDisplayed().performClick()
+        compose.runOnIdle {
+            assertEquals(listOf(false, true, true), requested)
+            data.value = BotDataState(busy = "Checking saved data…")
+        }
+        create.assertIsNotEnabled()
+        clear.assertIsNotEnabled()
+        compose.runOnIdle { data.value = BotDataState(invalid = true) }
+        create.assertIsNotEnabled()
+        clear.assertIsNotEnabled()
+        compose.runOnIdle { data.value = BotDataState(pack = pack) }
+        create.assertIsEnabled()
+        clear.assertIsEnabled()
+        compose.onNodeWithTag("bot-match-page").performScrollToNode(hasText("Saved update · ${pack.date}"))
+        compose.onNodeWithTag("bot-match-page").performScrollToNode(hasText("Replace saved update"))
+        compose.onNodeWithText("Replace saved update").assertIsDisplayed()
+    }
+
+    @Test fun recordedRoomRetryPreservesRecordingAndOffersOrdinaryRoom() {
+        val requested = mutableListOf<Boolean>()
+        compose.setContent {
+            PeerLinkTheme {
+                PlayPeerLinkContent(context, RoomState.Failed("Prime did not respond.", recordMemoryOnRetry = true),
+                    primeReady = true, primeActive = false, botSession = false, traffic = BotPacketCounts(),
+                    onExportLogs = {}, onCreateRoom = { requested.add(it) })
+            }
+        }
+        compose.onNodeWithText("Retry RAM cleanup and create room").performClick()
+        compose.onNodeWithText("Create room without recording").performClick()
+        compose.runOnIdle { assertEquals(listOf(true, false), requested) }
     }
 
     @Test fun settingsOpensPrimeSetupAndKeepsCrashLogsReachable() {
@@ -137,7 +187,7 @@ class PeerLinkUiTest {
                 }
             }
         }
-        compose.onNodeWithTag("bot-room-code", useUnmergedTree = true).assertTextEquals("123456789")
+        compose.onNodeWithTag("bot-room-code").assertTextEquals("123456789")
         compose.onNodeWithText("Your game joined. The bot is getting ready.").assertIsDisplayed()
         compose.onNodeWithTag("bot-open-game").assertIsDisplayed()
         screenshot("bot-room-ready")
@@ -175,7 +225,7 @@ class PeerLinkUiTest {
         }, context)
         try {
             show()
-            compose.onNodeWithText("Bot match", useUnmergedTree = true).performClick()
+            compose.onNodeWithText("Play PeerLink", useUnmergedTree = true).performClick()
             compose.onNodeWithTag("bot-create-room").performClick()
             compose.waitUntil(5000) { PlayRoomController.state.value is RoomState.Failed }
             compose.onNodeWithText("Couldn't open the room").assertIsDisplayed()
