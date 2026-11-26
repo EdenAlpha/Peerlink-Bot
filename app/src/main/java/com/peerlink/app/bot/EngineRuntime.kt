@@ -28,7 +28,7 @@ internal object EngineRuntime {
     var audit: (String) -> Unit = {}
     @Volatile var startupRetryable = true
         private set
-    var usingSavedDatabaseUpdate = false
+    @Volatile var savedDatabasePack: GameDatabaseUpdate.Pack? = null
         private set
     @Volatile private var runtimeThread: Thread? = null
     private val runtime = ScheduledThreadPoolExecutor(1) { action ->
@@ -139,10 +139,16 @@ internal object EngineRuntime {
         startupRetryable = true
         if (!nativeAvailable || uid !in 1..0xffffffffL) return false
         val app = context.applicationContext ?: context
-        val useSavedUpdate = GameDatabaseUpdate.isImported(app)
+        val selectedPack = try {
+            GameDatabaseUpdate.selectedPack(app)
+        } catch (error: Exception) {
+            startupRetryable = false
+            report(error.message ?: "PeerLink could not check its saved eFootball data.")
+            return false
+        }
         if (client != 0L) {
             if (ownerUid == uid) {
-                if (usingSavedDatabaseUpdate == useSavedUpdate) return true
+                if (savedDatabasePack == selectedPack) return true
                 report("Restart the bot session to change its eFootball data.")
                 return false
             }
@@ -233,14 +239,16 @@ internal object EngineRuntime {
                     error("Graphics-free bot did not initialize")
                 }
             }
-            check(files.savedDatabaseUpdate == useSavedUpdate) { "The selected update changed during startup. Try again." }
-            check(!usingSavedDatabaseUpdate || useSavedUpdate) { "Restart the bot session to change its eFootball data." }
+            check(files.savedDatabasePack == selectedPack) { "The selected update changed during startup. Try again." }
+            check(savedDatabasePack == null || savedDatabasePack == selectedPack) {
+                "Restart the bot session to change its eFootball data."
+            }
             check(onRuntime { nativeLoadDatabase(base, files.database.absolutePath) }) { "Bot game database could not start" }
-            if (files.savedDatabaseUpdate) {
+            if (selectedPack != null) {
                 report("Loading the saved eFootball update")
                 startupRetryable = false
-                val result = onRuntime { nativeApplySavedDatabase(base) }
-                audit("[BOT-FILES] SAVED_DATABASE_UPDATE result=$result")
+                val result = onRuntime { nativeApplySavedDatabase(base, selectedPack.playerCount) }
+                audit("[BOT-FILES] SAVED_DATABASE_UPDATE result=$result SHA256=${selectedPack.fingerprint.sha256}")
                 check(result == 1) {
                     when (result) {
                         -2, -3 -> "The engine could not open the saved eFootball update."
@@ -251,7 +259,7 @@ internal object EngineRuntime {
                         else -> "The bot's database was unavailable."
                     }
                 }
-                usingSavedDatabaseUpdate = true
+                savedDatabasePack = selectedPack
                 startupRetryable = true
             } else {
                 val editSupplement = stageEditSupplement(app)
@@ -317,7 +325,8 @@ internal object EngineRuntime {
 
     fun databaseDiagnostics(): String = onRuntime { nativeDatabaseDiagnostics(base) }
     fun verifySavedDatabase(): Boolean = onRuntime {
-        usingSavedDatabaseUpdate && nativeVerifySavedDatabase(base)
+        val pack = savedDatabasePack
+        pack != null && nativeVerifySavedDatabase(base, pack.playerCount)
     }
     fun networkStartupDiagnostics(): String = onRuntime {
         nativeNetworkStartupDiagnostics(base) + " " + (discovery?.diagnostics() ?: "localStunReady=false")
@@ -474,8 +483,8 @@ internal object EngineRuntime {
     private external fun nativeApplicationReady(base: Long): Boolean
     private external fun nativeStartupInfo(base: Long): String
     private external fun nativeLoadDatabase(base: Long, path: String): Boolean
-    private external fun nativeApplySavedDatabase(base: Long): Int
-    private external fun nativeVerifySavedDatabase(base: Long): Boolean
+    private external fun nativeApplySavedDatabase(base: Long, expectedPlayers: Int): Int
+    private external fun nativeVerifySavedDatabase(base: Long, expectedPlayers: Int): Boolean
     private external fun nativePrepareChannels(base: Long, peer: Long, home: Long, squad: String): Boolean
     private external fun nativeSetupMatch(base: Long, peer: Long, squad: String, context: String, roomRules: String): Boolean
     private external fun nativeSnapshot(base: Long, passive: Boolean): LongArray

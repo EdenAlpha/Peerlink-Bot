@@ -68,6 +68,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -213,6 +214,7 @@ class MainActivity : AppCompatActivity(), NsdDiscovery.NsdCallback {
         if (intent?.action == PeerBotService.ACTION_VPN_CONSENT) requestBotVpnConsent()
 
         setContent {
+            val screenState = rememberSaveableStateHolder()
             var isDestroyed by remember { mutableStateOf(prefs.getBoolean("isDestroyed", false)) }
                 var isUnlocked by remember { mutableStateOf(prefs.getBoolean("isUnlocked", false)) }
                 var isAdminState by remember { mutableStateOf(prefs.getBoolean("isAdmin", false)) }
@@ -241,7 +243,7 @@ class MainActivity : AppCompatActivity(), NsdDiscovery.NsdCallback {
                             },
                         )
                     }
-                } else PeerLinkTheme {
+                } else screenState.SaveableStateProvider("peerlink-main") { PeerLinkTheme {
                     LaunchedEffect(Unit) { runPostUnlockStartupOnce() }
 
                     var pendingDiscovery by remember { mutableStateOf<(() -> Unit)?>(null) }
@@ -540,7 +542,7 @@ class MainActivity : AppCompatActivity(), NsdDiscovery.NsdCallback {
                         },
                     )
                 )
-                }
+                } }
         }
     }
 

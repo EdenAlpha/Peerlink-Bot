@@ -205,7 +205,7 @@ object EngineBridge {
         log("engine status: staged=$stagedBytes bytes loaded=$loaded")
 
         if (loaded) {
-            if (EngineHost.usingSavedDatabaseUpdate == GameDatabaseUpdate.isImported(context)) return true
+            if (EngineHost.savedDatabaseSha256 == GameDatabaseUpdate.selectedPack(context)?.fingerprint?.sha256) return true
             EngineHost.stop("saved_database_update_changed")
         }
         val stagedFingerprint = stageVerifiedEngine(context)

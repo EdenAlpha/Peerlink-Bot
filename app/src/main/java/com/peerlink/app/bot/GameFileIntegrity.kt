@@ -60,19 +60,27 @@ internal class GameFileIntegrity(
     /** Verify the new bytes before replacing a previous copy, including same-size corruption. */
     fun replace(input: InputStream, destination: File, label: String, expected: Fingerprint,
                 readOnly: Boolean = false) {
+        replace(input, destination, label, readOnly) { actual ->
+            check(actual == expected) { "Source changed or copy failed for $label; unchecked bytes were not installed" }
+        }
+    }
+
+    fun replace(input: InputStream, destination: File, label: String, readOnly: Boolean,
+                verify: (Fingerprint) -> Unit): Fingerprint {
         val parent = requireNotNull(destination.parentFile)
         check(parent.isDirectory || parent.mkdirs()) { "Cannot create directory for $label" }
         val temporary = File.createTempFile(".verified-", ".tmp", parent)
         try {
             temporary.outputStream().use { output -> input.copyTo(output, 128 * 1024); output.fd.sync() }
             val actual = fingerprintPrivateFile(temporary)
-            check(actual == expected) { "Source changed or copy failed for $label; unchecked bytes were not installed" }
+            verify(actual)
             if (readOnly) check(temporary.setReadOnly()) { "Cannot protect $label" }
             check(temporary.renameTo(destination)) { "Cannot save verified $label" }
             verified++
             repaired++
             onVerifiedCopy(destination)
             report("[BOT-FILES] REPAIRED file=$label bytes=${actual.bytes} SHA256=${actual.sha256}")
+            return actual
         } finally { temporary.delete() }
     }
 

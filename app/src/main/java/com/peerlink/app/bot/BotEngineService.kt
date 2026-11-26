@@ -133,7 +133,7 @@ class BotEngineService : Service() {
                     result.putBoolean("ok", EngineRuntime.prepare(this, args.getLong("uid")))
                     result.putInt("pid", Process.myPid())
                     result.putBoolean("retryable", EngineRuntime.startupRetryable)
-                    result.putBoolean("savedDatabaseUpdate", EngineRuntime.usingSavedDatabaseUpdate)
+                    result.putString("savedDatabaseSha256", EngineRuntime.savedDatabasePack?.fingerprint?.sha256)
                     diagnostic("ENGINE_FOREGROUND state=$foregroundStatus pid=${Process.myPid()}")
                     if (!result.getBoolean("ok")) result.putString("reason", lastStatus.ifBlank { "Bot simulation could not start" })
                     if (result.getBoolean("ok")) diagnostic(EngineRuntime.networkStartupDiagnostics())

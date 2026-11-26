@@ -8,7 +8,7 @@ import java.util.zip.ZipInputStream
 /** App-private working files; the installed game and its saved data remain read-only. */
 internal object GameAssets {
     data class Prepared(val game: Context, val root: File, val missingMatchResources: Int = 0,
-                        val savedDatabaseUpdate: Boolean = false) {
+                        val savedDatabasePack: GameDatabaseUpdate.Pack? = null) {
         val project get() = File(root, "project/PesMobile")
         val database get() = File(root, "database")
     }
@@ -176,15 +176,15 @@ internal object GameAssets {
             GameResourcePacks.link(source, File(nativePaks, name), fingerprint, audit)
         }
         val missingMatchResources = GameResourcePacks.verifyAndLink(owner, nativePaks, audit, allowMissingMatchResources)
-        val savedDatabaseUpdate = GameDatabaseUpdate.stage(owner, root, audit)
+        val savedDatabasePack = GameDatabaseUpdate.stage(owner, root, audit)
         check(installation() == identity) { "Installed game changed during verification; retry with the game update finished" }
         val cacheSaved = fingerprints.save()
         audit("[BOT-FILES] INSTALLATION_CACHE reusedSourceBytes=$reusedSourceBytes saved=$cacheSaved")
         audit("BOT_MEMORY_CACHE phase=verified_copies advisedFiles=$advisedFiles advisedBytes=$advisedBytes")
         audit("[BOT-FILES] SUMMARY result=PASS verified=${integrity.verified} repaired=${integrity.repaired} " +
             "cpk=${names.size} resources=${resources.size} nativeResources=${resources.size} databaseTables=$databaseTables nativeDatabaseTables=44 " +
-            "savedDatabaseUpdateStaged=$savedDatabaseUpdate")
-        return prepared.copy(missingMatchResources = missingMatchResources, savedDatabaseUpdate = savedDatabaseUpdate)
+            "savedDatabaseUpdateStaged=${savedDatabasePack != null}")
+        return prepared.copy(missingMatchResources = missingMatchResources, savedDatabasePack = savedDatabasePack)
     }
 
     private fun resourceDestination(root: File, name: String): File {

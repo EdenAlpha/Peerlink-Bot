@@ -71,7 +71,7 @@ class PeerLinkUiTest {
     @Test fun nearbyPlayerCanBeSelected() {
         var selected = 0
         show(connect = { selected++ })
-        compose.onNodeWithText("Good games.", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("Local play").assertIsDisplayed()
         screenshot("home")
         compose.onNodeWithTag("home-list").performScrollToNode(hasText("Alex"))
         compose.onNodeWithText("Alex").performClick()
@@ -100,7 +100,7 @@ class PeerLinkUiTest {
         compose.onNodeWithText("Alex").assertIsDisplayed()
         compose.onNodeWithContentDescription("Settings").performClick()
         compose.onNodeWithTag("settings-screen").assertIsDisplayed()
-        compose.onNodeWithText("Make it yours.").assertIsDisplayed()
+        compose.onNodeWithText("Settings").assertIsDisplayed()
         screenshot("settings-large-text")
         compose.onNodeWithContentDescription("Back").performClick()
         compose.onNodeWithTag("home-list").assertIsDisplayed()
@@ -108,7 +108,7 @@ class PeerLinkUiTest {
 
     @Test fun botPageHasOneClearRoomAction() {
         show()
-        compose.onNodeWithText("Play PeerLink", useUnmergedTree = true).performClick()
+        compose.onNodeWithText("Bot match", useUnmergedTree = true).performClick()
         compose.onNodeWithTag("bot-match-page").assertIsDisplayed()
         compose.onNodeWithTag("bot-create-room").assertIsDisplayed()
         compose.onAllNodesWithText("Create room").assertCountEquals(1)
@@ -137,7 +137,7 @@ class PeerLinkUiTest {
                 }
             }
         }
-        compose.onNodeWithTag("bot-room-code").assertTextEquals("123456789")
+        compose.onNodeWithTag("bot-room-code", useUnmergedTree = true).assertTextEquals("123456789")
         compose.onNodeWithText("Your game joined. The bot is getting ready.").assertIsDisplayed()
         compose.onNodeWithTag("bot-open-game").assertIsDisplayed()
         screenshot("bot-room-ready")
@@ -175,7 +175,7 @@ class PeerLinkUiTest {
         }, context)
         try {
             show()
-            compose.onNodeWithText("Play PeerLink", useUnmergedTree = true).performClick()
+            compose.onNodeWithText("Bot match", useUnmergedTree = true).performClick()
             compose.onNodeWithTag("bot-create-room").performClick()
             compose.waitUntil(5000) { PlayRoomController.state.value is RoomState.Failed }
             compose.onNodeWithText("Couldn't open the room").assertIsDisplayed()

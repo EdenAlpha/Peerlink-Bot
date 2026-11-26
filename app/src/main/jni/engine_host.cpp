@@ -222,15 +222,14 @@ struct TaskLock {
 // Compare the active 11.1.1 database with the saved pack after the engine
 // finishes loading. The stock database has 24,203 records and different
 // parameter values for player key 15320.
-bool matches_saved_database(uintptr_t owner) {
-    if (!owner || *reinterpret_cast<const uint32_t *>(owner + 0x30) != 4) return false;
+bool matches_saved_database(uintptr_t owner, uint32_t expected_players) {
+    if (!owner || !expected_players || *reinterpret_cast<const uint32_t *>(owner + 0x30) != 4) return false;
     const auto work = *reinterpret_cast<const uintptr_t *>(owner + 0x40);
     const auto edit = *reinterpret_cast<const uintptr_t *>(owner + 0x50);
     const auto players = work ? *reinterpret_cast<const uint32_t *>(work + 0x2686098) : 0;
     const auto appearances = edit ? *reinterpret_cast<const uint32_t *>(edit + 0x66b0c4) : 0;
-    constexpr uint32_t kExpectedPlayers = 47'370;
     bool parameters_match = false;
-    if (players == kExpectedPlayers && appearances == kExpectedPlayers) {
+    if (players == expected_players && appearances == expected_players) {
         struct PlayerIdentity { uint32_t id, padding; uint64_t key; };
         const auto player = work + 29 * 0x1d0;
         const auto identity = entry<PlayerIdentity (*)(uintptr_t)>(0x68fe720)(player);
@@ -240,8 +239,8 @@ bool matches_saved_database(uintptr_t owner) {
             parameter(player, 0, &value0) && value0 == 8 &&
             parameter(player, 61, &value61) && value61 == 5;
     }
-    peerlink_journal("SAVED_DATABASE_VERIFIED players=%u appearances=%u parametersMatch=%u",
-                     players, appearances, unsigned(parameters_match));
+    peerlink_journal("SAVED_DATABASE_VERIFIED players=%u appearances=%u parametersMatch=%u expectedPlayers=%u",
+                     players, appearances, unsigned(parameters_match), expected_players);
     return parameters_match;
 }
 
@@ -487,9 +486,12 @@ JNIEXPORT jboolean JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeLoadDat
 }
 
 JNIEXPORT jint JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeApplySavedDatabase(
-        JNIEnv *, jobject, jlong base) {
-    if (!valid(base) || !g_core_ready || g_client || g_match_stage) return -1;
-    if (g_saved_database_ready) return 1;
+        JNIEnv *, jobject, jlong base, jint expected_players) {
+    if (!valid(base) || !g_core_ready || g_client || g_match_stage || expected_players <= 0) return -1;
+    if (g_saved_database_ready) {
+        TaskLock lock;
+        return lock.manager && matches_saved_database(entry<uintptr_t (*)()>(0x82468d4)(), expected_players) ? 1 : -5;
+    }
     if (g_saved_database_attempted) return -7;
     g_saved_database_attempted = true;
 
@@ -547,7 +549,7 @@ JNIEXPORT jint JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeApplySavedD
                     break;
                 case Phase::WaitForDatabase:
                     if (stage != kDatabaseReady) break;
-                    if (!matches_saved_database(owner)) return -5;
+                    if (!matches_saved_database(owner, expected_players)) return -5;
                     const auto consumer = entry<uintptr_t (*)()>(0x7b59768)();
                     if (consumer) entry<void (*)(uintptr_t)>(0x7b59808)(consumer);
                     g_saved_database_ready = true;
@@ -562,10 +564,10 @@ JNIEXPORT jint JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeApplySavedD
 }
 
 JNIEXPORT jboolean JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeVerifySavedDatabase(
-        JNIEnv *, jobject, jlong base) {
-    if (!valid(base) || !g_saved_database_ready || !g_client || g_match_stage) return JNI_FALSE;
+        JNIEnv *, jobject, jlong base, jint expected_players) {
+    if (!valid(base) || !g_saved_database_ready || !g_client || g_match_stage || expected_players <= 0) return JNI_FALSE;
     TaskLock lock;
-    return lock.manager && matches_saved_database(entry<uintptr_t (*)()>(0x82468d4)()) ? JNI_TRUE : JNI_FALSE;
+    return lock.manager && matches_saved_database(entry<uintptr_t (*)()>(0x82468d4)(), expected_players) ? JNI_TRUE : JNI_FALSE;
 }
 
 JNIEXPORT jboolean JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeMergeEditRecords(

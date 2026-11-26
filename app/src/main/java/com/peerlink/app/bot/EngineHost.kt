@@ -16,7 +16,7 @@ object EngineHost {
         private set
     @Volatile internal var startupRetryable = true
         private set
-    @Volatile internal var usingSavedDatabaseUpdate = false
+    @Volatile internal var savedDatabaseSha256: String? = null
         private set
     @Volatile private var ownerUid = 0L
     @Volatile private var service: Messenger? = null
@@ -91,7 +91,7 @@ object EngineHost {
         }
         service = null
         isReady = false
-        usingSavedDatabaseUpdate = false
+        savedDatabaseSha256 = null
         PeerSlot.engineAttached = false
         lastError = "Bot engine stopped — start a new room"
         PeerBotService.status(lastError)
@@ -152,9 +152,9 @@ object EngineHost {
         } finally { pending.remove(id) }
     }
     fun prepare(owner: Context, uid: Long): Boolean = synchronized(preparation) {
-        val useSavedUpdate = GameDatabaseUpdate.isImported(owner)
-        if (isReady) return ownerUid == uid && usingSavedDatabaseUpdate == useSavedUpdate
         try {
+            val selected = GameDatabaseUpdate.selectedPack(owner)?.fingerprint?.sha256
+            if (isReady) return ownerUid == uid && savedDatabaseSha256 == selected
             startupRetryable = true
             stopRequestedAt = 0
             enginePid = 0
@@ -166,14 +166,15 @@ object EngineHost {
                 "foreground=${process.getString("foreground")} importance=${process.getInt("importance")}")
             val result = request(EngineProtocol.PREPARE, Bundle().apply { putLong("uid", uid) }, 300)
             startupRetryable = result.getBoolean("retryable", true)
-            usingSavedDatabaseUpdate = result.getBoolean("savedDatabaseUpdate")
-            isReady = result.getBoolean("ok") && usingSavedDatabaseUpdate == useSavedUpdate
+            savedDatabaseSha256 = result.getString("savedDatabaseSha256")
+            isReady = result.getBoolean("ok") && savedDatabaseSha256 == selected
             if (isReady) ownerUid = uid
             else lastError = result.getString("reason") ?: if (result.getBoolean("ok"))
                 "The selected eFootball data changed. Start a new bot session."
             else "The bot simulation did not start"
             isReady
         } catch (error: Exception) {
+            if (error is GameDatabaseUpdate.UnsupportedArchive) startupRetryable = false
             releaseService()
             lastError = error.cause?.message ?: error.message ?: "Bot startup failed"
             PeerBotService.status(lastError)
@@ -244,7 +245,7 @@ object EngineHost {
         PeerSlot.logFlow("engine_host_stop")
         runCatching { request(EngineProtocol.STOP) }
         isReady = false
-        usingSavedDatabaseUpdate = false
+        savedDatabaseSha256 = null
         ownerUid = 0
         releaseService()
     }

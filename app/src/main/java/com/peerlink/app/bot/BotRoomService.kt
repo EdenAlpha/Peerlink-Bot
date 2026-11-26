@@ -98,11 +98,11 @@ object BotRoomService : BotRoomBackend {
                     "-- the room-time report will retry")
             }
 
-            val usingSavedDatabase = EngineHost.usingSavedDatabaseUpdate
-            check(usingSavedDatabase == GameDatabaseUpdate.isImported(ctx)) {
+            val savedDatabaseSha256 = EngineHost.savedDatabaseSha256
+            check(savedDatabaseSha256 == GameDatabaseUpdate.selectedPack(ctx)?.fingerprint?.sha256) {
                 "The selected eFootball data changed. Try creating a room again."
             }
-            if (usingSavedDatabase) {
+            if (savedDatabaseSha256 != null) {
                 check(EngineHost.verifySavedDatabase()) { "The saved update was no longer active in the bot." }
             }
             val r = gate.createRoom()

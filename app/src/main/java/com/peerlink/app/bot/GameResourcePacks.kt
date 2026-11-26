@@ -103,12 +103,16 @@ internal object GameResourcePacks {
             "source=${if (allowDownload) "verified_local_copies_or_selected_download" else "verified_local_copies"}")
     }
 
-    internal fun bounded(input: InputStream, limit: Long) = object : FilterInputStream(input) {
+    internal fun bounded(input: InputStream, limit: Long,
+                         onSizeExceeded: () -> Nothing = { error("Resource exceeds verified size") }) = object : FilterInputStream(input) {
         private var count = 0L
         override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
             check(!Thread.currentThread().isInterrupted) { "Match resource preparation cancelled" }
             val read = super.read(buffer, offset, length)
-            if (read > 0) { count += read; check(count <= limit) { "Resource exceeds verified size" } }
+            if (read > 0) {
+                count += read
+                if (count > limit) onSizeExceeded()
+            }
             return read
         }
     }
