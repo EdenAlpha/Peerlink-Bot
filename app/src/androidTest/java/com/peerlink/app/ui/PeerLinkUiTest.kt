@@ -215,20 +215,25 @@ class PeerLinkUiTest {
         screenshot("bot-error")
     }
 
+    @OptIn(ExperimentalTestApi::class)
     @Test fun startupFailureLeavesPreparationAndShowsRetry() {
         val previous = PlayRoomController.backend
-        PlayRoomController.attach(object : BotRoomBackend {
+        val failingBackend = object : BotRoomBackend {
             override suspend fun createRoom(ctx: Context, allowResourceDownload: Boolean, verifyEngine: ((Int) -> Unit)?,
                                             onMatchStarting: (() -> Unit)?): String {
                 error("The graphics-free bot could not start.")
             }
-        }, context)
+        }
         try {
             show()
             compose.onNodeWithText("Play PeerLink", useUnmergedTree = true).performClick()
+            compose.waitUntilAtLeastOneExists(hasTestTag("bot-create-room") and isEnabled(), 5000)
+            // The screen attaches its production service when it enters composition.
+            compose.runOnIdle { PlayRoomController.attach(failingBackend, context) }
             compose.onNodeWithTag("bot-create-room").performClick()
             compose.waitUntil(5000) { PlayRoomController.state.value is RoomState.Failed }
             compose.onNodeWithText("Couldn't open the room").assertIsDisplayed()
+            compose.onNodeWithText("The graphics-free bot could not start.").assertIsDisplayed()
             compose.onNodeWithText("Try again").assertIsDisplayed()
             compose.onNodeWithText("Export diagnostics").assertIsDisplayed()
             compose.onNodeWithText("Setting things up").assertDoesNotExist()
