@@ -39,6 +39,7 @@
 #include "game/input_readiness.h"
 #include "game/edit_work_merge.h"
 #include "game/match_pool_memory.h"
+#include "game/received_squad.h"
 
 extern "C" {
 long peerlink_game_database_input(uintptr_t, const char *);
@@ -383,6 +384,27 @@ JNIEXPORT jboolean JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeConfigu
     int result = chdir(directory);
     env->ReleaseStringUTFChars(assets, directory);
     return result == 0 ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT jbyteArray JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeReceivedSquad(
+        JNIEnv *env, jobject, jlong base, jbyteArray own) {
+    peerlink::ReceivedSquad waiting;
+    waiting.envelope.account = g_channel_peer;
+    std::vector<uint8_t> result;
+    const jsize size = own ? env->GetArrayLength(own) : 0;
+    if (valid(base) && g_channel_peer && g_user_sync_complete && size >= 864 && size <= 864 + 40 * 608) {
+        std::vector<uint8_t> input(static_cast<size_t>(size));
+        env->GetByteArrayRegion(own, 0, size, reinterpret_cast<jbyte *>(input.data()));
+        if (env->ExceptionCheck()) return nullptr;
+        TaskLock lock;
+        if (lock.manager)
+            result = peerlink::observeReceivedSquad(g_base, g_uid, g_channel_peer, input.data(), input.size());
+    }
+    if (result.empty()) result = waiting.bytes();
+    jbyteArray output = env->NewByteArray(static_cast<jsize>(result.size()));
+    if (output) env->SetByteArrayRegion(output, 0, static_cast<jsize>(result.size()),
+                                      reinterpret_cast<const jbyte *>(result.data()));
+    return output;
 }
 
 JNIEXPORT jboolean JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeOpenJournal(

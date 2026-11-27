@@ -383,12 +383,17 @@ class MainActivity : AppCompatActivity(), NsdDiscovery.NsdCallback {
                                 val botWires = runCatching { com.peerlink.app.bot.BotWireRecorder.snapshots(this@MainActivity) }
                                     .getOrDefault(emptyList())
                                 val shots = com.peerlink.app.service.ScoreCaptureDump.exportedFiles()
+                                val receivedSquads = com.peerlink.app.bot.ReceivedSquadFiles.exportedFiles(this@MainActivity)
 
                                 // Bundle EVERYTHING into a single zip file.
                                 val entries = mutableListOf<ZipEntryData>()
                                 entries.add(ZipEntryData(name = "match_log.txt", text = fullLog))
                                 entries.add(ZipEntryData(name = "engine_exit_report.txt", text =
                                     com.peerlink.app.bot.EngineProcessExitReports.export(this@MainActivity)))
+                                for (file in receivedSquads)
+                                    entries.add(ZipEntryData(name = "received_squads/${file.name}", file = file))
+                                if (receivedSquads.isEmpty()) entries.add(ZipEntryData(name = "received_squads/status.txt",
+                                    text = "A received squad capture is not available. Open a bot room on this build and reach team setup before exporting.\n"))
                                 val heap = com.peerlink.app.bot.BotHeapRecording.export(this@MainActivity)
                                 for (file in heap.files) entries.add(ZipEntryData(name = "bot_memory/${file.name}", file = file))
                                 if (heap.pending) entries.add(ZipEntryData(name = "bot_memory/pending.txt", text =
@@ -460,6 +465,7 @@ class MainActivity : AppCompatActivity(), NsdDiscovery.NsdCallback {
                                             appendLine("Contents:")
                                             appendLine("- match_log.txt : full session log")
                                             appendLine("- engine_exit_report.txt : Android bot-process exit history queried at export, including retained earlier attempts")
+                                            appendLine("- received_squads/ : decoded opponent squad, keyed player attributes, format checks and compatible PSQ1 engine inputs")
                                             appendLine("- engine_events/ : native frame checks, ball transitions, match states, and process stop events")
                                             if (keeperLogs.isNotEmpty()) appendLine("- keeper_events/ : goalkeeper and scene state around goals and replays, plus local player positions at the first frame check disagreement")
                                             if (heap.files.isNotEmpty() || heap.pending) appendLine("- bot_memory/ : requested bot allocation profiles and recording status")

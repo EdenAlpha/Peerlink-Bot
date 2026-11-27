@@ -68,6 +68,12 @@ class BotEngineService : Service() {
     private var nextHostStall = 0L
     @Volatile private var enteredGameplay = false
     private var diagnosticTask: ScheduledFuture<*>? = null
+    private val squadCaptureId = "${System.currentTimeMillis()}-${Process.myPid()}"
+    private var squadCaptureTask: Future<*>? = null
+    @Volatile private var squadCaptured = false
+    private var squadCaptureAttempts = 0
+    private var nextSquadCapture = 0L
+    private var lastSquadCaptureHash: String? = null
     private val connectionTrace = NativeConnectionTrace()
     private val messenger = Messenger(object : Handler(Looper.getMainLooper()) {
         override fun handleMessage(message: Message) {
@@ -80,6 +86,10 @@ class BotEngineService : Service() {
         super.onCreate()
         EngineRuntime.report = ::report
         EngineRuntime.audit = { line -> diagnostic(line) }
+        memoryWorker.execute {
+            runCatching { ReceivedSquadFiles.start(this, squadCaptureId) }
+                .onFailure { diagnostic("BOT_SQUAD_CAPTURE startError=${it.javaClass.simpleName}") }
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -205,6 +215,7 @@ class BotEngineService : Service() {
                     sampleDiagnostics()
                     diagnosticTask?.cancel(false)
                     automaticPlay = false
+                    squadCaptureTask?.cancel(false)
                     pollTask?.cancel(false)
                     stopPlaying()
                     EngineRuntime.stopPreview()
@@ -351,7 +362,8 @@ class BotEngineService : Service() {
     }
     private fun diagnostic(line: String, firstFailure: Boolean = false) {
         if (firstFailure || line.startsWith("MATCH_LOADING") || line.startsWith("NATIVE_STATE") ||
-            line.startsWith("PEERLINK_STOP") || line.startsWith("BOT_INPUT") || line.startsWith("BOT_MEMORY"))
+            line.startsWith("PEERLINK_STOP") || line.startsWith("BOT_INPUT") || line.startsWith("BOT_MEMORY") ||
+            line.startsWith("BOT_SQUAD_CAPTURE"))
             EngineRuntime.journal(line)
         runCatching { observer?.send(Message.obtain(null, EngineProtocol.DIAGNOSTIC).apply {
             data = Bundle().apply {
@@ -369,6 +381,7 @@ class BotEngineService : Service() {
         try {
             val state = published ?: snapshot(passive = true)
             state.roundEnd?.let(::reportRoundEnd)
+            captureReceivedSquad(state)
             val now = SystemClock.elapsedRealtime()
             // Network startup can fail before SETUP_MATCH enables the loading
             // monitor. Export these passive diagnostics during introduction,
@@ -387,6 +400,33 @@ class BotEngineService : Service() {
         } catch (error: Exception) {
             diagnostic("MONITOR_UNAVAILABLE error=${error.javaClass.simpleName}; native cause not observed")
             diagnosticTask?.cancel(false)
+        }
+    }
+    private fun captureReceivedSquad(state: EngineSnapshot) {
+        val now = SystemClock.elapsedRealtime()
+        if (squadCaptured || squadCaptureAttempts >= 12 || state.roundEnd != null ||
+            !state.metadataReady || !state.connected || now < nextSquadCapture || squadCaptureTask?.isDone == false) return
+        nextSquadCapture = now + if (enteredGameplay) 10_000 else 3000
+        val attempt = ++squadCaptureAttempts
+        squadCaptureTask = memoryWorker.submit {
+            val start = SystemClock.elapsedRealtime()
+            try {
+                val capture = ReceivedSquadCapture.decode(EngineRuntime.receivedSquad())
+                val duration = SystemClock.elapsedRealtime() - start
+                val fingerprint = ReceivedSquadCapture.sha256(capture.raw)
+                if (fingerprint != lastSquadCaptureHash) {
+                    ReceivedSquadFiles.save(this, squadCaptureId, attempt, capture, durationMs = duration)
+                    lastSquadCaptureHash = fingerprint
+                }
+                squadCaptured = capture.attributesComplete
+                diagnostic("BOT_SQUAD_CAPTURE attempt=$attempt status=${capture.status} " +
+                    "players=${capture.playerCount} completePlayers=${capture.completePlayers} " +
+                    "engineInputCompatible=${capture.engineCompatible} durationMs=$duration")
+            } catch (error: Exception) {
+                runCatching { ReceivedSquadFiles.save(this, squadCaptureId, attempt, null,
+                    error = error.javaClass.simpleName, durationMs = SystemClock.elapsedRealtime() - start) }
+                diagnostic("BOT_SQUAD_CAPTURE attempt=$attempt error=${error.javaClass.simpleName}")
+            }
         }
     }
     private fun logNativeState(state: EngineSnapshot) {

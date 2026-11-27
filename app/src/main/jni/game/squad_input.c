@@ -9,6 +9,7 @@ typedef __SIZE_TYPE__ size_t;
 typedef __UINTPTR_TYPE__ uintptr_t;
 typedef unsigned int u32;
 typedef unsigned long long u64;
+#include "squad_dto.h"
 extern void *calloc(size_t, size_t);
 extern void free(void *);
 extern int open(const char *, int, ...);
@@ -16,14 +17,8 @@ extern long read(int, void *, size_t);
 extern int close(int);
 extern int dprintf(int, const char *, ...);
 
-typedef struct {
-    u32 magic, version, account, base_team, count, coach_id;
-    u64 coach_serial;
-    char name[72], short_name[8];
-    u32 order[40], coordinates[2][2][11][3];
-    u32 captain, set_pieces[6], overlaps[3], extras[6];
-} SquadHeader;
-typedef struct { u32 id, uniform; u64 serial; u32 parameters[147], padding; } Player;
+typedef PeerlinkSquadHeader SquadHeader;
+typedef PeerlinkSquadPlayer Player;
 _Static_assert(sizeof(SquadHeader) == 864, "squad DTO header");
 _Static_assert(sizeof(Player) == 608, "player DTO size");
 

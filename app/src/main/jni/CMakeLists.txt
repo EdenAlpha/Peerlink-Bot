@@ -43,6 +43,8 @@ add_library(peerlinkbackend SHARED
         peerlink_backend.cpp
         engine_host.cpp
         game/squad_input.c
+        game/received_squad.cpp
+        game/received_squad_runtime.cpp
         game/database_input.c
         game/online_inputs.c
         game/match_context.c

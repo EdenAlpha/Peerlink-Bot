@@ -23,6 +23,7 @@ internal object EngineRuntime {
     @Volatile private var ownerUid = 0L
     private var gameHost: GameAndroidRuntime? = null
     private var loadedEngineFile: File? = null
+    private var ownSquadForCapture: ByteArray? = null
     private var discovery: BotDiscoveryServer? = null
     var report: (String) -> Unit = {}
     var audit: (String) -> Unit = {}
@@ -392,7 +393,9 @@ internal object EngineRuntime {
 
     fun prepareChannels(peerUid: Long, squad: ByteArray, homeUid: Long): Boolean = onRuntime {
         if (client == 0L || peerUid == ownerUid || (homeUid != ownerUid && homeUid != peerUid)) return@onRuntime false
-        nativePrepareChannels(base, peerUid, homeUid, storeSquad(squad).absolutePath)
+        nativePrepareChannels(base, peerUid, homeUid, storeSquad(squad).absolutePath).also {
+            if (it) ownSquadForCapture = squad
+        }
     }
 
     fun setupMatch(peerUid: Long, gameId: Long, sid: String, category: String,
@@ -418,6 +421,9 @@ internal object EngineRuntime {
 
     fun snapshot(passive: Boolean = false): LongArray = onRuntime {
         if (base == 0L) LongArray(35) else nativeSnapshot(base, passive)
+    }
+    fun receivedSquad(): ByteArray = onRuntime {
+        nativeReceivedSquad(base, ownSquadForCapture)
     }
     fun advanceMatch(controllerAllowed: Boolean): Int = onRuntime {
         if (base == 0L) -1 else nativeAdvanceMatch(base, controllerAllowed)
@@ -498,6 +504,7 @@ internal object EngineRuntime {
     private external fun nativePrepareChannels(base: Long, peer: Long, home: Long, squad: String): Boolean
     private external fun nativeSetupMatch(base: Long, peer: Long, squad: String, context: String, roomRules: String): Boolean
     private external fun nativeSnapshot(base: Long, passive: Boolean): LongArray
+    private external fun nativeReceivedSquad(base: Long, own: ByteArray?): ByteArray
     private external fun nativeAdvanceMatch(base: Long, controllerAllowed: Boolean): Int
     private external fun nativeReleaseUnusedMemory(): Int
     private external fun nativeSetupMemoryGroups(baseline: Boolean, last: Boolean): String
