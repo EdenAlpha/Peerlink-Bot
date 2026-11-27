@@ -3,6 +3,7 @@ package com.peerlink.app.bot
 import android.content.Context
 import com.peerlink.app.core.AppState
 import com.peerlink.app.core.PrimeGameplayTracker
+import com.peerlink.app.godmode.PrimeClient
 import java.io.File
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
@@ -13,7 +14,7 @@ internal object BotMatchDiagnostics {
     private const val TRACE_LIMIT_BYTES = 48L * 1024 * 1024
     private val validId = Regex("[0-9]{13}-[a-f0-9]{12}")
 
-    private class Recording(val id: String, val pid: Int) {
+    private class Recording(val id: String, val pid: Int, val heapVerified: Boolean) {
         val ending = AtomicBoolean(false)
         var waitingForHeap = false
     }
@@ -32,11 +33,13 @@ internal object BotMatchDiagnostics {
         }.onFailure { AppState.appendLog("[BOT-DIAGNOSTICS] Could not save the report: ${it.javaClass.simpleName}") }
     }
 
-    @Synchronized fun reclaimBeforeRoom(ctx: Context, id: String): Boolean {
+    enum class RamCleanup { COMPLETED, INCOMPLETE, PRIME_UNAVAILABLE }
+
+    @Synchronized fun reclaimBeforeRoom(ctx: Context, id: String): RamCleanup {
         require(validId.matches(id))
         if (PrimeGameplayTracker.isMatchProtected()) {
             record(ctx, id, "RAM cleanup skipped while a match was active")
-            return false
+            return RamCleanup.INCOMPLETE
         }
         return runCatching {
             val dir = directory(ctx)
@@ -45,14 +48,18 @@ internal object BotMatchDiagnostics {
             val result = BotPerfetto.shell(script, 30_000)
             record(ctx, id, "RAM cleanup exit=${result.exitCode}\n${result.output}")
             prune(dir)
-            result.ok
+            when {
+                result.ok -> RamCleanup.COMPLETED
+                result.exitCode == -1 && !PrimeClient.isAlive(timeoutMs = 800) -> RamCleanup.PRIME_UNAVAILABLE
+                else -> RamCleanup.INCOMPLETE
+            }
         }.getOrElse {
             record(ctx, id, "RAM cleanup failed: ${it.message ?: it.javaClass.simpleName}")
-            false
+            RamCleanup.INCOMPLETE
         }
     }
 
-    @Synchronized fun startScheduler(ctx: Context, id: String, pid: Int): Boolean {
+    @Synchronized fun startScheduler(ctx: Context, id: String, pid: Int, heapVerified: Boolean): Boolean {
         require(validId.matches(id))
         if (pid <= 0) return false
         return runCatching {
@@ -60,7 +67,7 @@ internal object BotMatchDiagnostics {
             check(dir.isDirectory || dir.mkdirs()) { "Could not open the scheduler recording folder" }
             val marker = File(dir, "$id.pending")
             check(marker.createNewFile()) { "Scheduler recording already exists" }
-            val recording = Recording(id, pid)
+            val recording = Recording(id, pid, heapVerified)
             active = recording
             check(BotPerfetto.shell("perfetto --query | grep -q 'linux.ftrace'").ok) {
                 "Android scheduler tracing is unavailable"
@@ -81,7 +88,7 @@ internal object BotMatchDiagnostics {
             val config = ctx.assets.open("bot-scheduler.pbtxt").bufferedReader().use { it.readText() } +
                 "\nunique_session_name: \"${key(id)}\"\n"
             val started = BotPerfetto.start(key(id), config)
-            if (!started.ok && lastHeapRelease != (id to recording.pid) &&
+            if (!started.ok && recording.heapVerified && lastHeapRelease != (id to recording.pid) &&
                 started.output.contains("too many concurrent tracing", ignoreCase = true)) {
                 // Android rejected this session. The user-requested heap profile
                 // owns a slot until the pitch loads. Its stop callback retries once.
@@ -102,13 +109,14 @@ internal object BotMatchDiagnostics {
     }
 
     // Called on the heap export worker after Perfetto confirms the stop.
-    @Synchronized fun heapStoppedAtPitch(ctx: Context, id: String, pid: Int) {
+    @Synchronized fun heapStopped(ctx: Context, id: String, pid: Int, reason: String) {
         lastHeapRelease = id to pid
         val recording = active ?: return
         if (recording.id != id || recording.pid != pid || !recording.waitingForHeap ||
             recording.ending.get() || !EngineHost.isReady || EngineHost.enginePid != pid) return
         recording.waitingForHeap = false
-        attemptStart(ctx, recording)
+        if (reason == "pitch_loaded") attemptStart(ctx, recording)
+        else record(ctx, id, "Scheduler recording cancelled before a slot opened reason=$reason")
     }
 
     fun completed(ctx: Context, pid: Int, reason: String) {

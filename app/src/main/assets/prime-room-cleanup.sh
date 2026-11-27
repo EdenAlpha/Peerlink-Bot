@@ -68,12 +68,13 @@ printf 'Final %s MiB available (%+d MiB)\n' "$after" "$((after - before))"
 if printf '%s\n' "$targets" | grep -Fxq com.google.android.youtube; then
   dumpsys -t 5 package com.google.android.youtube | awk -v user="$user_id" '
     $0 == "Packages:" { installed = 1; next }
-    $0 == "Hidden system packages:" { exit }
-    installed && $1 == "User" && $2 == (user ":") {
+    $0 == "Hidden system packages:" { installed = 0 }
+    installed && !reported && $1 == "User" && $2 == (user ":") {
       for (i = 3; i <= NF; i++) {
         if ($i ~ /^stopped=/) {
           print "YouTube " $i
-          exit
+          reported = 1
+          break
         }
       }
     }

@@ -181,7 +181,8 @@ class PeerLinkUiTest {
         compose.setContent {
             PeerLinkTheme {
                 Surface(Modifier.fillMaxSize(), color = PL.bg) {
-                PlayPeerLinkContent(context, RoomState.Ready("123456789", "your game joined -- the bot is firing its half"), primeReady = false, primeActive = false,
+                PlayPeerLinkContent(context, RoomState.Ready("123456789", "your game joined -- the bot is firing its half",
+                    diagnosticsNote = "Android returned no verified live memory samples for the bot."), primeReady = false, primeActive = false,
                     botSession = true, traffic = BotPacketCounts(2765, 2774, android.os.SystemClock.elapsedRealtime()),
                     onExportLogs = {})
                 }
@@ -189,6 +190,7 @@ class PeerLinkUiTest {
         }
         compose.onNodeWithTag("bot-room-code").assertTextEquals("123456789")
         compose.onNodeWithText("Your game joined. The bot is getting ready.").assertIsDisplayed()
+        compose.onNodeWithText("Android returned no verified live memory samples for the bot.").assertIsDisplayed()
         compose.onNodeWithTag("bot-open-game").assertIsDisplayed()
         screenshot("bot-room-ready")
         compose.onNodeWithTag("bot-match-page").performScrollToNode(hasTestTag("bot-traffic-card"))

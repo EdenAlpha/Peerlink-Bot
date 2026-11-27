@@ -253,6 +253,10 @@ private fun MatchRoomCard(
                 if (room.note.isNotBlank()) {
                     Text(roomStatusText(room.note), color = PL.goldSoft, fontSize = 12.sp, lineHeight = 17.sp)
                 }
+                room.diagnosticsNote?.let {
+                    Text(it, color = PL.inkSoft, fontSize = 12.sp, lineHeight = 17.sp,
+                        modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
+                }
                 MatchPrimaryButton("Copy and open eFootball", Icons.Rounded.NorthEast, Modifier.testTag("bot-open-game")) {
                     onCopyRoom(room.number)
                     onOpenGame()

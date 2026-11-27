@@ -55,7 +55,7 @@ sealed interface RoomState {
     data class Creating(val note: String) : RoomState
 
     /** The bot has a room; [number] is shown copyable to type into eFootball. */
-    data class Ready(val number: String, val note: String = "") : RoomState
+    data class Ready(val number: String, val note: String = "", val diagnosticsNote: String? = null) : RoomState
 
     /** Room creation failed (gate down, not logged in, …). */
     data class Failed(val reason: String, val recordMemoryOnRetry: Boolean = false) : RoomState
@@ -108,36 +108,50 @@ object PlayRoomController {
             )
             return
         }
-        _state.value = RoomState.Creating(if (recordMemory) "Starting the bot memory recorder…" else "The bot is opening a room at Konami…")
+        _state.value = RoomState.Creating(if (recordMemory) "Freeing RAM before loading the bot…" else "The bot is opening a room at Konami…")
         io.launch {
-            var recording: String? = null
+            val recording = if (recordMemory) BotHeapRecording.newId() else null
+            var heapVerified = false
+            var cleanupNote: String? = null
+            var heapNote: String? = null
             var opened = false
             try {
-                val verify: ((Int) -> Unit)? = if (recordMemory) {
-                    val id = BotHeapRecording.prepare(ctx)
-                    recording = id
-                    preparationNote("Freeing RAM before loading the bot…")
-                    val cleaned = BotMatchDiagnostics.reclaimBeforeRoom(ctx, id)
-                    preparationNote(if (cleaned) "Opening the bot’s room…" else
-                        "Opening the room. RAM cleanup results are in diagnostics.")
-                    val verifyRecording: (Int) -> Unit = { pid ->
-                        preparationNote("Checking that Android recorded a bot allocation…")
-                        BotHeapRecording.startAndVerify(ctx, id, pid) { EngineHost.probeHeapRecording(pid) }
+                val verify: ((Int) -> Unit)? = recording?.let { id ->
+                    when (BotMatchDiagnostics.reclaimBeforeRoom(ctx, id)) {
+                        BotMatchDiagnostics.RamCleanup.PRIME_UNAVAILABLE ->
+                            error("Activate Prime in Settings, then tap Clear RAM and create room.")
+                        BotMatchDiagnostics.RamCleanup.INCOMPLETE ->
+                            cleanupNote = "RAM cleanup was incomplete. See Export diagnostics for details."
+                        BotMatchDiagnostics.RamCleanup.COMPLETED -> Unit
                     }
-                    verifyRecording
-                } else null
+                    heapNote = BotHeapRecording.prepare(ctx, id)
+                    preparationNote(heapNote ?: cleanupNote ?: "Opening the bot’s room…")
+                    if (heapNote != null) return@let null
+                    val attach: (Int) -> Unit = { pid ->
+                        preparationNote("Checking the bot's memory recording…")
+                        heapNote = BotHeapRecording.startAndVerify(ctx, id, pid) { EngineHost.probeHeapRecording(pid) }
+                        check(pid > 0 && EngineHost.isReady && EngineHost.enginePid == pid) {
+                            EngineHost.lastError.ifBlank { "The bot engine stopped during room setup." }
+                        }
+                        heapVerified = heapNote == null
+                        heapNote?.let { preparationNote(it) }
+                    }
+                    attach
+                }
                 val startScheduler = recording?.let { id ->
                     val start: () -> Unit = {
                         val pid = EngineHost.enginePid
                         io.launch {
                             if (EngineHost.isReady && pid == EngineHost.enginePid &&
-                                !BotMatchDiagnostics.startScheduler(ctx, id, pid))
+                                !BotMatchDiagnostics.startScheduler(ctx, id, pid, heapVerified))
                                 preparationNote("Scheduler recording failed. Export diagnostics for details.")
                         }
                     }
                     start
                 }
-                onRoomCreated(be.createRoom(ctx, allowResourceDownload, verify, startScheduler))
+                val number = be.createRoom(ctx, allowResourceDownload, verify, startScheduler)
+                val diagnosticsNote = listOfNotNull(cleanupNote, heapNote).joinToString(" ").ifBlank { null }
+                onRoomCreated(number, diagnosticsNote)
                 opened = true
             } catch (missing: com.peerlink.app.bot.GameResourcePacks.MissingResources) {
                 _state.value = RoomState.FilesNeeded(missing.missingFiles, missing.missingBytes, missing.totalFiles, recordMemory)
@@ -150,12 +164,12 @@ object PlayRoomController {
     }
 
     /** Called by the wiring with the room number the bot got back. */
-    fun onRoomCreated(number: String) {
+    fun onRoomCreated(number: String, diagnosticsNote: String? = null) {
         val n = number.filter { it.isLetterOrDigit() }
         _state.value = if (n.isBlank()) {
             RoomState.Failed("Konami returned an empty room number.")
         } else {
-            RoomState.Ready(n)
+            RoomState.Ready(n, diagnosticsNote = diagnosticsNote)
         }
     }
 

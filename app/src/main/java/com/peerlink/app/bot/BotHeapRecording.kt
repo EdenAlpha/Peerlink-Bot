@@ -7,6 +7,7 @@ import java.io.File
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.util.UUID
+import java.util.concurrent.CancellationException
 import java.util.concurrent.atomic.AtomicInteger
 
 /** An explicitly requested Perfetto recording of this APK's private bot process. */
@@ -53,7 +54,33 @@ internal object BotHeapRecording {
         AppState.appendLog("[BOT-MEMORY] $message")
     }
 
-    @Synchronized fun prepare(ctx: Context): String {
+    fun newId() = "${System.currentTimeMillis()}-${UUID.randomUUID().toString().replace("-", "").take(12)}"
+
+    private class RecorderUnavailable(message: String) : Exception(message)
+
+    /** A missing trace must never turn a working engine into a failed room. */
+    private fun capture(ctx: Context, id: String, step: String, action: () -> Unit): String? {
+        return try {
+            action()
+            null
+        } catch (error: Exception) {
+            if (error is CancellationException || error is InterruptedException) throw error
+            val note = (error as? RecorderUnavailable)?.message ?: "Detailed memory recording is unavailable."
+            val detail = "recording_unavailable step=$step cause=${error.javaClass.simpleName} detail=${error.message}"
+            AppState.appendLog("[BOT-MEMORY] $detail")
+            runCatching {
+                File(directory(ctx), "$id.txt").appendText("${System.currentTimeMillis()} $detail\n")
+            }
+            // Stop only this request's trace. Uncopied output retains its pending marker for export.
+            if (!runCatching { finish(ctx, id, "recording_unavailable") }.getOrDefault(false)) {
+                AppState.appendLog("[BOT-MEMORY] saving_partial_recording_deferred id=$id")
+            }
+            runCatching { prune(directory(ctx)) }
+            note
+        }
+    }
+
+    @Synchronized fun prepare(ctx: Context, id: String): String? = capture(ctx, id, "prepare") {
         val dir = directory(ctx)
         check(dir.isDirectory || dir.mkdirs()) { "PeerLink could not open its recording folder." }
         val ready = BotPerfetto.shell("command -v perfetto >/dev/null || { echo 'Perfetto is unavailable'; exit 1; }\n" +
@@ -65,23 +92,23 @@ internal object BotHeapRecording {
             val entry = "recorder_preflight_failed exit=${ready.exitCode} detail=$detail"
             AppState.appendLog("[BOT-MEMORY] $entry")
             runCatching { File(dir, PREFLIGHT_ERROR_FILE).writeText("${System.currentTimeMillis()} $entry\n") }
-            if (ready.exitCode == -1) error("Activate Prime in Settings, then tap Clear RAM and create room.")
-            error("Could not start memory recording. $detail")
+            throw RecorderUnavailable("Detailed memory recording is unavailable. See Export diagnostics for the reason.")
         }
         for (pending in pendingIds(dir)) {
             check(finish(ctx, pending, "next_recording")) { "The previous recording is still on this phone. Turn on Prime and export it first." }
         }
-        val id = "${System.currentTimeMillis()}-${UUID.randomUUID().toString().replace("-", "").take(12)}"
         val marker = File(dir, "$id.pending")
         check(marker.createNewFile())
         prune(dir)
         status(ctx, id, "requested target=${ctx.packageName}:botengine build=${com.peerlink.app.BuildConfig.VERSION_NAME}")
         activeId = id
-        return id
     }
 
     /** Attach to the prepared bot before the room opens and before team setup starts. */
-    @Synchronized fun startAndVerify(ctx: Context, id: String, pid: Int, sampleAllocation: () -> Boolean) {
+    @Synchronized fun startAndVerify(ctx: Context, id: String, pid: Int, sampleAllocation: () -> Boolean): String? =
+        capture(ctx, id, "verify") { verify(ctx, id, pid, sampleAllocation) }
+
+    private fun verify(ctx: Context, id: String, pid: Int, sampleAllocation: () -> Boolean) {
         check(id == activeId && pid > 0) { "PeerLink could not identify the bot process for recording." }
         val traceConfig = config(ctx.packageName)
         File(directory(ctx), "$id.pending").writeText(pid.toString())
@@ -89,7 +116,10 @@ internal object BotHeapRecording {
         val run = BotPerfetto.start(key(id), traceConfig)
         if (!run.ok) {
             status(ctx, id, "recorder_start_failed exit=${run.exitCode} ${run.output.take(300)}")
-            error("Android could not start the memory recording. Open Export diagnostics for the reason.")
+            if (run.output.contains("too many concurrent tracing", ignoreCase = true)) {
+                throw RecorderUnavailable("Android's tracing slots were full. Detailed memory recording is unavailable.")
+            }
+            throw RecorderUnavailable("Android could not start detailed memory recording.")
         }
         val probe = File(directory(ctx), "$id.probe")
         val start = SystemClock.elapsedRealtime()
@@ -142,8 +172,8 @@ internal object BotHeapRecording {
             else -> "no_mapped_allocation"
         }
         status(ctx, id, "no_verified_allocation_stack pid=$pid reason=$reason probes=$probes")
-        if (reason == "no_new_bot_dump") error("The bot's memory recording stopped updating. Export diagnostics now.")
-        error("Android started the recorder but supplied no live allocation stack for this bot. Export diagnostics now.")
+        if (reason == "no_new_bot_dump") throw RecorderUnavailable("Detailed memory recording stopped updating.")
+        throw RecorderUnavailable("Android returned no verified live memory samples for the bot.")
     }
 
     private fun copyPrefix(ctx: Context, id: String, output: File) =
@@ -163,9 +193,8 @@ internal object BotHeapRecording {
         if (!marker.exists()) return true
         if (activeId == id) { recordingPid.set(0); activeId = null }
         if (!BotPerfetto.stop(key(id))) return false
-        if (reason == "pitch_loaded") {
-            val pid = marker.readText().trim().toIntOrNull()
-            if (pid != null) BotMatchDiagnostics.heapStoppedAtPitch(ctx, id, pid)
+        marker.readText().trim().toIntOrNull()?.let { pid ->
+            BotMatchDiagnostics.heapStopped(ctx, id, pid, reason)
         }
         val part = File(dir, "$id.part")
         try {
@@ -210,6 +239,8 @@ internal object BotHeapRecording {
     private fun prune(dir: File) {
         val files = dir.listFiles().orEmpty().filter { validId.matches(it.nameWithoutExtension) }
         val older = files.map { it.nameWithoutExtension }.distinct().sortedDescending().drop(3).toSet()
-        files.filter { it.nameWithoutExtension in older && it.extension in setOf("txt", "pftrace") }.forEach { it.delete() }
+        val pending = pendingIds(dir).toSet()
+        files.filter { it.nameWithoutExtension in older && it.nameWithoutExtension !in pending &&
+            it.extension in setOf("txt", "pftrace") }.forEach { it.delete() }
     }
 }

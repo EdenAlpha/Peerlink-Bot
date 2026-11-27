@@ -1,0 +1,11 @@
+// ./gradlew -I tests/room-recording/robolectric.gradle :app:testDebugUnitTest --tests '*RecordingRoomRegressionTest'
+allprojects { project ->
+    project.plugins.withId('com.android.application') {
+        if (project.path == ':app') {
+            project.android.testOptions.unitTests.includeAndroidResources = true
+            project.android.sourceSets.getByName('testDebug').java.srcDir(
+                new File(project.rootDir, 'tests/room-recording/src'))
+            project.dependencies.add('testDebugImplementation', 'org.robolectric:robolectric:4.16.1')
+        }
+    }
+}
