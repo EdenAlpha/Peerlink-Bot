@@ -20,6 +20,7 @@ object EngineHost {
         private set
     @Volatile private var ownerUid = 0L
     @Volatile private var service: Messenger? = null
+    @Volatile private var lastRoundEnd: Pair<Int, RoomRoundEnd>? = null
     private var context: Context? = null
     @Volatile var enginePid = 0
         private set
@@ -36,7 +37,12 @@ object EngineHost {
     private val replies = Messenger(object : Handler(replyThread.looper) {
         override fun handleMessage(message: Message) {
             val data = message.data
-            if (message.what == EngineProtocol.STATUS) {
+            if (message.what == EngineProtocol.ROUND_ENDED) {
+                val pid = data.getInt("pid")
+                if (pid == enginePid && pid > 0 && stopRequestedAt == 0L)
+                    RoomRoundEnd.entries.firstOrNull { it.name == data.getString("end") }?.let { lastRoundEnd = pid to it }
+            } else if (message.what == EngineProtocol.STATUS) {
+                if (data.getInt("pid") != enginePid || stopRequestedAt != 0L) return
                 val line = data.getString("status").orEmpty()
                 if (line.isNotBlank()) PeerBotService.status(line)
             } else if (message.what == EngineProtocol.NATIVE_STATE) {
@@ -64,19 +70,21 @@ object EngineHost {
             } else pending.remove(message.arg1)?.complete(data)
         }
     })
-    private val connection = object : ServiceConnection {
+    private var connection: ServiceConnection? = null
+    private fun newConnection(): ServiceConnection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName, binder: IBinder) {
             synchronized(this@EngineHost) {
-                if (!bound) return
+                if (!bound || connection !== this) return
                 service = Messenger(binder)
                 binding?.countDown()
             }
         }
-        override fun onServiceDisconnected(name: ComponentName) = disconnected("onServiceDisconnected")
-        override fun onBindingDied(name: ComponentName) = disconnected("onBindingDied")
-        override fun onNullBinding(name: ComponentName) = disconnected("onNullBinding")
+        override fun onServiceDisconnected(name: ComponentName) = disconnected(this, "onServiceDisconnected")
+        override fun onBindingDied(name: ComponentName) = disconnected(this, "onBindingDied")
+        override fun onNullBinding(name: ComponentName) = disconnected(this, "onNullBinding")
     }
-    private fun disconnected(callback: String) {
+    @Synchronized private fun disconnected(lost: ServiceConnection, callback: String) {
+        if (connection !== lost) return
         AppState.appendLog("[BOT-DIAG] ENGINE_SERVICE_LOST callback=$callback observedAtMs=${SystemClock.elapsedRealtime()} " +
             "hostStopRequestedAtMs=$stopRequestedAt; checking Android process exit record")
         PeerSlot.logFlow("engine_service_lost")
@@ -93,7 +101,7 @@ object EngineHost {
         isReady = false
         savedDatabaseSha256 = null
         PeerSlot.engineAttached = false
-        lastError = "Bot engine stopped — start a new room"
+        lastError = "Bot engine stopped"
         PeerBotService.status(lastError)
         releaseService()
         for ((id, future) in pending) if (pending.remove(id, future))
@@ -105,9 +113,11 @@ object EngineHost {
         binding?.countDown()
         binding = null
         val owner = context ?: return
-        if (bound) {
+        val previous = connection
+        connection = null
+        if (bound && previous != null) {
             bound = false
-            runCatching { owner.unbindService(connection) }
+            runCatching { owner.unbindService(previous) }
         }
         if (foregroundStartRequested) {
             foregroundStartRequested = false
@@ -124,7 +134,9 @@ object EngineHost {
             binding ?: CountDownLatch(1).also {
                 binding = it
                 val intent = Intent(app, BotEngineService::class.java)
-                bound = app.bindService(intent, connection, Context.BIND_AUTO_CREATE or Context.BIND_IMPORTANT)
+                val next = newConnection()
+                connection = next
+                bound = app.bindService(intent, next, Context.BIND_AUTO_CREATE or Context.BIND_IMPORTANT)
                 if (!bound) {
                     releaseService()
                     error("Could not start the bot engine service")
@@ -158,6 +170,7 @@ object EngineHost {
             startupRetryable = true
             stopRequestedAt = 0
             enginePid = 0
+            lastRoundEnd = null
             engineStartedAt = System.currentTimeMillis()
             bind(owner)
             val process = request(EngineProtocol.PROCESS_INFO, timeout = 10)
@@ -235,7 +248,28 @@ object EngineHost {
         isReady && pid > 0 && pid == enginePid && request(EngineProtocol.HEAP_RECORDING_PROBE,
             Bundle().apply { putInt("pid", pid) }, timeout = 3).getBoolean("ok")
     internal fun probePreviewCallback(): Boolean = request(EngineProtocol.PROBE_PREVIEW).getBoolean("ok")
-    fun stop(reason: String = "engine_host_stop") {
+    internal fun roundEnd(pid: Int): RoomRoundEnd? = when {
+        !isReady || enginePid != pid -> RoomRoundEnd.ENGINE_STOPPED
+        else -> lastRoundEnd?.takeIf { it.first == pid }?.second
+    }
+
+    /** Wait for this private process to exit before binding a fresh engine in the same room. */
+    internal fun finishRound() {
+        val binder = service?.binder ?: return
+        val exited = CountDownLatch(1)
+        val death = IBinder.DeathRecipient { exited.countDown() }
+        val linked = try { binder.linkToDeath(death, 0); true } catch (_: DeadObjectException) { false }
+        try {
+            stop("room_rematch")
+            check(!linked || !binder.isBinderAlive || exited.await(15, TimeUnit.SECONDS)) {
+                "The previous bot engine is still closing."
+            }
+        } finally {
+            if (linked) runCatching { binder.unlinkToDeath(death, 0) }
+        }
+    }
+
+    fun stop(reason: String = "engine_host_stop") = synchronized(preparation) {
         context?.let { owner ->
             if (BotHeapRecording.observing(enginePid)) BotHeapRecording.completed(owner, enginePid, "bot_stopped")
             BotMatchDiagnostics.completed(owner, enginePid, "bot_stopped")
@@ -279,10 +313,16 @@ internal object EngineProtocol {
     const val STATUS = 100
     const val NATIVE_STATE = 101
     const val DIAGNOSTIC = 102
+    const val ROUND_ENDED = 103
 }
 
 data class EngineSnapshot(val values: LongArray) {
     private fun field(index: Int) = values.getOrElse(index) { 0 }
+    internal val roundEnd: RoomRoundEnd? get() = when {
+        field(34) == 1L -> RoomRoundEnd.RESULT
+        nativeFailed -> RoomRoundEnd.DISCONNECTED
+        else -> null
+    }
     val sessionConnected get() = field(2) == 4L
     // The configured TURN session owns its connection verdict. The NTL
     // fallback uses the separate original SDK verdict as well.

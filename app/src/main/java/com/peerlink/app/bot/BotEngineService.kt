@@ -36,6 +36,7 @@ class BotEngineService : Service() {
     private var pollTask: ScheduledFuture<*>? = null
     private var lastStatus = ""
     private val brain = BotBrain()
+    private val controlTracker = BotControlTracker()
     private val kickoff = OpeningKickoff()
     private val celebration = GoalCelebration()
     private var waitingAfterGoal = false
@@ -46,6 +47,7 @@ class BotEngineService : Service() {
     private var nextHalftimePress = 0L
     private var playTask: ScheduledFuture<*>? = null
     private var stick = BotStick()
+    private var reportedRoundEnd: RoomRoundEnd? = null
     private var heldButton: BotAction? = null
     private var keyRelease: ScheduledFuture<*>? = null
     private val actionWindow = BotActionWindow()
@@ -187,7 +189,7 @@ class BotEngineService : Service() {
                 EngineProtocol.LOADING_DIAGNOSTICS -> result.putString("details", EngineRuntime.loadingDiagnostics())
                 EngineProtocol.START_TEST -> {
                     controllerAllowed = args.getBoolean("controllerAllowed")
-                    automaticPlay = controllerAllowed && args.getBoolean("automatic", true)
+                    automaticPlay = controllerAllowed && reportedRoundEnd == null && args.getBoolean("automatic", true)
                     tacticalReadFailed = false
                     if (!automaticPlay) stopPlaying()
                     result.putBoolean("ok", controllerAllowed)
@@ -231,10 +233,22 @@ class BotEngineService : Service() {
         }
         message.recycle()
     }
+    private fun reportRoundEnd(end: RoomRoundEnd) {
+        if (reportedRoundEnd == end || reportedRoundEnd == RoomRoundEnd.RESULT) return
+        val recipient = observer ?: return
+        runCatching { recipient.send(Message.obtain(null, EngineProtocol.ROUND_ENDED).apply {
+            data = Bundle().apply { putInt("pid", Process.myPid()); putString("end", end.name) }
+        }) }.onSuccess {
+            reportedRoundEnd = end
+            automaticPlay = false
+            stopPlaying()
+        }
+    }
+
     private fun report(line: String) {
         lastStatus = line
         runCatching { observer?.send(Message.obtain(null, EngineProtocol.STATUS).apply {
-            data = Bundle().apply { putString("status", line) }
+            data = Bundle().apply { putInt("pid", Process.myPid()); putString("status", line) }
         }) }
     }
     private fun snapshot(passive: Boolean = false): EngineSnapshot {
@@ -352,6 +366,7 @@ class BotEngineService : Service() {
     private fun sampleDiagnostics(published: EngineSnapshot? = null) {
         try {
             val state = published ?: snapshot(passive = true)
+            state.roundEnd?.let(::reportRoundEnd)
             val now = SystemClock.elapsedRealtime()
             // Network startup can fail before SETUP_MATCH enables the loading
             // monitor. Export these passive diagnostics during introduction,
@@ -386,6 +401,7 @@ class BotEngineService : Service() {
             val startedAt = SystemClock.elapsedRealtime()
             val advance = EngineRuntime.advanceMatch(controllerAllowed)
             observeHostStall("match_poll", startedAt)
+            if (advance == -214) reportRoundEnd(RoomRoundEnd.DISCONNECTED)
             check(advance >= 0) {
                 val reason = when (advance) {
                     -205 -> "The bot's user-data task disappeared before completion"
@@ -506,16 +522,21 @@ class BotEngineService : Service() {
                 setStick(BotStick())
                 return
             }
-            if (heldButton?.defensive == false) return
-            val control = state.forControl()
-            if (heldButton != null) {
-                if (control.selected >= 0 && control.owner == control.selected) releaseButton()
+            val control = controlTracker.resolve(state)
+            if (heldButton?.defensive == false) {
+                if (control.owner in control.opponents) releaseButton() else return
+            } else if (heldButton != null && control.selected >= 0 && control.owner == control.selected) {
+                releaseButton()
             }
             val plan = brain.decide(control)
-            if (!setStick(plan.stick)) return
             val action = plan.action
-            if (heldButton == null && action != null && actionWindow.available(now, action, control) && pressButton(action)) {
-                actionWindow.sent(now, action, control.selected)
+            val canPress = action != null && heldButton == null && actionWindow.available(now, action, control)
+            // Aiming a pass while the button is unavailable walks the carrier toward the target.
+            val movement = if (action != null && !action.defensive && !canPress)
+                brain.carryBetweenKicks(control) else plan.stick
+            if (!setStick(movement)) return
+            if (canPress && action != null && pressButton(action)) {
+                actionWindow.sent(now, action, control.selected, control.centreRestart)
                 EngineRuntime.journal("BOT_PLAY_ACTION frame=${state.frame} action=${action.name} " +
                     "selected=${state.selected} owner=${state.owner} side=${state.side} " +
                     "controlPlayer=${control.selected} controlOwner=${control.owner} intendedReceiver=${plan.receiver}")
@@ -568,6 +589,7 @@ class BotEngineService : Service() {
         playTask?.cancel(false)
         playTask = null
         celebration.reset()
+        controlTracker.reset()
         waitingAfterGoal = false
         lastPlayFrame = 0
         lastPlayAt = null
@@ -576,9 +598,13 @@ class BotEngineService : Service() {
     }
 
     private fun pressPass(published: EngineSnapshot? = null, manual: Boolean = true): Boolean {
-        if (!controllerAllowed || heldButton != null || !(published ?: snapshot()).canTestPass ||
-            !setStick(BotStick()) || !pressButton(BotAction.PASS)) return false
-        actionWindow.sent(SystemClock.elapsedRealtime(), BotAction.PASS, -1)
+        if (!controllerAllowed || heldButton != null || !(published ?: snapshot()).canTestPass) return false
+        val state = if (manual) null else EngineRuntime.playState()?.forControl()
+        val player = state?.players?.getOrNull(state.selected)
+        val aim = if (state != null && player != null && state.centreRestart && state.owner == state.selected)
+            brain.kickoffPass(state, player).stick else BotStick()
+        if (!setStick(aim) || !pressButton(BotAction.PASS)) return false
+        actionWindow.sent(SystemClock.elapsedRealtime(), BotAction.PASS, state?.selected ?: -1, !manual)
         if (manual) {
             diagnostic("BOT_INPUT key=96 action=down nativeAccepted=true destination=private_bot_engine")
             report("Bot Pass input sent — check the response in eFootball")

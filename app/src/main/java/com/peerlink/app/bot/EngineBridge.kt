@@ -198,7 +198,8 @@ object EngineBridge {
      * it is not up yet, gets it up -- in the log window, where the story can
      * be read afterwards.
      */
-    fun ensureEngineForSession(context: Context, allowResourceDownload: Boolean = false): Boolean {
+    fun ensureEngineForSession(context: Context, allowResourceDownload: Boolean = false, active: () -> Boolean = { true }): Boolean {
+        if (!active()) return false
         val staged = File(stageDir(context), "libUE4.so")
         val stagedBytes = if (staged.isFile) staged.length() else 0L
         val loaded = EngineHost.isReady
@@ -227,8 +228,9 @@ object EngineBridge {
         }
         // Reuse verified files already on this phone before native startup.
         // Match resources are never downloaded by this preparation path.
+        if (!active()) return false
         GameResourcePacks.prepare(context, allowResourceDownload)
-        val up = prepareWithRetries(context, uid)
+        val up = prepareWithRetries(context, uid, active)
         log(if (up) "the engine is up for this session" else "the engine did NOT come up this session")
         return up
     }
@@ -243,10 +245,11 @@ object EngineBridge {
      * Three tries, five seconds apart, covers the first seconds of a session
      * without holding anything up; every later ask is a cheap no-op.
      */
-    private fun prepareWithRetries(context: Context, uid: Long): Boolean {
+    private fun prepareWithRetries(context: Context, uid: Long, active: () -> Boolean): Boolean {
+        if (!active()) return false
         var up = EngineHost.prepare(context, uid)
         var attempt = 1
-        while (!up && EngineHost.startupRetryable && attempt < 3) {
+        while (!up && active() && EngineHost.startupRetryable && attempt < 3) {
             log("the engine did not come up on try $attempt -- the app's own " +
                 "library may still be loading; trying again in five seconds")
             try {
@@ -254,6 +257,7 @@ object EngineBridge {
             } catch (_: InterruptedException) {
                 return up
             }
+            if (!active()) return false
             attempt++
             up = EngineHost.prepare(context, uid)
         }

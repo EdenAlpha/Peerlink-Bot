@@ -119,7 +119,12 @@ object BotRoomService : BotRoomBackend {
             if (rid <= 0L) throw KgsGate.GateException("Room opened without a valid matchmaking ID.")
             PeerBotService.start(ctx, num)
             startGameVpn(ctx)
-            check(BotMatchDriver.start(gate, rid, num, onMatchStarting)) { "The previous bot room is still stopping" }
+            check(BotMatchDriver.start(gate, rid, num, onMatchStarting) { active ->
+                if (EngineBridge.ensureEngineForSession(ctx, allowResourceDownload, active)) null
+                else EngineHost.lastError.ifBlank { "The bot engine could not restart." }.also {
+                    check(EngineHost.startupRetryable) { it }
+                }
+            }) { "The previous bot room is still stopping" }
             roomOpened = true
             return num
         } finally {

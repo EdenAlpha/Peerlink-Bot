@@ -1034,7 +1034,7 @@ JNIEXPORT jlongArray JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeSnaps
         JNIEnv *env, jobject, jlong base, jboolean passive) {
     // Append-only IPC layout. Diagnostic fields are reads under the same
     // original task lock; they never change the engine's connection verdict.
-    constexpr unsigned kStateSize = 34;
+    constexpr unsigned kStateSize = 35;
     jlong state[kStateSize]{};
     char stop[1024];
     bool journal_sample = false;
@@ -1127,6 +1127,7 @@ JNIEXPORT jlongArray JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeSnaps
         state[30] = readiness.frame;
         state[31] = g_channel_home && g_channel_home == g_uid ? 1 : 0;
         state[33] = peerlink_game_thread_tid();
+        state[34] = peerlink_match_result_available();
         static uint64_t next_journal_sample = 0; // Runtime thread, under TaskLock.
         const uint64_t now = monotonic_ms();
         if (now >= next_journal_sample) {

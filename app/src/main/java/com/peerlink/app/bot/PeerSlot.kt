@@ -157,14 +157,16 @@ object PeerSlot {
     }
 
     /** Reserve before the gate advertises a port; do not collide with the game's own UDP socket. */
-    @Synchronized fun reserveEndpoint(): Int {
+    @Synchronized fun reserveEndpoint(): Int = reserveEndpoint(0)
+
+    private fun reserveEndpoint(port: Int): Int {
         val existing = socket
         if (existing != null && !existing.isClosed) return existing.localPort
         val reserved = DatagramSocket(null)
         try {
             // A real game's host candidate can reach this phone directly;
             // fabricated-address packets arrive from the VPN on loopback.
-            reserved.bind(InetSocketAddress("0.0.0.0", 0))
+            reserved.bind(InetSocketAddress("0.0.0.0", port))
             socket = reserved
             return reserved.localPort
         } catch (error: Exception) { reserved.close(); throw error }
@@ -232,6 +234,14 @@ object PeerSlot {
             disarm("socket_start_failed")
             throw IllegalStateException("Could not start the local match sockets", error)
         }
+    }
+
+    @Synchronized internal fun finishRound() {
+        val port = socket?.localPort ?: return
+        disarm("match_ended")
+        // Keep the port already advertised for this room. New round-specific sockets and
+        // learned routes are installed by arm() once both players are ready again.
+        reserveEndpoint(port)
     }
 
     @Synchronized fun disarm(reason: String = "peer_slot_disarm") {

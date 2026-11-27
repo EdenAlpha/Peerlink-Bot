@@ -337,4 +337,138 @@ class BotPlayTest {
         assertTrue(unknown.estimatedSelection)
         assertNotEquals(BotAction.SWITCH, BotBrain().decide(unknown).action)
     }
+
+    @Test fun standingDefenderCanStepIntoPassAndBotUsesSideOutletInEitherDirection() {
+        val state = scenario(PitchPoint(2f, 0f))
+        val formation = state.players.toMutableList().apply {
+            this[8] = PitchPoint(22f, 0f)
+            this[7] = PitchPoint(11f, 7f)
+            this[15] = PitchPoint(14f, -3f)
+        }
+        for (sign in listOf(1f, -1f)) {
+            val rotated = state.copy(ball = state.ball * sign, players = formation.map { it?.times(sign) })
+            val play = BotBrain().decide(rotated)
+            assertEquals(7, play.receiver)
+            assertTrue(play.stick.y * sign > 0)
+        }
+    }
+
+    @Test fun throughPassMustAlsoBeSafeBeyondTheReceiver() {
+        val state = scenario(PitchPoint(2f, 0f))
+        val players = state.players.toMutableList().apply {
+            this[4] = PitchPoint(16f, 5f)
+            this[16] = PitchPoint(-3f, -2.5f)
+            this[17] = PitchPoint(20.5f, 5.5f)
+        }
+        assertNotEquals(BotAction.THROUGH, BotBrain().decide(state.copy(players = players)).action)
+    }
+
+    @Test fun burstAwayFromChasingDefenderWhenSidePassGainsLittle() {
+        val state = scenario(PitchPoint(10f, 2f))
+        val players = state.players.toMutableList().apply {
+            this[7] = PitchPoint(17.5f, 10f)
+            this[16] = PitchPoint(7f, 2.5f)
+        }
+        for (teammateX in listOf(17.5f, 18.6f)) {
+            players[7] = PitchPoint(teammateX, 10f)
+            val play = BotBrain().decide(state.copy(players = players))
+            assertNull(play.action)
+            assertTrue(play.stick.sprint && play.stick.x > 0.8f)
+        }
+    }
+
+    @Test fun blockedPassAndCarryChooseAnEscapeInsteadOfRunningIntoTheMarker() {
+        val state = scenario(PitchPoint(5f, 0f))
+        val players = state.players.toMutableList().apply {
+            for (id in 1..10) if (id != 6) this[id] = PitchPoint(42f, 15f)
+            this[8] = PitchPoint(20f, 0f)
+            this[15] = PitchPoint(7.5f, 0f)
+        }
+        val brain = BotBrain()
+        val blocked = state.copy(players = players)
+        val play = brain.decide(blocked)
+        assertNull(play.action)
+        assertTrue(kotlin.math.abs(play.stick.y) >= 0.5f)
+        val protecting = brain.carryBetweenKicks(blocked)
+        assertTrue(kotlin.math.abs(protecting.y) >= 0.5f)
+    }
+
+    @Test fun centreRestartAimsAtAVisibleOpenTeammateAndDebouncesTheSamePasser() {
+        val state = scenario(PitchPoint(-0.5f, 0f)).copy(ball = PitchPoint(0f, 0f))
+        val players = state.players.toMutableList().apply {
+            this[7] = PitchPoint(-5f, 7f)
+            this[8] = PitchPoint(3f, 5f)
+            this[15] = PitchPoint(1.3f, 2.2f)
+        }
+        val restart = state.copy(players = players)
+        val brain = BotBrain()
+        val plan = brain.decide(restart)
+        assertEquals(BotAction.PASS, plan.action)
+        assertEquals(7, plan.receiver)
+        assertTrue(plan.stick.x < 0 && plan.stick.y > 0)
+        assertEquals(BotStick(), brain.carryBetweenKicks(restart))
+        val window = BotActionWindow()
+        window.sent(1000, BotAction.PASS, 6, centreRestart = true)
+        assertFalse(window.available(1500, BotAction.PASS, restart))
+        assertTrue(window.available(2020, BotAction.PASS, restart))
+    }
+
+    @Test fun lastDefenderScreensTheCutbackWhileAnOutfielderWithCoverCanPressWide() {
+        val state = scenario(PitchPoint(-39f, 8f), 17).copy(ball = PitchPoint(-35f, 15f))
+        val players = state.players.toMutableList().apply {
+            this[17] = state.ball
+            this[18] = PitchPoint(-43f, 0f)
+        }
+        val brain = BotBrain()
+        val last = brain.decide(state.copy(players = players))
+        assertTrue("last defender protects the inside", last.stick.x < 0 && last.stick.y < 0)
+        players[5] = PitchPoint(-42f, 2f)
+        val covered = brain.decide(state.copy(frame = 101, players = players))
+        assertTrue("cover frees the defender to close down the wing", covered.stick.x > 0 && covered.stick.y > 0)
+    }
+
+    @Test fun beatenDefenderRecoversInsideWithSprintAndTimesTheirChallenge() {
+        val state = scenario(PitchPoint(-18f, 2f), 17).copy(ball = PitchPoint(-21.1f, 2f))
+        val players = state.players.toMutableList().apply { this[17] = state.ball }
+        val beaten = BotBrain().decide(state.copy(players = players))
+        assertNotEquals(BotAction.PRESS, beaten.action)
+        assertTrue(beaten.stick.sprint && beaten.stick.x < 0)
+        players[6] = PitchPoint(-23f, 2f)
+        val close = BotBrain().decide(state.copy(players = players))
+        assertEquals(BotAction.PRESS, close.action)
+        assertFalse(close.stick.sprint)
+    }
+
+    @Test fun trackingARealDribbleRestoresPossessionForEitherTeamButRejectsAPassOrATie() {
+        for (carrier in listOf(6, 16)) {
+            val base = scenario(PitchPoint(15f, 1f), -2)
+            fun at(frame: Int, x: Float, ballX: Float, contested: Boolean = false) = base.copy(frame = frame,
+                players = base.players.toMutableList().apply {
+                    this[6] = PitchPoint(-12f, 1f)
+                    this[carrier] = PitchPoint(x, 1f)
+                    if (contested) this[20] = PitchPoint(ballX + 2.2f, 1f)
+                }, ball = PitchPoint(ballX, 1f), velocity = PitchPoint(8f, 0f))
+            val brain = BotControlTracker()
+            assertEquals(-2, brain.resolve(at(100, 15f, 17f)).owner)
+            assertEquals(carrier, brain.resolve(at(103, 15.7f, 17.7f)).owner)
+            assertEquals(-2, brain.resolve(at(106, 16.4f, 18.4f, contested = true)).owner)
+            brain.reset()
+            brain.resolve(at(100, 15f, 16.3f))
+            assertEquals(-2, brain.resolve(at(103, 15.3f, 17.7f)).owner)
+        }
+    }
+
+    @Test fun uncertainCloseOpponentIsCoveredWithoutPressingAndFirstConfirmedTurnoverCanBeChallenged() {
+        val state = scenario(PitchPoint(-18f, 2f), -2).copy(ball = PitchPoint(-21.1f, 2f))
+        val players = state.players.toMutableList().apply { this[17] = state.ball }
+        val recovering = BotBrain().decide(state.copy(players = players))
+        assertNull(recovering.action)
+        assertTrue(recovering.stick.x < 0f && recovering.stick.sprint)
+        val window = BotActionWindow()
+        window.sent(1000, BotAction.SHOOT, 6)
+        assertFalse(window.available(1100, BotAction.PRESS, state))
+        assertTrue(window.available(1100, BotAction.PRESS, state.copy(owner = 17)))
+        window.sent(1100, BotAction.PRESS, 6)
+        assertFalse(window.available(1150, BotAction.PRESS, state.copy(owner = 17)))
+    }
 }

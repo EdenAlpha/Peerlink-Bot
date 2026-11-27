@@ -423,14 +423,14 @@ class BotMatchFlow(
 
     // -------------------------------------------------- pre-connection half
     /** CMD_GET_ROOM_INFO -> room_info (the state the driver polls). */
-    fun roomState(g: KgsGate, rid: Long): Map<*, *> {
-        val r = g.step("CMD_GET_ROOM_INFO", linkedMapOf(
+    fun roomReply(g: KgsGate, rid: Long): Map<*, *> =
+        g.step("CMD_GET_ROOM_INFO", linkedMapOf(
             "mode" to "CUSTOM", "id" to 0,
             "room_id" to linkedMapOf("id" to rid),
             "event_id" to 0, "user_compe_id" to 0, "is_room_search" to "NO",
         ))
-        return (r["room_info"] as? Map<*, *>) ?: emptyMap<String, Any?>()
-    }
+    fun roomState(g: KgsGate, rid: Long): Map<*, *> =
+        roomReply(g, rid)["room_info"] as? Map<*, *> ?: emptyMap<String, Any?>()
 
     /**
      * From a CMD_GET_GAME_SESSION reply: the OTHER user's address entry of

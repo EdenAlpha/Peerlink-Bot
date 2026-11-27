@@ -33,7 +33,6 @@ import kotlin.concurrent.thread
 object BotMatchDriver {
 
     private const val SEAT_POLL_MS = 2_000L
-    private const val GO_POLL_MS = 1_000L
 
     /** Re-assert the bot's ready on this cadence while waiting for go. */
     private const val READY_REASSERT_MS = 20_000L
@@ -47,20 +46,26 @@ object BotMatchDriver {
     /** TURN watch: poll for the peer address, then carry on without it. */
     private const val WATCH_TIMEOUT_MS = 60_000L
 
-    @Volatile
-    private var running = false
+    @Volatile private var driver: Thread? = null
+    @Volatile private var stopping = false
+    private val running get() = Thread.currentThread() === driver && !stopping
 
-    /** Start the driver for a freshly created room. False if one is running. */
-    fun start(gate: KgsGate, rid: Long, roomNumber: String, onMatchStarting: (() -> Unit)? = null): Boolean {
-        if (running) return false
-        running = true
-        thread(name = "bot-match-driver") { run(gate, rid, roomNumber, onMatchStarting) }
+    @Synchronized fun start(gate: KgsGate, rid: Long, roomNumber: String, onMatchStarting: (() -> Unit)?,
+                            prepareNextEngine: (() -> Boolean) -> String?): Boolean {
+        if (driver != null) return false
+        stopping = false
+        val worker = thread(start = false, name = "bot-match-driver") {
+            run(gate, rid, roomNumber, onMatchStarting, prepareNextEngine)
+        }
+        driver = worker
+        worker.start()
         return true
     }
 
-    fun stop(reason: String = "driver_stop") {
+    @Synchronized fun stop(reason: String = "driver_stop") {
         log("PEERLINK_STOP component=match_driver reason=$reason observedAtMs=${android.os.SystemClock.elapsedRealtime()}")
-        running = false
+        stopping = true
+        driver?.interrupt()
     }
 
     private fun log(line: String) = AppState.appendLog("[BOT-DRIVER] $line")
@@ -80,9 +85,45 @@ object BotMatchDriver {
     private fun already(result: String?): Boolean =
         result?.startsWith("ERR_ALREADY") == true
 
-    private fun run(gate: KgsGate, rid: Long, roomNumber: String, onMatchStarting: (() -> Unit)?) {
+    private fun run(gate: KgsGate, rid: Long, roomNumber: String, onMatchStarting: (() -> Unit)?,
+                    prepareNextEngine: (() -> Boolean) -> String?) {
         val flow = BotMatchFlow(gate, gate, BotMatchFlow.SquadSource { emptyList() })
+        try {
+            BotRoomRounds(
+                active = { running },
+                play = { room, prior -> playRound(flow, gate, room, roomNumber, prior,
+                    onMatchStarting.takeIf { prior == null }) },
+                readRoom = { room -> flow.roomReply(gate, room) },
+                finishEngine = {
+                    EngineHost.finishRound()
+                    if (running) PeerSlot.finishRound()
+                },
+                prepareEngine = { prepareNextEngine { running } },
+                status = ::status,
+                resultOrProcessExit = { !EngineHost.isReady || EngineHost.roundEnd(EngineHost.enginePid) == RoomRoundEnd.RESULT },
+                requestLobbyReady = { room, lastStart ->
+                    val result = flow.matchReady(gate, room, BotMode.declaredProfile())["result"]?.toString()
+                    log("ROOM_RETURN_READY result=$result")
+                    result == "NOERR" || BotRoomRounds.alreadyReady(result) &&
+                        BotRoomRounds.freshSession(flow.gameSession(gate, room), lastStart)
+                },
+            ).run(rid, roomNumber)
+        } catch (error: Exception) {
+            if (running) {
+                log("DRIVER_EXCEPTION type=${error.javaClass.simpleName} observedAtMs=${android.os.SystemClock.elapsedRealtime()}")
+                PeerSlot.logFlow("driver_exception")
+                status(error.message ?: "Bot match setup stopped")
+            }
+        } finally {
+            synchronized(this) { driver = null }
+        }
+    }
+
+    private fun playRound(flow: BotMatchFlow, gate: KgsGate, rid: Long, roomNumber: String,
+                          previous: CompletedRoomMatch?, onMatchStarting: (() -> Unit)?): CompletedRoomMatch? {
         val self = gate.uid
+        val pid = EngineHost.enginePid
+        var connectingStart = 0L
         try {
             check(EngineHost.isReady) { "Bot simulation is not ready; start a new room" }
             // Apply the same server settings as the regular client before
@@ -97,7 +138,7 @@ object BotMatchDriver {
                 log("SERVER_MATCH_SETTINGS source=CMD_GET_SERVER_ENV is_revision_check=${if (settings.revisionCheck) "YES" else "NO"} nativeApplied=true")
                 break
             }
-            if (!running) return
+            if (!running) return null
             val squadReply = flow.userSquad(gate, self)
             check(squadReply["result"] == "NOERR") { "Could not read the bot's current squad" }
             val squadInput = SquadInput.encode(squadReply, self)
@@ -112,11 +153,12 @@ object BotMatchDriver {
                 log("original match transport configured from the authenticated server response")
                 break
             }
-            if (!running) return
-            status("room $roomNumber open -- join it from eFootball now")
+            if (!running) return null
+            status(if (previous == null) "room $roomNumber open -- join it from eFootball now"
+                else "Bot is back in room $roomNumber. Getting ready for the next match…")
 
             val oppSeen = waitForSeat(flow, gate, rid, self)
-            if (!running) return
+            if (!running) return null
             var opp = if (oppSeen < 0) 0L else oppSeen
             if (opp == 0L) {
                 log("seated, but the opponent uid was not parsed from room_info " +
@@ -138,7 +180,7 @@ object BotMatchDriver {
                     }
                 }
             }
-            if (!running) return
+            if (!running) return null
 
             // -- ROOM-TIME relay-quality report (capture block 63). The real
             //    client measures AGAIN inside the room, after the entry side
@@ -161,7 +203,7 @@ object BotMatchDriver {
                     qualityDone = true
                 }
             }
-            if (!running) return
+            if (!running) return null
 
             // -- check_match_enable, immediately before the first ready
             //    (capture adjacency). ERR_INVALID_SESSION / OTZP- is the
@@ -178,7 +220,7 @@ object BotMatchDriver {
                 log("check_match_enable -> $r" + if (r != "NOERR") " (non-blocking)" else "")
                 cmeDone = true
             }
-            if (!running) return
+            if (!running) return null
 
             // -- ready + go_match watch. The ready is re-asserted on a
             //    cadence: the server wants both sides' ready, and the game
@@ -186,42 +228,14 @@ object BotMatchDriver {
             //    ready must never be the reason the room stalls.
             log("bot endpoint: host=${BotMode.hostIp}:${BotMode.BOT_PORT} " +
                 "reflexive=${BotMode.BOT_FAB_IP}:${BotMode.BOT_PORT}")
-            var firstReady = true
-            var nextReadyAt = 0L
-            var nextStatusAt = 0L
-            var lastUsers = -1
-            var go = false
-            while (running && !go) {
-                val now = System.currentTimeMillis()
-                if (firstReady || now >= nextReadyAt) {
-                    val mr = flow.matchReady(gate, rid, BotMode.declaredProfile())
-                    val r = mr["result"]?.toString()
-                    firstReady = false
-                    nextReadyAt = now + READY_REASSERT_MS
-                    when {
-                        r == "NOERR" -> log("match_ready -> NOERR")
-                        already(r) -> log("match_ready -> $r (already ready)")
-                        else -> log("match_ready -> $r (will re-assert)")
-                    }
-                }
-                val info = flow.roomState(gate, rid)
-                val n = (info["num_users"] as? Number)?.toInt() ?: lastUsers
-                if (n > 0 && n != lastUsers) {
-                    lastUsers = n
-                    log("room now has $n user(s)")
-                }
-                if ((info["is_go_match"] as? String) == "YES") {
-                    go = true
-                    break
-                }
-                if (now >= nextStatusAt) {
-                    nextStatusAt = now + STATUS_EVERY_MS
-                    status("ready sent -- waiting for both sides " +
-                        "(press Ready + To Match in eFootball)")
-                }
-                Thread.sleep(GO_POLL_MS)
-            }
-            if (!running) return
+            val go = BotRoomRounds.awaitGo(
+                previousStart = previous?.sessionStart, active = { running },
+                setReady = { flow.matchReady(gate, rid, BotMode.declaredProfile())["result"]?.toString() },
+                readRoom = { flow.roomReply(gate, rid) }, readSession = { flow.gameSession(gate, rid) },
+                status = ::status, log = ::log,
+            ) ?: return null
+            var gs = go.confirmedSession
+            if (!running) return null
             status("both sides ready -- the game is entering the connection phase")
 
             // The game punches the moment its tunnel exists: make the peer
@@ -233,7 +247,6 @@ object BotMatchDriver {
 
             // -- game_session + the opponent's address (retried together:
             //    the reply must ALSO contain the address block).
-            var gs: Map<*, *>? = null
             var oppBlock: Map<*, *>? = null
             var rounds = 0
             while (running && (gs == null || oppBlock == null)) {
@@ -257,7 +270,7 @@ object BotMatchDriver {
                     Thread.sleep(RETRY_MS)
                 }
             }
-            if (!running) return
+            if (!running) return null
 
             val sessionOpp = (oppBlock!!["user_id"] as? Number)?.toLong() ?: opp
             if (sessionOpp > 0 && sessionOpp != opp) {
@@ -279,7 +292,7 @@ object BotMatchDriver {
             //    session reply; the bot does not answer the engine's P2P
             //    frames at all.
             check(gs!!["game_sycom"] == "P2P") { "The server selected relay; this bot test requires P2P" }
-            val connectingStart = (gs!!["connecting_start_time"] as? Number)?.toLong() ?: 0L
+            connectingStart = (gs!!["connecting_start_time"] as? Number)?.toLong() ?: 0L
             check(flow.handPeerToEngine(oppBlock!!, opp, connectingStart)) { "The bot engine did not accept the server's session" }
             val turnExchange = NativeTurnExchange(
                 localAddress = EngineHost::turnAddress,
@@ -303,7 +316,7 @@ object BotMatchDriver {
                         lastIntroductionVerdict = verdict
                     }
                 },
-            )) return
+            )) return null
             var lastConnectionState = ""
             if (!PeerConnectionPhase.awaitTransport(
                 running = { running },
@@ -317,7 +330,7 @@ object BotMatchDriver {
                         lastConnectionState = progress
                     }
                 },
-            )) return
+            )) return null
             log("original peer transport confirmed; reporting connection before waiting for match data")
             status("Peer link connected — confirming match setup with the server")
 
@@ -327,7 +340,7 @@ object BotMatchDriver {
                 poll = { flow.pollConnectionReport(gate, rid, self, opp) },
                 exchangeAddresses = turnExchange::pump,
                 progress = ::log,
-            )) return
+            )) return null
 
             // -- game id + session id (the gate assembles these over a beat).
             var gameId: Long? = null
@@ -338,7 +351,7 @@ object BotMatchDriver {
                     Thread.sleep(RETRY_MS)
                 }
             }
-            if (!running) return
+            if (!running) return null
             log("game_id found")
             val sessionIdReply = flow.sendSessionId(gate, gameId!!)
             log("send_session_id -> ${sessionIdReply["result"] ?: "unavailable"}")
@@ -346,7 +359,7 @@ object BotMatchDriver {
             if (!PeerConnectionPhase.awaitMetadata(
                 running = { running }, snapshot = EngineHost::snapshot,
                 exchangeAddresses = turnExchange::pump,
-            )) return
+            )) return null
             status("Connected — setting up the bot's match")
             val room = flow.roomState(gate, rid)
             val matchSettings = room["room_match_settings"] as? Map<*, *>
@@ -372,17 +385,17 @@ object BotMatchDriver {
             status(EngineHost.snapshot().status())
 
             while (running) {
+                EngineHost.roundEnd(pid)?.let { return CompletedRoomMatch(it, connectingStart) }
                 Thread.sleep(1000)
-                if (!running) break
-                turnExchange.pump()
+                if (running && EngineHost.roundEnd(pid) == null) turnExchange.pump()
             }
-        } catch (t: Throwable) {
-            log("DRIVER_EXCEPTION type=${t.javaClass.simpleName} observedAtMs=${android.os.SystemClock.elapsedRealtime()}; recording flow before leaving driver")
-            PeerSlot.logFlow("driver_exception")
-            status(t.message ?: "Bot match setup stopped")
-        } finally {
-            running = false
+        } catch (error: Exception) {
+            if (running && connectingStart > 0L) {
+                EngineHost.roundEnd(pid)?.let { return CompletedRoomMatch(it, connectingStart) }
+            }
+            throw error
         }
+        return null
     }
 
     /**

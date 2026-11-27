@@ -41,6 +41,7 @@ constexpr uintptr_t kPeerUpdate = 0x7c8a280;
 constexpr uintptr_t kStreamUpdate = 0x7c23884;
 uintptr_t image_base = 0;
 std::atomic<uintptr_t> observed_poll_completion{0};
+std::atomic<bool> match_result_available{false};
 
 template <typename Value>
 Value field(uintptr_t object, size_t offset) {
@@ -113,8 +114,11 @@ uint64_t observe_match_result(uintptr_t command) {
     char status[41], match_result[41], end_reason[41], abnormal_reason[41];
     const char *availability = enum_string(command + 0x960, match_result);
     const bool ready = strcmp(availability, "YES") == 0;
+    const char *reply_status = enum_string(command + 0x1f0, status);
+    if ((result & 1) && ready && strcmp(reply_status, "NOERR") == 0)
+        match_result_available.store(true, std::memory_order_relaxed);
     peerlink_journal("MATCH_RESULT_REPLY result=%s getMatchResult=%s endReason=%s abnormalReason=%s parser=%s parsed=%u",
-        enum_string(command + 0x1f0, status), availability,
+        reply_status, availability,
         ready ? enum_string(command + 0x978, end_reason) : "unavailable",
         ready ? enum_string(command + 0x990, abnormal_reason) : "unavailable",
         Offset == kMatchResult ? "json" : "binary", unsigned(result & 1));
@@ -280,6 +284,10 @@ bool install_slot(uintptr_t slot_offset, uintptr_t original, uintptr_t observer,
 }
 
 } // namespace
+
+bool peerlink_match_result_available() {
+    return match_result_available.load(std::memory_order_relaxed);
+}
 
 void peerlink_observe_match_lifecycle(uintptr_t base) {
     if (!base || image_base) return;

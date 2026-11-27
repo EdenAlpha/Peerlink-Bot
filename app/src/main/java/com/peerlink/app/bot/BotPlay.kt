@@ -32,6 +32,7 @@ internal data class BotPlayState(
 ) {
     val ownPlayers get() = side * 11 until (side + 1) * 11
     val opponents get() = (1 - side) * 11 until (2 - side) * 11
+    val centreRestart get() = abs(ball.x) < 0.8f && abs(ball.z) < 0.8f && height < 0.6f && velocity.length() < 0.45f
     val direction: Int get() {
         val ownX = players.getOrNull(if (ownKeeper >= 0) ownKeeper else side * 11)?.x ?: return 0
         val opponentX = players.getOrNull(if (opposingKeeper >= 0) opposingKeeper else (1 - side) * 11)?.x ?: return 0
@@ -106,6 +107,40 @@ internal data class BotPlayState(
     }
 }
 
+/** Confirm a close dribble when the engine temporarily loses the possession field.
+ * A fast pass crossing a player or a contested touch must remain unowned. */
+internal class BotControlTracker {
+    private var previous: BotPlayState? = null
+
+    fun reset() { previous = null }
+
+    fun resolve(raw: BotPlayState): BotPlayState {
+        val control = raw.forControl()
+        val old = previous
+        previous = control
+        if (control.owner != -2 || old == null || old.side != control.side ||
+            control.frame - old.frame !in 1..8 || control.height > 1.1f || old.height > 1.1f ||
+            control.velocity.length() > 9.5f || control.players.any { it == null }) return control
+        var closest = -1
+        var first = Float.POSITIVE_INFINITY
+        var second = Float.POSITIVE_INFINITY
+        for (id in control.players.indices) {
+            val d = control.players[id]!!.distance(control.ball)
+            if (d < first) { second = first; first = d; closest = id }
+            else if (d < second) second = d
+        }
+        if (closest < 0 || first > 2.5f || second - first < 0.7f) return control
+        val before = old.players[closest] ?: return control
+        val current = control.players[closest]!!
+        val frames = control.frame - old.frame
+        val moved = current - before
+        if (before.distance(old.ball) > 2.5f || moved.length() !in 0.08f..(frames * 0.45f) ||
+            (control.ball - old.ball - moved).length() > minOf(0.75f, frames * 0.15f)) return control
+        val selected = if (control.estimatedSelection && closest in control.ownPlayers) closest else control.selected
+        return control.copy(owner = closest, selected = selected)
+    }
+}
+
 // Android gamepad keys in the pinned game's native input handler.
 internal enum class BotAction(val key: Int, val holdMs: Long, val cooldownMs: Long) {
     PASS(96, 140, 480),
@@ -129,12 +164,14 @@ internal class BotActionWindow {
             return now >= until + 1000
         if (action == BotAction.PRESS && previous == BotAction.SWITCH && player != control.selected)
             return true
+        if (action.defensive && previous?.defensive == false && control.owner in control.opponents)
+            return true
         return now >= until || (!action.defensive && control.selected >= 0 && control.selected == control.owner &&
             (previous?.defensive == true || player >= 0 && player != control.selected))
     }
 
-    fun sent(now: Long, action: BotAction, selected: Int) {
-        until = now + action.cooldownMs
+    fun sent(now: Long, action: BotAction, selected: Int, centreRestart: Boolean = false) {
+        until = now + if (centreRestart && action == BotAction.PASS) 1000L else action.cooldownMs
         previous = action
         player = selected
     }
@@ -221,13 +258,11 @@ internal class BotBrain {
         val player = state.players.getOrNull(state.selected)
             ?: return BotPlay(action = BotAction.PRESS.takeIf { state.owner in state.opponents && state.height < 1.7f })
         val toBall = player.distance(state.ball)
-        val ballStill = state.velocity.length() < 0.45f
-        val center = abs(state.ball.x) < 0.8f && abs(state.ball.z) < 0.8f && state.height < 0.6f
         val direction = state.direction
         if (direction != 0) attackDirection = direction
 
-        if (center && ballStill) {
-            if (toBall <= 2.5f && state.owner == state.selected) return BotPlay(action = BotAction.PASS)
+        if (state.centreRestart) {
+            if (toBall <= 2.5f && state.owner == state.selected) return kickoffPass(state, player)
             // Let the native restart take place when the other side has the ball.
             if (toBall > 3f && state.opponents.any { (state.players[it]?.distance(state.ball) ?: 100f) < 3f }) return BotPlay()
         }
@@ -236,6 +271,26 @@ internal class BotBrain {
         // An unavailable ownership read still leaves usable ball geometry.
         // Chase or switch players, while pressure requires known opposition possession.
         return defend(state, player, toBall, previous)
+    }
+
+    fun kickoffPass(state: BotPlayState, player: PitchPoint): BotPlay {
+        var best = BotPlay(action = BotAction.PASS)
+        var bestScore = Float.NEGATIVE_INFINITY
+        for (id in state.ownPlayers) {
+            if (id == state.selected || id == state.ownKeeper) continue
+            val target = state.players[id] ?: continue
+            val distance = player.distance(target)
+            if (distance !in 2.5f..26f || nearerReceiverOnLine(state, id, player, target)) continue
+            val lane = clearance(state, player, target)
+            if (lane < 1.6f) continue
+            val score = minOf(lane, 5f) - distance * 0.4f -
+                ((target.x - player.x) * attackDirection).coerceAtLeast(0f) * 0.4f
+            if (score > bestScore) {
+                bestScore = score
+                best = BotPlay(steer(player, target), BotAction.PASS, id)
+            }
+        }
+        return best
     }
 
     private fun attack(state: BotPlayState, player: PitchPoint, previous: BotPlayState?): BotPlay {
@@ -287,71 +342,112 @@ internal class BotBrain {
             val farLane = clearance(state, player, far, state.opposingKeeper)
             val nearLane = clearance(state, player, near, state.opposingKeeper)
             val shot = if (nearLane > farLane + 0.6f || farLane <= 1.15f && nearLane > 1.15f) near else far
-            if (maxOf(farLane, nearLane) > 1.15f || goalDistance < 9f && pressure < 3.5f)
+            if (maxOf(farLane, nearLane) > 1.15f)
                 return BotPlay(steer(player, shot), BotAction.SHOOT)
         }
 
+        val run = carryLane(state, player)
+        val runLength = player.distance(run)
+        val runClearance = clearance(state, player, run)
+        val canBurst = !isKeeper && attackDirection != 0 && runLength >= 4f && runClearance >= 2.8f
+        val forwardRun = (run.x - player.x) * attackDirection
         var receiver: PitchPoint? = null
         var bestScore = Float.NEGATIVE_INFINITY
-        var bestLane = 0f
         var receiverId = -1
+        var bestAction = BotAction.PASS
+        val ball = state.ball
         for (id in state.ownPlayers) {
             if (id == state.selected || id == state.ownKeeper) continue
             val target = state.players[id] ?: continue
             val distance = player.distance(target)
             if (distance !in 3f..33f || abs(target.z) >= 33f || seen == 0) continue
             if (seen == 11 && target.x * attackDirection > offsideLine + 0.05f) continue
-            val aim = PitchPoint((target.x + motionX[id] * 9f).coerceIn(-51f, 51f),
-                (target.z + motionZ[id] * 9f).coerceIn(-33f, 33f))
-            val width = passingMargin(state, player, aim)
-            if (width <= 1.1f) continue
-            var space = Float.POSITIVE_INFINITY
-            for (opponent in state.opponents) {
-                val marker = state.players[opponent] ?: continue
-                space = minOf(space, marker.distance(aim))
-            }
-            if (space < 2.3f || nearerReceiverOnLine(state, id, player, aim)) continue
+
+            // Assisted ground passes can go to the receiver's feet even when the stick leads them.
+            // Both the direct line and the aimed line must be playable from the actual ball.
+            val direct = passingMargin(state, ball, target)
+            if (direct < 1.35f) continue
+            val leadFrames = (distance * 0.6f).coerceIn(3f, 12f)
+            val aim = PitchPoint((target.x + motionX[id] * leadFrames).coerceIn(-51f, 51f),
+                (target.z + motionZ[id] * leadFrames).coerceIn(-33f, 33f))
+            val width = if (aim == target) direct else minOf(direct, passingMargin(state, ball, aim))
+            if (width < 1.35f || nearerReceiverOnLine(state, id, player, aim)) continue
+            val space = nearestOpponent(state, aim)
+            if (space < 2.5f) continue
             val advance = (target.x - player.x) * attackDirection
-            val score = advance.coerceIn(-14f, 19f) * 0.62f + minOf(width, 6f) * 0.65f +
-                minOf(space, 9f) * 0.4f - distance * 0.17f
-            if (score > bestScore) {
-                bestScore = score
-                receiver = aim
-                receiverId = id
-                bestLane = width
+            val score = advance.coerceIn(-14f, 19f) * 0.48f + minOf(width, 7f) * 1.1f +
+                minOf(space, 9f) * 0.6f - distance * 0.19f
+            if (score <= bestScore) continue
+            bestScore = score
+            receiver = aim
+            receiverId = id
+            bestAction = BotAction.PASS
+            if (!isKeeper && seen == 11 && closingPressure <= 6f && pressure >= 2f &&
+                advance in 8f..23f && target.x * attackDirection < offsideLine - 1f && width > 2.8f &&
+                motionX[id] * attackDirection >= -0.04f) {
+                // A through ball travels beyond the teammate. Check that extra stretch as well.
+                val beyond = PitchPoint(aim.x + 4f * attackDirection, aim.z)
+                if (abs(beyond.x) < 51f && passingMargin(state, ball, beyond) >= 2.5f &&
+                    nearestOpponent(state, beyond) >= 3.5f && !nearerReceiverOnLine(state, id, player, beyond)) {
+                    receiver = beyond
+                    bestAction = BotAction.THROUGH
+                }
             }
         }
 
         if (receiver != null) {
-            val advance = (receiver.x - player.x) * attackDirection
-            val through = !isKeeper && seen == 11 && closingPressure <= 6f && pressure >= 2f &&
-                advance in 8f..23f && receiver.x * attackDirection < offsideLine - 1f && bestLane > 2.8f
-            if (isKeeper || closingPressure <= 6f || advance >= 7f || attackDirection == 0)
-                return BotPlay(steer(player, receiver), if (through) BotAction.THROUGH else BotAction.PASS, receiverId)
+            // Compare what the teammate actually gains. A through ball's extra lead is
+            // empty grass, which the carrier may already be able to reach in stride.
+            val advance = (state.players[receiverId]!!.x - player.x) * attackDirection
+            val breakaway = attackDirection != 0 && seen == 11 && player.x * attackDirection >= backLine &&
+                canBurst && forwardRun > 5f
+            val escapingChaser = canBurst && forwardRun >= 6f && advance < 12f && state.opponents.any { id ->
+                state.players[id]?.let { (player.x - it.x) * attackDirection > 1f && it.distance(player) < 8f } == true
+            }
+            if (isKeeper || attackDirection == 0 || !breakaway && !escapingChaser &&
+                (closingPressure <= 6f || advance >= 7f || runClearance < 2f)) {
+                return BotPlay(steer(player, receiver), bestAction, receiverId)
+            }
         }
         if (isKeeper || receiver == null && pressure < 2f && player.x * attackDirection < -30f) {
             if (attackDirection == 0) return BotPlay(action = BotAction.PASS)
             return BotPlay(steer(player, PitchPoint(player.x + 30f * attackDirection, player.z)), BotAction.CLEAR)
         }
+        return BotPlay(steer(player, run, sprint = canBurst))
+    }
 
-        // Carry into space on the first decision. Compare a straight run
-        // with two angled runs so a blocked passing lane still has an outlet.
-        var bestRun = player
-        var runScore = Float.NEGATIVE_INFINITY
-        for (angle in -2..2) {
-            val x = (player.x + (when (abs(angle)) { 0 -> 10f; 1 -> 6f; else -> 0f }) * attackDirection).coerceIn(-51f, 51f)
-            val z = (player.z * 0.92f + angle.coerceIn(-1, 1) * 8f).coerceIn(-32f, 32f)
-            val target = PitchPoint(x, z)
-            val length = player.distance(target)
-            if (length < 1f) continue
-            val score = minOf(clearance(state, player, target), 9f) +
-                (x - player.x) * attackDirection * 0.22f - abs(z) * 0.025f
-            if (score > runScore) {
-                runScore = score
-                bestRun = target
-            }
+    fun carryBetweenKicks(state: BotPlayState): BotStick {
+        val player = state.players.getOrNull(state.selected) ?: return BotStick()
+        if (state.owner != state.selected || state.centreRestart || state.selected == state.ownKeeper) return BotStick()
+        val run = carryLane(state, player)
+        val sprint = attackDirection != 0 && player.distance(run) >= 4f && clearance(state, player, run) >= 2.8f
+        return steer(player, run, sprint)
+    }
+
+    private fun nearestOpponent(state: BotPlayState, target: PitchPoint): Float {
+        var nearest = 100f
+        for (id in state.opponents) state.players[id]?.let { nearest = minOf(nearest, it.distance(target)) }
+        return nearest
+    }
+
+    private fun carryLane(state: BotPlayState, player: PitchPoint): PitchPoint {
+        var best = player
+        var bestScore = Float.NEGATIVE_INFINITY
+        // Forward, diagonal, lateral, and a short turn out on either shoulder.
+        for (lane in -3..3) {
+            val side = lane.compareTo(0)
+            val forward = when (abs(lane)) { 0 -> 10f; 1 -> 7f; 2 -> 1.5f; else -> -4f }
+            val sideways = when (abs(lane)) { 0 -> 0f; 1 -> 5.5f; 2 -> 6.5f; else -> 4.5f }
+            val target = PitchPoint((player.x + forward * attackDirection).coerceIn(-51f, 51f),
+                (player.z + side * sideways).coerceIn(-32.5f, 32.5f))
+            if (player.distance(target) < 1.5f) continue
+            val laneSpace = clearance(state, player, target)
+            val progress = (target.x - player.x) * attackDirection
+            val score = minOf(laneSpace, 7f) + minOf(nearestOpponent(state, target), 8f) * 0.55f +
+                progress * 0.30f - (abs(target.z) - 27f).coerceAtLeast(0f) * 0.23f
+            if (score > bestScore) { bestScore = score; best = target }
         }
-        return BotPlay(steer(player, bestRun, sprint = closingPressure > 4f && player.distance(bestRun) > 4f))
+        return best
     }
 
     private fun support(state: BotPlayState, player: PitchPoint): BotPlay {
@@ -367,20 +463,72 @@ internal class BotBrain {
 
     private fun defend(state: BotPlayState, player: PitchPoint, distance: Float, previous: BotPlayState?): BotPlay {
         val onBall = state.owner in state.opponents
-        val lead = if (onBall) projectedRun(state, previous, state.owner, 7f) else {
+        // During a contested dribble the owner field can be unknown. Cover a nearby attacker
+        // without firing a tackle at a loose or airborne ball.
+        val threat = when {
+            onBall -> state.owner
+            state.owner == -2 && state.height < 1.35f && state.velocity.length() <= 8.5f -> {
+                var nearest = -1
+                var reach = minOf(2.65f, distance + 0.25f)
+                for (id in state.opponents) {
+                    val d = state.players[id]?.distance(state.ball) ?: continue
+                    if (d < reach) { reach = d; nearest = id }
+                }
+                nearest
+            }
+            else -> -1
+        }
+        val lead = if (threat >= 0) projectedRun(state, previous, threat, 7f) else {
             val travel = state.velocity * 0.22f
             travel * (5f / maxOf(5f, travel.length()))
         }
-        val pressing = onBall && distance < 3.7f && state.height < 1.7f
-        val cover = if (onBall && !pressing) -attackDirection * 1.5f else 0f
-        val target = PitchPoint((state.ball.x + lead.x + cover).coerceIn(-52f, 52f),
-            (state.ball.z + lead.z).coerceIn(-34f, 34f))
         val keeper = state.ownKeeper.takeIf { it >= 0 } ?: state.ownPlayers.first
+        val ownGoal = PitchPoint(-52.5f * attackDirection, 0f)
+        val relativeDepth = (player.x - state.ball.x) * attackDirection
+        val goalSide = attackDirection == 0 || relativeDepth <= 0.75f
+        val pressing = onBall && state.height < 1.7f &&
+            (distance <= 2.15f || goalSide && distance < 3.7f)
+        val predicted = state.ball + lead
+        var target = predicted
+        if (threat >= 0 && !pressing && attackDirection != 0) {
+            // Recover inside the attacker first. A last defender covering a winger stays in the
+            // path to goal and can screen the central runner instead of abandoning the middle.
+            val toGoal = ownGoal - predicted
+            val goalDistance = maxOf(1f, toGoal.length())
+            val lastCover = state.ownPlayers.none { id ->
+                id != state.selected && id != keeper && state.players[id]?.let {
+                    (it.x - predicted.x) * attackDirection < -2f && abs(it.z) < abs(predicted.z) + 2f
+                } == true
+            }
+            val depth = when {
+                !goalSide -> 5f
+                lastCover && abs(predicted.z) > 9f -> 5.5f
+                lastCover -> 3.5f
+                else -> 1.8f
+            }
+            target = predicted + toGoal * (minOf(depth, goalDistance * 0.65f) / goalDistance)
+            if (lastCover && abs(predicted.z) > 9f && predicted.x * attackDirection < -12f) {
+                var danger: PitchPoint? = null
+                var dangerDistance = goalDistance
+                for (id in state.opponents) {
+                    if (id == threat || id == state.opposingKeeper) continue
+                    val runner = state.players[id] ?: continue
+                    if (abs(runner.z) >= abs(predicted.z) - 4f || runner.distance(predicted) > 19f) continue
+                    val d = runner.distance(ownGoal)
+                    if (d < dangerDistance) { danger = runner; dangerDistance = d }
+                }
+                if (danger != null) target = target * 0.55f + danger * 0.45f
+            }
+        }
+        target = PitchPoint(target.x.coerceIn(-52f, 52f), target.z.coerceIn(-34f, 34f))
         val myDistance = player.distance(target)
-        val advantage = if (state.selected == keeper) 2f else maxOf(4.5f, myDistance * 0.25f)
+        fun recoveryCost(p: PitchPoint): Float = p.distance(target) + if (threat >= 0 && attackDirection != 0)
+            ((p.x - predicted.x) * attackDirection).coerceIn(0f, 8f) * 0.65f else 0f
+        val myCost = recoveryCost(player)
+        val advantage = if (state.selected == keeper) 2f else maxOf(4.5f, myCost * 0.25f)
         val switch = !pressing && !state.estimatedSelection && distance > 5f && state.ownPlayers.any { other ->
             other != state.selected && other != keeper &&
-                state.players[other]?.let { it.distance(target) + advantage < myDistance } == true
+                state.players[other]?.let { recoveryCost(it) + advantage < myCost } == true
         }
         val action = when {
             pressing -> BotAction.PRESS
@@ -388,7 +536,7 @@ internal class BotBrain {
             else -> null
         }
         if (state.selected == keeper && distance > 5f) return BotPlay(action = action)
-        return BotPlay(steer(player, target, sprint = !pressing && myDistance > 5.5f), action)
+        return BotPlay(steer(player, target, sprint = !pressing && myDistance > if (goalSide) 5.5f else 3f), action)
     }
 
     private fun projectedRun(state: BotPlayState, previous: BotPlayState?, id: Int, frames: Float): PitchPoint {
@@ -407,22 +555,31 @@ internal class BotBrain {
     private fun passingMargin(state: BotPlayState, from: PitchPoint, to: PitchPoint): Float {
         val dx = to.x - from.x
         val dz = to.z - from.z
-        val travel = maxOf(0.1f, sqrt(dx * dx + dz * dz) / 17f)
-        val leadFrames = minOf(14f, travel * 27f)
+        val length = maxOf(0.1f, sqrt(dx * dx + dz * dz))
+        val travel = length / 15f
         var margin = 100f
         for (id in state.opponents) {
             val marker = state.players[id] ?: continue
-            val x = marker.x - from.x
-            val z = marker.z - from.z
-            val vx = dx - motionX[id] * leadFrames
-            val vz = dz - motionZ[id] * leadFrames
-            val closest = (x * vx + z * vz) / maxOf(0.01f, vx * vx + vz * vz)
-            if (closest < 0f) continue
-            val t = minOf(closest, 1f)
-            val gapX = x - t * vx
-            val gapZ = z - t * vz
-            val reach = maxOf(0f, t * travel - 0.22f) * 2.7f
-            margin = minOf(margin, sqrt(gapX * gapX + gapZ * gapZ) - reach)
+            val mx = marker.x - from.x
+            val mz = marker.z - from.z
+            val projection = (mx * dx + mz * dz) / (length * length)
+            if (projection < 0f) continue
+            // Check where the defender is when the kick releases, crosses their line, and
+            // reaches the receiver. Allow a stationary human to step into the lane as well.
+            for (sample in 0..2) {
+                val t = when (sample) {
+                    0 -> projection.coerceIn(0f, 1f)
+                    1 -> ((mx + motionX[id] * 9f) * dx + (mz + motionZ[id] * 9f) * dz)
+                        .div(length * length).coerceIn(0f, 1f)
+                    else -> 1f
+                }
+                val seconds = 0.14f + t * travel
+                val frames = minOf(seconds * 27f, 12f)
+                val x = mx + motionX[id] * frames - t * dx
+                val z = mz + motionZ[id] * frames - t * dz
+                val reach = (seconds - 0.18f).coerceAtLeast(0f) * 3.8f + t * length * 0.025f
+                margin = minOf(margin, sqrt(x * x + z * z) - reach)
+            }
         }
         return margin
     }
