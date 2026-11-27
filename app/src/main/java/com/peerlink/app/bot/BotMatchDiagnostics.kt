@@ -53,20 +53,30 @@ internal object BotMatchDiagnostics {
             try {
                 val manager = ctx.getSystemService(ActivityManager::class.java)
                 val memory = ActivityManager.MemoryInfo()
-                val policy = RoomMemoryPressure()
+                val gameUid by lazy { ctx.packageManager.getApplicationInfo("jp.konami.pesam", 0).uid }
+                val appUid = android.os.Process.myUid()
+                var guardPid = 0
+                var policy = RoomMemoryPressure()
                 val script = ctx.assets.open("prime-room-cleanup.sh").bufferedReader().use { it.readText() }
                 record(ctx, id, "Room memory guard started")
                 while (isActive) {
                     delay(4000)
+                    val pid = EngineHost.enginePid
+                    if (pid <= 0 || EngineHost.roundEnd(pid) != null) continue
+                    if (guardPid != pid) {
+                        guardPid = pid
+                        policy = RoomMemoryPressure()
+                    }
                     manager.getMemoryInfo(memory)
                     val before = memory.availMem / 1048576
                     if (!policy.shouldReclaim(SystemClock.elapsedRealtime(), before, memory.totalMem / 1048576, memory.lowMemory)) continue
-                    val result = GodModeManager.runRoomMemoryGuard("set -- guard\n$script")
+                    val result = GodModeManager.runRoomMemoryGuard("set -- guard $gameUid $appUid\n$script")
                     delay(1500)
                     manager.getMemoryInfo(memory)
                     val after = memory.availMem / 1048576
-                    policy.attempted(SystemClock.elapsedRealtime(), after - before)
-                    record(ctx, id, "Room memory guard beforeMiB=$before afterMiB=$after exit=${result.exitCode}\n${result.output.take(600)}")
+                    val requested = result.ok && result.output.lineSequence().any { it.trim() == "Android cached-app sweep requested" }
+                    policy.attempted(SystemClock.elapsedRealtime(), if (requested) after - before else 0)
+                    record(ctx, id, "Room memory guard pid=$pid cachedSweep=$requested beforeMiB=$before afterMiB=$after exit=${result.exitCode}\n${result.output.take(600)}")
                 }
             } catch (cancelled: CancellationException) {
                 throw cancelled

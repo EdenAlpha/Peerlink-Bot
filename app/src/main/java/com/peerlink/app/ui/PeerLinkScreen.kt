@@ -20,6 +20,7 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.*
@@ -1613,6 +1614,9 @@ fun PrimeSetupScreen(
     var shellOutput by remember { mutableStateOf("") }
     var shellOk by remember { mutableStateOf<Boolean?>(null) }
     var shellBusy by remember { mutableStateOf(false) }
+    var ramReport by remember { mutableStateOf(GodModeManager.lastRamReport()) }
+    var ramReportError by remember { mutableStateOf("") }
+    var readingRam by remember { mutableStateOf(false) }
     val shellScope = rememberCoroutineScope()
     val (heroLabel, heroColor) = when {
         isActive -> "Prime Mode Active" to PL.green
@@ -1837,9 +1841,35 @@ fun PrimeSetupScreen(
 
                 PrimeControlCard(
                     title = "Prime Memory",
-                    subtitle = "Keep eFootball + PeerLink alive without blindly clearing RAM",
+                    subtitle = "See what uses RAM and manage memory during play",
                     icon = Icons.Rounded.Memory,
                 ) {
+                    GhostBtn(
+                        if (readingRam) "Reading RAM use…" else "Check RAM use",
+                        Icons.Rounded.Memory, Modifier.testTag("prime-ram-report"),
+                        enabled = snap.primeServerAlive && !readingRam,
+                    ) {
+                        readingRam = true
+                        ramReportError = ""
+                        shellScope.launch {
+                            try {
+                                val result = withContext(Dispatchers.IO) { GodModeManager.readRamReport() }
+                                if (result.ok) ramReport = result.output
+                                else ramReportError = result.output.ifBlank { "Prime could not read Android’s RAM report." }
+                            } finally {
+                                readingRam = false
+                            }
+                        }
+                    }
+                    if (!snap.primeServerAlive) Text("Start the Prime engine to check RAM use.", fontSize = 12.sp, color = PL.muted)
+                    if (ramReportError.isNotBlank()) Text(ramReportError, fontSize = 12.sp, color = PL.red)
+                    if (ramReport.isNotBlank()) {
+                        Spacer(Modifier.height(8.dp))
+                        SelectionContainer {
+                            Text(ramReport, fontSize = 12.sp, lineHeight = 17.sp, color = PL.inkSoft)
+                        }
+                    }
+                    Spacer(Modifier.height(11.dp))
                     if (capabilities.processFreeze) {
                         PrimeSwitchRow(
                             title = "Instant Vault",

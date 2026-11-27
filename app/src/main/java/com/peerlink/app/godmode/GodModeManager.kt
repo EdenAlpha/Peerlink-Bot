@@ -1055,6 +1055,22 @@ object GodModeManager {
     internal fun runRoomMemoryGuard(command: String): PrimeExecResult =
         runLoggedShell(command, 15_000, "Reclaim eligible cached apps for the bot room")
 
+    internal fun lastRamReport(): String = prefs().getString("prime_last_ram_report", "").orEmpty()
+
+    internal fun readRamReport(): PrimeExecResult {
+        val result = runLoggedShell(PrimeRamReport.command, 22_000, "Read Android RAM usage")
+        if (!result.ok) return result
+        val usage = try {
+            PrimeRamReport.format(result.output)
+        } catch (_: IllegalArgumentException) {
+            return PrimeExecResult("Android did not return a complete RAM report. Try again when the phone is idle.", -1, false)
+        }
+        val time = java.text.DateFormat.getDateTimeInstance().format(java.util.Date())
+        val report = "$time\n$usage"
+        prefs().edit().putString("prime_last_ram_report", report).apply()
+        return PrimeExecResult(report, 0, true)
+    }
+
     private fun runLoggedShell(command: String, timeoutMs: Int, label: String): PrimeExecResult {
         val trimmed = command.trim()
         if (trimmed.isEmpty()) return PrimeExecResult("", -1, false)

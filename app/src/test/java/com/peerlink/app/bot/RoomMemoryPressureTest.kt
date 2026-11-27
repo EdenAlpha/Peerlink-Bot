@@ -23,4 +23,22 @@ class RoomMemoryPressureTest {
             assertFalse(policy.shouldReclaim(0, available, 3743, false))
         assertTrue(policy.shouldReclaim(0, 210, 3743, true))
     }
+
+    @Test fun suddenMemoryLossDuringLoadingCanInterruptBackoffOnce() {
+        val policy = RoomMemoryPressure()
+        assertFalse(policy.shouldReclaim(0, 680, 3743, false))
+        assertTrue(policy.shouldReclaim(4000, 606, 3743, false))
+        policy.attempted(4000, 0)
+        assertFalse(policy.shouldReclaim(8000, 850, 3743, false))
+        assertTrue(policy.shouldReclaim(44000, 637, 3743, false))
+        policy.attempted(44000, 0)
+        assertFalse(policy.shouldReclaim(48000, 390, 3743, false))
+        assertFalse(policy.shouldReclaim(60000, 390, 3743, false))
+        assertTrue(policy.shouldReclaim(64000, 390, 3743, false))
+        policy.attempted(64000, 0)
+        assertFalse(policy.shouldReclaim(90000, 380, 3743, true))
+        assertFalse(policy.shouldReclaim(100000, 1300, 3743, false))
+        assertFalse(policy.shouldReclaim(104000, 390, 3743, false))
+        assertTrue(policy.shouldReclaim(108000, 390, 3743, false))
+    }
 }
