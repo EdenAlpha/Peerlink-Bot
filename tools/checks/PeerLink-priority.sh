@@ -11,6 +11,40 @@ work=/data/local/tmp/peerlink-bot-priority
 
 stop_check() { printf 'INCONCLUSIVE. %s\n' "$*"; exit 1; }
 
+display_setting() {
+  local reply status value
+  reply=$(timeout 5 settings get global "$key" 2>&1); status=$?
+  if [ "$status" -eq 0 ]; then
+    case "$reply" in ''|null|[0-9]*x[0-9]*/*) printf '%s\n' "$reply"; return 0 ;; esac
+  fi
+  # Standalone Android cmd can send Binder errors to stdout. Keep the reason
+  # outside the value returned to the caller. This query requests just one key.
+  printf 'settings get %s (exit %s): %.500s\n' "$key" "$status" "${reply:-no output}" >&2
+  reply=$(timeout 5 cmd settings list global 2>&1); status=$?
+  if [ "$status" -eq 0 ]; then
+    value=$(printf '%s\n' "$reply" | awk -v key="$key=" '
+      index($0,key)==1 { n++; value=substr($0,length(key)+1) }
+      /^(adb_enabled|airplane_mode_on|device_provisioned|development_settings_enabled)=/ { table=1 }
+      END {
+        if (n==1) print value
+        else if (n==0 && table) print "null"
+        else exit 1
+      }') && { printf '%s\n' "$value"; return 0; }
+  fi
+  # Only print errors, never the phone's global settings table.
+  printf 'cmd settings list global (exit %s) could not verify the setting.\n' "$status" >&2
+  printf '%s\n' "$reply" | awk '/^[[:space:]]*(cmd:|Error:|Exception|SecurityException|Permission [Dd]enial|java\.[a-z.]+Exception:|Can.t find service|timeout:)/ {print substr($0,1,500); exit}' >&2
+  return 1
+}
+
+write_display_setting() {
+  local reply status
+  reply=$(timeout 5 cmd settings "$@" 2>&1) && return 0
+  status=$?
+  printf 'cmd settings %s %s %s (exit %s): %.500s\n' "$1" "$2" "$3" "$status" "${reply:-no output}" >&2
+  return 1
+}
+
 process_pid() {
   ps -A -n -o UID,PID,NAME | awk -v name="$1" -v user="$android_user" '
     $1 ~ /^[0-9]+$/ && int($1 / 100000) == user && $3 == name { pid=$2; n++ }
@@ -68,14 +102,14 @@ restore_display() {
   [ -f "$work/previous" ] || return 0
   local current previous
   previous=$(cat "$work/previous") || return 1
-  current=$(settings get global "$key") || return 1
+  current=$(display_setting) || return 1
   if [ "$current" = "$panel" ]; then
     case "$previous" in
-      null) settings delete global "$key" >/dev/null || return 1 ;;
-      '') settings put global "$key" '' || return 1 ;;
+      null) write_display_setting delete global "$key" || return 1 ;;
+      '') write_display_setting put global "$key" '' || return 1 ;;
       *) return 1 ;;
     esac
-    current=$(settings get global "$key") || return 1
+    current=$(display_setting) || return 1
     [ "$current" = "$previous" ] || return 1
     echo 'Restored the original simulated-display setting.'
   elif [ "$current" != "$previous" ]; then
@@ -127,10 +161,7 @@ measure() {
   echo "$$" > "$work/pid"
   local previous ids display attempt settle grace base_low base_high panel_low panel_high
   local android_user="$1" bot_pid="$2" game_pid='' low high
-  previous=$(settings get global "$key") || stop_check 'The display setting could not be read.'
-  case "$previous" in ''|null) ;; *) stop_check 'A simulated display is already configured.' ;; esac
-  ids=$(overlay_ids) || stop_check 'Android did not list its displays.'
-  [ -z "$ids" ] || stop_check 'A simulated display is already active.'
+  printf 'PeerLink priority check v2. Android user %s, bot PID %s. Lower scores receive stronger protection against low-memory kills.\n' "$android_user" "$bot_pid"
   grace=$(dumpsys -t 4 activity settings | awk -F= '
     $1 ~ /^[[:space:]]*top_to_(fgs|almost_perceptible)_grace_duration$/ && $2 ~ /^[0-9]+$/ {
       if ($2 > max+0) max=$2
@@ -138,15 +169,20 @@ measure() {
     END { print (max+0 > 15000 ? max : 15000) }')
   [ "$grace" -le 120000 ] || stop_check 'This phone has a foreground grace period longer than two minutes.'
   settle=$(( (grace + 999) / 1000 + 5 ))
-  echo 'PeerLink bot priority check. Lower scores receive stronger protection against low-memory kills.'
   open_game
   check_phase 'Before' none
   base_low=$low; base_high=$high
 
-  [ "$(settings get global "$key")" = "$previous" ] || stop_check 'The display setting changed before the test.'
+  previous=$(display_setting) || stop_check 'Only the baseline was measured. Android did not confirm the display setting.'
+  case "$previous" in ''|null) ;; *) stop_check 'A simulated display is already configured.' ;; esac
+  ids=$(overlay_ids) || stop_check 'Android did not list its displays.'
+  [ -z "$ids" ] || stop_check 'A simulated display is already active.'
   [ ! -f "$work/cancel" ] || stop_check 'Check cancelled.'
+  local current
+  current=$(display_setting) || stop_check 'Android could not recheck the display setting.'
+  [ "$current" = "$previous" ] || stop_check 'The display setting changed before the test.'
   printf '%s\n' "$previous" > "$work/previous" || stop_check 'Could not save the display setting.'
-  settings put global "$key" "$panel" || stop_check 'Android denied the simulated display.'
+  write_display_setting put global "$key" "$panel" || stop_check 'Android could not enable the simulated display.'
   display=''
   for attempt in 1 2 3 4 5; do
     ids=$(overlay_ids) || stop_check 'Android stopped reporting its displays.'
@@ -160,7 +196,8 @@ measure() {
   check_phase 'With PeerLink visible' "$display"
   panel_low=$low; panel_high=$high
 
-  [ "$(settings get global "$key")" = "$panel" ] || stop_check 'The simulated-display setting was changed separately during the check.'
+  current=$(display_setting) || stop_check 'Android could not verify the temporary display setting.'
+  [ "$current" = "$panel" ] || stop_check 'The simulated-display setting was changed separately during the check.'
   restore_display || stop_check 'Android did not confirm removal of the temporary display.'
   sleep 2
   open_game
@@ -201,5 +238,7 @@ mkdir "$work" 2>/dev/null || stop_check 'A check is already active. After an int
 if ! mkdir -p "$downloads" || ! : > "$report" || ! cp "$0" "$work/run.sh"; then
   release_check; stop_check 'Prime could not prepare the report in Downloads.'
 fi
-(trap '' HUP; exec sh "$work/run.sh" --measure "$android_user" "$bot_pid") </dev/null >> "$report" 2>&1 &
+# Android services receive copies of the shell command's descriptors. Only cat
+# should open the Downloads file. Give the worker a pipe for stdout AND stderr.
+(trap '' HUP; sh "$work/run.sh" --measure "$android_user" "$bot_pid" 2>&1 | cat >> "$report") </dev/null >/dev/null 2>&1 &
 printf 'Check started. Leave eFootball on screen until the report finishes.\nDownloads/%s\n' "${report##*/}"
