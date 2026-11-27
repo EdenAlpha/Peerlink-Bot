@@ -2,6 +2,7 @@ package com.peerlink.app.godmode
 
 import android.content.Context
 import android.os.Process
+import com.peerlink.app.bot.BotMode
 import com.peerlink.app.core.AppState
 import com.peerlink.app.core.MatchPhase
 import com.peerlink.app.core.MatchTracker
@@ -114,7 +115,8 @@ class PrimeMemoryDirector(
     private suspend fun tick() {
         if (gameUid <= 0) return
         val now = System.currentTimeMillis()
-        val matchProtected = PrimeGameplayTracker.isMatchProtected(now)
+        // Bot rooms have a local transport and can be active without any normal peer UDP.
+        val matchProtected = BotMode.active || PrimeGameplayTracker.isMatchProtected(now)
         if (capabilities().uidState && now - lastUidSampleMs >= UID_SAMPLE_MS) {
             lastUidSampleMs = now
             val sampledState = readUidState(gameUid)
@@ -145,7 +147,7 @@ class PrimeMemoryDirector(
                 currentCoroutineContext().ensureActive()
                 // A stale cached package or unreadable foreground is not permission to freeze.
                 if (top.isNotBlank() && top != GAME &&
-                    !PrimeGameplayTracker.isMatchProtected() &&
+                    !BotMode.active && !PrimeGameplayTracker.isMatchProtected() &&
                     MatchTracker.state.value.phase == MatchPhase.NO_MATCH) {
                     if (top.isNotBlank()) temporaryForegroundPkg = top
                     val r = execute("am freeze --sticky $GAME")

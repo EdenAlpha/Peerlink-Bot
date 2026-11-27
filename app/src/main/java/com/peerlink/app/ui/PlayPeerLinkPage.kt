@@ -301,7 +301,7 @@ private fun MatchRoomCard(
                     modifier = Modifier.testTag("bot-clear-ram")) {
                     onCreateRoom(true)
                 }
-                Text("Prime closes background apps before play and records memory and match diagnostics.",
+                Text("Prime clears background apps, watches RAM during play, and saves match diagnostics.",
                     color = PL.inkSoft, fontSize = 11.5.sp, lineHeight = 17.sp)
             }
         }

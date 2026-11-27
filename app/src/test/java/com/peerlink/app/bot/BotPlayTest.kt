@@ -471,4 +471,34 @@ class BotPlayTest {
         window.sent(1100, BotAction.PRESS, 6)
         assertFalse(window.available(1150, BotAction.PRESS, state.copy(owner = 17)))
     }
+
+    @Test fun aTrappedBallCanBePlayedWithoutWaitingForTheCarrierToMove() {
+        val raw = scenario(PitchPoint(2f, 1f), -2).let { it.copy(ball = PitchPoint(3.9f, 1f),
+            players = it.players.toMutableList().apply { this[4] = PitchPoint(17f, 6f) }) }
+        val tracker = BotControlTracker()
+        assertEquals(-2, tracker.resolve(raw).owner)
+        val trapped = tracker.resolve(raw.copy(frame = 103))
+        assertEquals(6, trapped.owner)
+        assertEquals(BotAction.PASS, BotBrain().decide(trapped).action)
+        for (unsafe in listOf(raw.copy(owner = -1), raw.copy(selected = -1), raw.copy(height = 1f),
+                raw.copy(players = raw.players.toMutableList().apply { this[17] = PitchPoint(4.9f, 1f) }))) {
+            tracker.reset()
+            tracker.resolve(unsafe)
+            assertNotEquals(6, tracker.resolve(unsafe.copy(frame = 103)).owner)
+        }
+    }
+
+    @Test fun stalledCarrierReleasesSideOutletAndMovingCarrierKeepsAdvantage() {
+        val raw = scenario(PitchPoint(2f, 1f))
+        fun sample(frame: Int, x: Float) = raw.copy(frame = frame, ball = PitchPoint(x, 1f),
+            players = raw.players.toMutableList().apply { this[6] = PitchPoint(x, 1f); this[4] = PitchPoint(3f, 9f) })
+        for (advance in listOf(0f, 2f)) {
+            val brain = BotBrain()
+            assertNull(brain.decide(sample(100, 2f)).action)
+            brain.decide(sample(103, 2f + advance / 2))
+            val plan = brain.decide(sample(106, 2f + advance))
+            if (advance == 0f) { assertEquals(BotAction.PASS, plan.action); assertEquals(4, plan.receiver) }
+            else { assertNull(plan.action); assertTrue(plan.stick.sprint) }
+        }
+    }
 }

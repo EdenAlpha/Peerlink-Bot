@@ -1049,13 +1049,19 @@ object GodModeManager {
         }
     }
 
-    fun runUserShell(command: String, timeoutMs: Int = 30_000): PrimeExecResult {
+    fun runUserShell(command: String, timeoutMs: Int = 30_000): PrimeExecResult =
+        runLoggedShell(command, timeoutMs, command.trim())
+
+    internal fun runRoomMemoryGuard(command: String): PrimeExecResult =
+        runLoggedShell(command, 15_000, "Reclaim eligible cached apps for the bot room")
+
+    private fun runLoggedShell(command: String, timeoutMs: Int, label: String): PrimeExecResult {
         val trimmed = command.trim()
         if (trimmed.isEmpty()) return PrimeExecResult("", -1, false)
         if (!PrimeClient.isAlive(timeoutMs = 800)) {
             return PrimeExecResult("Prime engine is not running. Activate Prime first.", -1, false)
         }
-        AppState.appendLog("[PRIME-SHELL] $trimmed")
+        AppState.appendLog("[PRIME-SHELL] $label")
         return executePrimeShellChecked(trimmed, timeoutMs)
     }
 

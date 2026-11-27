@@ -426,8 +426,18 @@ internal object EngineRuntime {
         if (base == 0L) false else nativeInputKey(base, code, if (down) 0 else 1)
     }
     fun halftimeConfirm(): Boolean = onRuntime { base != 0L && nativeHalftimeConfirm(base) }
-    fun playState(): BotPlayState? = onRuntime {
-        if (base == 0L) null else BotPlayState.decode(nativePlayState(base))
+    fun playState(): BotPlayState? = BotPlayState.decode(onRuntime {
+        if (base == 0L) null else nativePlayState(base)
+    })
+    enum class ButtonInput { MOTION_FAILED, AIMED, PRESSED }
+
+    fun aimAndPress(aim: BotStick?, action: BotAction): ButtonInput = onRuntime {
+        when {
+            base == 0L -> ButtonInput.MOTION_FAILED
+            aim != null && !nativeInputMotion(base, aim.x, aim.y, if (aim.sprint) 1f else 0f) -> ButtonInput.MOTION_FAILED
+            nativeInputKey(base, action.key, 0) -> ButtonInput.PRESSED
+            else -> ButtonInput.AIMED
+        }
     }
     fun inputMotion(x: Float, y: Float, dash: Boolean): Boolean = onRuntime {
         base != 0L && nativeInputMotion(base, x, y, if (dash) 1f else 0f)

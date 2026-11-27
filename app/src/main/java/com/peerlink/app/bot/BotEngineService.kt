@@ -259,9 +259,10 @@ class BotEngineService : Service() {
         val state = EngineSnapshot(values)
         val playing = enteredGameplay || state.matchConstructed
         val tid = values.getOrNull(33) ?: 0L
-        setMatchThreadPriority(if (state.matchConstructed) tid.toInt() else 0)
+        val needsMatchCpu = state.needsMatchCpu(enteredGameplay, reportedRoundEnd != null)
+        setMatchThreadPriority(if (needsMatchCpu) tid.toInt() else 0)
         val sampleMemory = now >= nextMemorySample
-        val sampleScheduler = playing && state.matchConstructed && tid > 0 && now >= nextSchedulerSample
+        val sampleScheduler = needsMatchCpu && tid > 0 && now >= nextSchedulerSample
         if ((sampleMemory || sampleScheduler) && memorySample?.isDone != false) {
             val inSetup = pollStarted
             if (sampleMemory) nextMemorySample = now + if (playing) 15000 else 5000
@@ -541,13 +542,13 @@ class BotEngineService : Service() {
             // Aiming a pass while the button is unavailable walks the carrier toward the target.
             val movement = if (action != null && !action.defensive && !canPress)
                 brain.carryBetweenKicks(control) else plan.stick
-            if (!setStick(movement)) return
-            if (canPress && action != null && pressButton(action)) {
+            if (canPress && action != null) {
+                if (!pressButton(action, movement)) return
                 actionWindow.sent(now, action, control.selected, control.centreRestart)
                 EngineRuntime.journal("BOT_PLAY_ACTION frame=${state.frame} action=${action.name} " +
                     "selected=${state.selected} owner=${state.owner} side=${state.side} " +
                     "controlPlayer=${control.selected} controlOwner=${control.owner} intendedReceiver=${plan.receiver}")
-            }
+            } else if (!setStick(movement)) return
             if (now >= nextPlaySample) {
                 nextPlaySample = now + 3000
                 EngineRuntime.journal("BOT_PLAY_STATE frame=${state.frame} side=${state.side} " +
@@ -570,8 +571,12 @@ class BotEngineService : Service() {
         return true
     }
 
-    private fun pressButton(action: BotAction): Boolean {
-        if (heldButton != null || !EngineRuntime.inputKey(action.key, true)) return false
+    private fun pressButton(action: BotAction, aim: BotStick): Boolean {
+        if (heldButton != null) return false
+        val result = EngineRuntime.aimAndPress(aim.takeUnless { it == stick }, action)
+        if (result == EngineRuntime.ButtonInput.MOTION_FAILED) return false
+        stick = aim
+        if (result != EngineRuntime.ButtonInput.PRESSED) return false
         heldButton = action
         keyRelease = worker.schedule(::releaseButton, action.holdMs, TimeUnit.MILLISECONDS)
         return true
@@ -610,7 +615,7 @@ class BotEngineService : Service() {
         val player = state?.players?.getOrNull(state.selected)
         val aim = if (state != null && player != null && state.centreRestart && state.owner == state.selected)
             brain.kickoffPass(state, player).stick else BotStick()
-        if (!setStick(aim) || !pressButton(BotAction.PASS)) return false
+        if (!pressButton(BotAction.PASS, aim)) return false
         actionWindow.sent(SystemClock.elapsedRealtime(), BotAction.PASS, state?.selected ?: -1, !manual)
         if (manual) {
             diagnostic("BOT_INPUT key=96 action=down nativeAccepted=true destination=private_bot_engine")

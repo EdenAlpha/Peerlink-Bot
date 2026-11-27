@@ -341,6 +341,9 @@ data class EngineSnapshot(val values: LongArray) {
     val connected get() = sessionConnected && field(3) == 4L && field(4) == 4L
     val metadataReady get() = field(5) == 5L && field(6) == 1L && field(7) == 0L
     val matchConstructed get() = field(8) == 17L && field(9) == 54L && field(10) == 22L
+    internal fun needsMatchCpu(played: Boolean, terminal: Boolean): Boolean =
+        !terminal && roundEnd == null && (matchConstructed ||
+            played && connected && field(9) == 54L && field(10) == 22L)
     val matchAtBreak get() = connected && field(8) == 21L && field(9) == 54L && field(10) == 22L
     val halftimeMenu get() = field(32).toInt()
     val halftimeCanConfirm get() = matchAtBreak && (halftimeMenu == 3 || halftimeMenu == 5)

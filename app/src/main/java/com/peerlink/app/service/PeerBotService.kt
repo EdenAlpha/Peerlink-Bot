@@ -14,6 +14,7 @@ import androidx.core.app.NotificationCompat
 import com.peerlink.app.bot.BotMode
 import com.peerlink.app.bot.EngineHost
 import com.peerlink.app.bot.BotMatchDriver
+import com.peerlink.app.bot.BotMatchDiagnostics
 import com.peerlink.app.bot.PeerSlot
 import com.peerlink.app.core.AppState
 
@@ -124,6 +125,7 @@ class PeerBotService : Service() {
 
     override fun onDestroy() {
         active = null
+        BotMatchDiagnostics.stopMemoryGuard()
         BotMatchDriver.stop("bot_service_onDestroy")
         PeerSlot.disarm("bot_service_onDestroy")
         if (BotMode.active) stopService(Intent(this, PeerLinkVpnService::class.java))

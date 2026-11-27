@@ -122,6 +122,7 @@ internal class BotWireCapture(
 
     private fun writeLoop() {
         val line = StringBuilder(512)
+        val payloadHex = StringBuilder(256)
         var characters = CharArray(512)
         try {
             while (accepting || slots.availablePermits() < queueCapacity || queue.isNotEmpty()) {
@@ -134,14 +135,23 @@ internal class BotWireCapture(
                     is Item.Packet -> {
                         bytesAvailable.release(item.bytes.size)
                         slots.release()
+                        if (capped) {
+                            dropped.addAndGet(item.rows)
+                            continue
+                        }
                         line.setLength(0)
-                        appendRow(line, item, item.point, item.wall, item.elapsed, false)
+                        payloadHex.setLength(0)
+                        for (byte in item.bytes) {
+                            val v = byte.toInt() and 255
+                            payloadHex.append(HEX[v ushr 4]).append(HEX[v and 15])
+                        }
+                        appendRow(line, item, item.point, item.wall, item.elapsed, false, payloadHex)
                         if (item.sent != 0L) {
                             val tx = if (item.point == PacketFlowTrace.Point.GAME_RX)
                                 PacketFlowTrace.Point.ENGINE_TX else PacketFlowTrace.Point.GAME_TX
-                            appendRow(line, item, tx, item.sentWall, item.sent, true)
+                            appendRow(line, item, tx, item.sentWall, item.sent, true, payloadHex)
                         }
-                        if (capped || bytesWritten + line.length + FINAL_STATUS_RESERVE > maxBytes) {
+                        if (bytesWritten + line.length + FINAL_STATUS_RESERVE > maxBytes) {
                             capped = true
                             dropped.addAndGet(item.rows)
                         } else synchronized(io) {
@@ -181,13 +191,10 @@ internal class BotWireCapture(
     }
 
     private fun appendRow(line: StringBuilder, item: Item.Packet, point: PacketFlowTrace.Point,
-                          wall: Long, elapsed: Long, tx: Boolean) = with(line) {
+                          wall: Long, elapsed: Long, tx: Boolean, payloadHex: StringBuilder) = with(line) {
         append(wall).append(',').append(elapsed).append(',').append(point.name).append(',')
         append(if (item.vpn) "vpn" else "host").append(',').append(item.bytes.size).append(',')
-        for (byte in item.bytes) {
-            val v = byte.toInt() and 255
-            append(HEX[v ushr 4]).append(HEX[v and 15])
-        }
+        append(payloadHex)
         append(',')
         item.receipt?.let { append(it.receiveCall) }
         append(',')

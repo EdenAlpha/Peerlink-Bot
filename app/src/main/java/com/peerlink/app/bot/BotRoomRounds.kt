@@ -45,23 +45,20 @@ internal class BotRoomRounds(
                 val seats = (info?.get("num_users") as? Number)?.toInt() ?: 0
                 val go = info?.get("is_go_match")
                 if (reply["result"] == "NOERR" && seats > 0 && (go == "NO" || go == "YES")) {
-                    // A confirmed result or a dead process needs no further native reporting.
-                    // After a native disconnect, let the engine finish its result while the room
-                    // is still playing. A final result can arrive after the disconnect signal.
-                    var canReturn = go == "NO" || finished.end != RoomRoundEnd.DISCONNECTED || resultOrProcessExit()
-                    if (!released && !canReturn && seats >= 2 && now() >= nextReadyCheck) {
-                        // Some rooms retain the old Go flag until a participant readies again.
-                        // Give the still-running result handler time when the server declines.
-                        nextReadyCheck = now() + 20_000
-                        canReturn = requestLobbyReady(roomId, finished.sessionStart)
+                    var lobbyAvailable = go == "NO"
+                    if (seats < 2 || lobbyAvailable) nextReadyCheck = Long.MIN_VALUE
+                    if (!lobbyAvailable && seats >= 2 && now() >= nextReadyCheck) {
+                        nextReadyCheck = now() + 6000
+                        lobbyAvailable = requestLobbyReady(roomId, finished.sessionStart)
                     }
                     if (!active()) return
-                    if (!released && canReturn) {
+                    if (!released && (lobbyAvailable || finished.end != RoomRoundEnd.DISCONNECTED || resultOrProcessExit())) {
                         finishEngine()
                         released = true
                         if (seats < 2) status("Back in room $roomNumber. Waiting for your game to return.")
+                        else if (!lobbyAvailable) status("Back in room $roomNumber. Waiting for the previous match to close.")
                     }
-                    if (released && seats >= 2 && now() >= nextPrepare) {
+                    if (released && lobbyAvailable && seats >= 2 && now() >= nextPrepare) {
                         status("Preparing the bot for the next match in room $roomNumber…")
                         val issue = prepareEngine()
                         if (!active()) return
@@ -92,39 +89,62 @@ internal class BotRoomRounds(
             var nextReady = Long.MIN_VALUE
             var nextStatus = Long.MIN_VALUE
             var nextSession = Long.MIN_VALUE
-            var accepted = false
+            var readyReply: String? = null
+            var lastGo: String? = null
+            var lastSession = ""
             var lastUsers = -1
             while (active()) {
                 val now = nowMs()
-                if (now >= nextReady) {
-                    val result = setReady()
-                    accepted = result == "NOERR" || alreadyReady(result)
-                    nextReady = now + 20_000
-                    log("match_ready -> $result")
-                }
-                if (!active()) return null
                 val reply = readRoom()
+                if (!active()) return null
                 check(reply["result"] != "ERR_ROOM_NOT_FOUND" && reply["result"] != "ERR_INVALID_SESSION") {
                     "This room is no longer available. End this room to create another."
                 }
                 val info = reply["room_info"] as? Map<*, *>
-                val users = (info?.get("num_users") as? Number)?.toInt() ?: 0
-                if (users > 0 && users != lastUsers) {
-                    lastUsers = users
-                    log("room now has $users user(s)")
+                val users = (info?.get("num_users") as? Number)?.toInt() ?: -1
+                val go = info?.get("is_go_match") as? String
+                if (reply["result"] != "NOERR" || users < 0) {
+                    wait()
+                    continue
                 }
-                if (reply["result"] == "NOERR" && info?.get("is_go_match") == "YES") {
+                val changed = users != lastUsers || go != lastGo
+                if (changed) {
+                    if (lastUsers < 2 || users < 2 || lastGo == "YES" && go == "NO") {
+                        readyReply = null
+                        nextReady = Long.MIN_VALUE
+                        nextSession = Long.MIN_VALUE
+                        lastSession = ""
+                    }
+                    log("room now has $users user(s) go=$go")
+                    lastUsers = users
+                    lastGo = go
+                }
+                val oldReply = readyReply
+                if (users >= 2 && now >= nextReady) {
+                    readyReply = setReady()
+                    nextReady = now + if (readyReply == "NOERR" || alreadyReady(readyReply)) 20_000 else 5000
+                    log("match_ready -> $readyReply seats=$users go=$go")
+                }
+                if (!active()) return null
+                if (users >= 2 && go == "YES") {
                     if (previousStart == null) return RoomGo()
-                    if (accepted && active() && now >= nextSession) {
+                    if (canCheckSession(readyReply) && now >= nextSession) {
                         nextSession = now + 3000
                         val session = readSession()
-                        if (freshSession(session, previousStart)) return RoomGo(session)
+                        val state = sessionAge(session, previousStart)
+                        if (state != lastSession) log("REMATCH_SESSION state=$state seats=$users go=$go")
+                        lastSession = state
+                        if (state == "new" && active()) return RoomGo(session)
                     }
                 }
-                if (now >= nextStatus) {
+                if (changed || readyReply != oldReply || now >= nextStatus) {
                     nextStatus = now + 30_000
-                    status(if (accepted) "Bot is ready. Press To Match in eFootball."
-                        else "Waiting for the room to accept the bot’s Ready.")
+                    status(when {
+                        users < 2 -> "Waiting for you to join the room."
+                        readyReply == "NOERR" || alreadyReady(readyReply) -> "Bot is ready. Press To Match in eFootball."
+                        readyReply == "ERR_ALREADY_MATCH" -> "Both players are here. Waiting for the room to release the previous match."
+                        else -> "Both players are here. Retrying the bot’s Ready."
+                    })
                 }
                 wait()
             }
@@ -132,9 +152,16 @@ internal class BotRoomRounds(
         }
 
         /** The service can still publish the old Go flag and address while returning to the room. */
-        fun freshSession(reply: Map<*, *>, previousStart: Long): Boolean {
+        fun canCheckSession(result: String?) = result == "NOERR" || alreadyReady(result) || result == "ERR_ALREADY_MATCH"
+
+        fun sessionAge(reply: Map<*, *>, previousStart: Long): String {
             val start = (reply["connecting_start_time"] as? Number)?.toLong() ?: 0
-            return reply["result"] == "NOERR" && start in 1..0xffffffffL && start > previousStart
+            return when {
+                reply["result"] != "NOERR" || start !in 1..0xffffffffL -> "unavailable"
+                start <= previousStart -> "previous"
+                else -> "new"
+            }
         }
+        fun freshSession(reply: Map<*, *>, previousStart: Long) = sessionAge(reply, previousStart) == "new"
     }
 }

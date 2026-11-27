@@ -57,11 +57,11 @@ class BotRoomRoundsTest {
 
     @Test fun disconnectKeepsResultsAliveThroughFailedPollAndWaitsForLobbyOrFinalResult() {
         val fixture = Fixture(RoomRoundEnd.DISCONNECTED, mutableListOf(mapOf("result" to "_NET_FAIL"),
-            room(2, "YES"), room(2, "YES"), room(2, "YES")))
-        fixture.onWait = { if (fixture.replies.size == 1) fixture.finalResult = true }
+            room(2, "YES"), room(2, "YES"), room(2, "YES"), room(2)))
+        fixture.onWait = { if (fixture.replies.size == 2) fixture.finalResult = true }
         fixture.run()
-        assertEquals(listOf("first match", "room", "room", "ready", "room", "room", "release",
-            "prepare", "second match"), fixture.events)
+        assertEquals(listOf("first match", "room", "room", "ready", "room", "room", "ready", "release",
+            "room", "prepare", "second match"), fixture.events)
     }
 
     @Test fun readyCanReturnFromDisconnectWhenTheOldGoFlagIsStillSet() {
@@ -141,6 +141,49 @@ class BotRoomRoundsTest {
             readRoom = { room(2, "YES") }, readSession = { sessions++; emptyMap<String, Any?>() },
             status = {}, log = {}, nowMs = { elapsed }, wait = { elapsed += 1000; active = false }))
         assertEquals(0, sessions)
+    }
+
+    @Test fun rejoiningOpponentReadiesImmediatelyAndAlreadyMatchedOnlyResumesANewerSession() {
+        var tick = 0
+        val readies = mutableListOf<Int>()
+        val lookups = mutableListOf<Int>()
+        val records = mutableListOf<String>()
+        val go = BotRoomRounds.awaitGo(245L, { tick <= 8 },
+            setReady = { readies += tick; "ERR_ALREADY_MATCH" },
+            readRoom = { when (tick) {
+                0, 2 -> room(1, "YES")
+                1, 3 -> room(2)
+                else -> room(2, "YES")
+            } }, readSession = {
+                lookups += tick
+                mapOf("result" to "NOERR", "connecting_start_time" to if (tick < 7) 245L else 400L)
+            }, status = {}, log = records::add, nowMs = { tick * 1000L }, wait = { tick++ })
+        assertEquals(listOf(1, 3), readies)
+        assertEquals(listOf(4, 7), lookups)
+        assertEquals(400L, go?.confirmedSession?.get("connecting_start_time"))
+        assertTrue(records.any { "state=previous" in it })
+    }
+
+    @Test fun firstRoomWaitsForBothSeatsAndRetriesReadyAfterReentry() {
+        var tick = 0
+        val reads = mutableListOf<Int>()
+        val result = BotRoomRounds.awaitGo(null, { tick < 5 }, setReady = { reads += tick; "NOERR" },
+            readRoom = { when (tick) { 0, 2 -> room(1); 1, 3 -> room(2); else -> room(2, "YES") } },
+            readSession = { error("first session comes from connection phase") }, status = {}, log = {},
+            nowMs = { tick * 1000L }, wait = { tick++ })
+        assertNotNull(result)
+        assertEquals(listOf(1, 3), reads)
+    }
+
+    @Test fun confirmedSeatingCanReadyWhenRoomHasYetToPublishGo() {
+        var ready = 0
+        var tick = 0
+        val active = BotRoomRounds.awaitGo(null, { tick < 3 }, { ready++; "NOERR" },
+            readRoom = { if (tick == 0) mapOf("result" to "NOERR", "room_info" to mapOf("num_users" to 2))
+                else room(2, "YES") }, readSession = { error("first room") },
+            status = {}, log = {}, nowMs = { tick * 1000L }, wait = { tick++ })
+        assertNotNull(active)
+        assertEquals(1, ready)
     }
 
     @Test fun transientEngineStartupFailureRetriesInTheSameRoomWithBackoff() {

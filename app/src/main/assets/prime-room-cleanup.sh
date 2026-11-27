@@ -1,6 +1,6 @@
 ram() { awk '/^MemAvailable:/ {printf "%.0f\n", $2/1024}' /proc/meminfo; }
 user_id=$(am get-current-user) || exit $?
-live_uids=$(ps -A -o UID) || exit $?
+live_uids=$(ps -A -n -o UID,RSS) || exit $?
 downloaded=$(pm list packages -3 --user "$user_id") || exit $?
 installed=$(pm list packages -U --user "$user_id") || exit $?
 
@@ -24,7 +24,7 @@ optional='com.snapchat.android com.whatsapp com.whatsapp.w4b com.zhiliaoapp.musi
 
 targets=$(
   printf '%s\n' "$live_uids" '#downloaded' "$downloaded" '#keep' "$protected" '#installed' "$installed" |
-  awk -v optional="$optional" -v quiet="$quiet" '
+  awk -v optional="$optional" -v quiet="$quiet" -v mode="${1:-prepare}" '
     BEGIN {
       n = split(optional, names, " ")
       for (i = 1; i <= n; i++) optional_app[names[i]] = 1
@@ -32,7 +32,7 @@ targets=$(
       for (i = 1; i <= n; i++) always_stop[names[i]] = 1
     }
     /^#/ { section = $0; next }
-    section == "" && NF == 1 && $1 ~ /^[0-9]+$/ { live[$1] = 1; next }
+    section == "" && $1 ~ /^[0-9]+$/ && $2 ~ /^[0-9]+$/ { live[$1] += $2; next }
     section == "#downloaded" && /^package:/ { downloaded[substr($1, 9)] = 1; next }
     section == "#keep" && NF == 1 { keep[$1] = 1; next }
     section == "#installed" && /^package:/ && $2 ~ /^uid:[0-9]+$/ {
@@ -44,7 +44,10 @@ targets=$(
       }
       for (pkg in uid) {
         if ((pkg in keep) || (uid[pkg] in protected_uid)) continue
-        if ((pkg in always_stop) ||
+        if (mode == "guard") {
+          if ((uid[pkg] in live) && ((pkg in downloaded) || (pkg in optional_app) || (pkg in always_stop)))
+            print live[uid[pkg]], uid[pkg], pkg
+        } else if ((pkg in always_stop) ||
             ((uid[pkg] in live) && ((pkg in downloaded) || (pkg in optional_app)))) print pkg
       }
     }
@@ -52,6 +55,28 @@ targets=$(
 ) || exit $?
 
 before=$(ram) || exit $?
+if [ "${1:-prepare}" = guard ]; then
+  # Only expend shell work on large candidates. Activity Manager rechecks eligibility
+  # at kill time, including if the user just switched to that app.
+  candidates=$(printf '%s\n' "$targets" | sort -nr | awk 'NF == 3 && !seen[$2]++ {print $2 ":" $3}' | head -12)
+  count=0
+  result=0
+  for candidate in $candidates; do
+    uid=${candidate%%:*}
+    pkg=${candidate#*:}
+    state=$(am get-uid-state "$uid" 2>/dev/null) || continue
+    case "$state" in
+      16\ *|17\ *|18\ *|19\ *|16|17|18|19|CACHED_*) ;;
+      *) continue ;;
+    esac
+    am kill --user "$user_id" "$pkg" || { result=1; continue; }
+    printf 'Requested cached app release %s\n' "$pkg"
+    count=$((count + 1))
+    [ "$count" -lt 4 ] || break
+  done
+  printf 'Cached app requests %s\n' "$count"
+  exit "$result"
+fi
 printf 'Before %s MiB available\n' "$before"
 result=0
 for app in $targets; do

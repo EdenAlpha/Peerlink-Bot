@@ -124,6 +124,7 @@ object PlayRoomController {
                             cleanupNote = "RAM cleanup was incomplete. See Export diagnostics for details."
                         BotMatchDiagnostics.RamCleanup.COMPLETED -> Unit
                     }
+                    BotMatchDiagnostics.startMemoryGuard(ctx, id, io)
                     heapNote = BotHeapRecording.prepare(ctx, id)
                     preparationNote(heapNote ?: cleanupNote ?: "Opening the bot’s room…")
                     if (heapNote != null) return@let null
@@ -158,7 +159,10 @@ object PlayRoomController {
             } catch (t: Throwable) {
                 _state.value = RoomState.Failed(t.message ?: "Room creation failed.", recordMemory)
             } finally {
-                if (!opened) recording?.let { id -> runCatching { BotHeapRecording.finish(ctx, id, "preparation_ended") } }
+                if (!opened) recording?.let { id ->
+                    BotMatchDiagnostics.stopMemoryGuard()
+                    runCatching { BotHeapRecording.finish(ctx, id, "preparation_ended") }
+                }
             }
         }
     }
@@ -175,6 +179,7 @@ object PlayRoomController {
 
     /** Called by the wiring when room creation failed. */
     fun onRoomFailed(reason: String) {
+        BotMatchDiagnostics.stopMemoryGuard()
         _state.value = RoomState.Failed(reason)
     }
 
@@ -193,6 +198,7 @@ object PlayRoomController {
         if (_state.value is RoomState.Creating || _state.value is RoomState.Ending) return
         val ctx = appContext ?: return
         _state.value = RoomState.Ending
+        BotMatchDiagnostics.stopMemoryGuard()
         io.launch {
             try {
                 if (BotMode.active) {

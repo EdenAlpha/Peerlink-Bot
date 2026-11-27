@@ -6,8 +6,7 @@ import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.util.Properties
 
-/** The Android package manager installs immutable APKs. Cache source digests per installation,
- * while rehashing every writable private copy on every startup. A missing cache is a cold start. */
+/** Digests belong to one installed game. Only an unchanged private pack can reuse its check. */
 internal class InstalledAssetFingerprints(private val file: File, private val installation: String) {
     private val values = Properties()
 
@@ -35,6 +34,13 @@ internal class InstalledAssetFingerprints(private val file: File, private val in
 
     operator fun set(key: String, fingerprint: GameFileIntegrity.Fingerprint) {
         values.setProperty(key, "${fingerprint.bytes} ${fingerprint.sha256}")
+    }
+
+    fun hasVerifiedCopy(key: String, stamp: String?, expected: GameFileIntegrity.Fingerprint) =
+        stamp != null && values.getProperty("copy/$key") == "$stamp ${expected.sha256}"
+
+    fun rememberCopy(key: String, stamp: String, verified: GameFileIntegrity.Fingerprint) {
+        values.setProperty("copy/$key", "$stamp ${verified.sha256}")
     }
 
     fun save(): Boolean {

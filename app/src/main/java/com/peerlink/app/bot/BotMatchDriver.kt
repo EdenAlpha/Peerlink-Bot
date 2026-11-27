@@ -104,8 +104,11 @@ object BotMatchDriver {
                 requestLobbyReady = { room, lastStart ->
                     val result = flow.matchReady(gate, room, BotMode.declaredProfile())["result"]?.toString()
                     log("ROOM_RETURN_READY result=$result")
-                    result == "NOERR" || BotRoomRounds.alreadyReady(result) &&
-                        BotRoomRounds.freshSession(flow.gameSession(gate, room), lastStart)
+                    if (BotRoomRounds.canCheckSession(result)) {
+                        val assignment = BotRoomRounds.sessionAge(flow.gameSession(gate, room), lastStart)
+                        log("ROOM_RETURN_SESSION state=$assignment")
+                        assignment == "new"
+                    } else false
                 },
             ).run(rid, roomNumber)
         } catch (error: Exception) {
@@ -124,6 +127,10 @@ object BotMatchDriver {
         val self = gate.uid
         val pid = EngineHost.enginePid
         var connectingStart = 0L
+        fun lostEngine(): CompletedRoomMatch? =
+            if (running && EngineHost.roundEnd(pid) == RoomRoundEnd.ENGINE_STOPPED)
+                CompletedRoomMatch(RoomRoundEnd.ENGINE_STOPPED, connectingStart.takeIf { it > 0 } ?: previous?.sessionStart ?: 0L)
+            else null
         try {
             check(EngineHost.isReady) { "Bot simulation is not ready; start a new room" }
             // Apply the same server settings as the regular client before
@@ -159,6 +166,7 @@ object BotMatchDriver {
 
             val oppSeen = waitForSeat(flow, gate, rid, self)
             if (!running) return null
+            lostEngine()?.let { return it }
             var opp = if (oppSeen < 0) 0L else oppSeen
             if (opp == 0L) {
                 log("seated, but the opponent uid was not parsed from room_info " +
@@ -229,11 +237,12 @@ object BotMatchDriver {
             log("bot endpoint: host=${BotMode.hostIp}:${BotMode.BOT_PORT} " +
                 "reflexive=${BotMode.BOT_FAB_IP}:${BotMode.BOT_PORT}")
             val go = BotRoomRounds.awaitGo(
-                previousStart = previous?.sessionStart, active = { running },
+                previousStart = previous?.sessionStart?.takeIf { it > 0L },
+                active = { running && EngineHost.roundEnd(pid) != RoomRoundEnd.ENGINE_STOPPED },
                 setReady = { flow.matchReady(gate, rid, BotMode.declaredProfile())["result"]?.toString() },
                 readRoom = { flow.roomReply(gate, rid) }, readSession = { flow.gameSession(gate, rid) },
                 status = ::status, log = ::log,
-            ) ?: return null
+            ) ?: return lostEngine()
             var gs = go.confirmedSession
             if (!running) return null
             status("both sides ready -- the game is entering the connection phase")
@@ -399,6 +408,7 @@ object BotMatchDriver {
                 if (running && EngineHost.roundEnd(pid) == null) turnExchange.pump()
             }
         } catch (error: Exception) {
+            lostEngine()?.let { return it }
             if (running && connectingStart > 0L) {
                 EngineHost.roundEnd(pid)?.let { return CompletedRoomMatch(it, connectingStart) }
             }

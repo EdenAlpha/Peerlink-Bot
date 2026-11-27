@@ -57,6 +57,24 @@ internal class GameFileIntegrity(
         }
     }
 
+    /** The installed source key and both kernel timestamps must still match the previous digest. */
+    fun ensurePack(destination: File, key: String, fingerprints: InstalledAssetFingerprints,
+                   fileStamp: (File) -> String?, source: () -> InputStream): Fingerprint {
+        val before = fileStamp(destination)
+        val expected = fingerprints[key]
+        if (expected != null && fingerprints.hasVerifiedCopy(key, before, expected)) {
+            verified++
+            report("[BOT-FILES] PASS file=$key bytes=${expected.bytes} proof=unchanged_verified_copy")
+            return expected
+        }
+        val result = ensure(destination, key, installedSource = expected, source = source)
+        fingerprints[key] = result
+        // A first install or repair replaces the inode. Establish its on-disk stamp on the
+        // next read, never associate a digest of an older inode with its replacement.
+        if (before != null && fileStamp(destination) == before) fingerprints.rememberCopy(key, before, result)
+        return result
+    }
+
     /** Verify the new bytes before replacing a previous copy, including same-size corruption. */
     fun replace(input: InputStream, destination: File, label: String, expected: Fingerprint,
                 readOnly: Boolean = false) {

@@ -1,6 +1,8 @@
 package com.peerlink.app.bot
 
 import android.content.Context
+import android.system.Os
+import android.system.OsConstants
 import java.io.File
 import java.nio.file.Files
 import java.util.zip.ZipInputStream
@@ -37,6 +39,14 @@ internal object GameAssets {
     }
 
     fun auditReportFile(owner: Context): File = File(owner.filesDir, "bot-startup-file-audit.txt")
+
+    private fun packStamp(file: File): String? = runCatching {
+        val stat = Os.lstat(file.absolutePath)
+        if (!OsConstants.S_ISREG(stat.st_mode) || stat.st_nlink != 1L ||
+            stat.st_ctim.tv_nsec == 0L && stat.st_mtim.tv_nsec == 0L) return null
+        "${stat.st_dev}/${stat.st_ino}/${stat.st_size}/${stat.st_ctim.tv_sec}.${stat.st_ctim.tv_nsec}/" +
+            "${stat.st_mtim.tv_sec}.${stat.st_mtim.tv_nsec}"
+    }.getOrNull()
 
     private fun prepareChecked(owner: Context, status: (String) -> Unit, audit: (String) -> Unit,
                                allowMissingMatchResources: Boolean,
@@ -86,9 +96,15 @@ internal object GameAssets {
         check("dt200_mobile_all.cpk" in names) { "Installed game's database pack is missing" }
         val assetDir = File(root, "assets")
         var databasePackHash = ""
-        for ((index, name) in names.withIndex()) {
-            status("Checking installed game packs ${index + 1}/${names.size}")
-            val pack = ensureInstalled(File(assetDir, name), "assets/$name") { assets.open(name) }
+        status("Checking ${names.size} installed game packs")
+        for (name in names) {
+            val key = "assets/$name"
+            var opened = false
+            val pack = integrity.ensurePack(File(assetDir, name), key, fingerprints, ::packStamp) {
+                opened = true
+                assets.open(name)
+            }
+            if (!opened) reusedSourceBytes += pack.bytes
             if (name == "dt200_mobile_all.cpk") databasePackHash = pack.sha256
         }
         status("Checking bot match resources")

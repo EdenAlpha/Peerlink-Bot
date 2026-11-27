@@ -38,6 +38,20 @@ class EngineSnapshotTest {
         assertTrue(snapshot.matchConstructed)
         assertFalse(snapshot.canTestPass)
     }
+    @Test fun gameThreadRetainsItsBudgetDuringRecordedTransitionsAndReleasesItAtEnd() {
+        val fields = state().copyOf(35)
+        for (outer in listOf(17L, 20L, 17L, 21L)) {
+            fields[8] = outer
+            assertTrue(EngineSnapshot(fields).needsMatchCpu(true, false))
+        }
+        assertFalse(EngineSnapshot(fields).needsMatchCpu(false, false))
+        assertFalse(EngineSnapshot(fields).needsMatchCpu(true, true))
+        fields[2] = 0
+        assertFalse(EngineSnapshot(fields).needsMatchCpu(true, false))
+        fields[2] = 4
+        fields[34] = 1
+        assertFalse(EngineSnapshot(fields).needsMatchCpu(true, false))
+    }
     @Test fun recordedLoadedPitchStillWaitingAtFrameZeroCannotAuthorizePass() {
         // Physical 5.0.23: outer17/core54, 22 players, ball at centre and
         // controllers enabled, but commandFrame0/missingMask2/tickGate0.

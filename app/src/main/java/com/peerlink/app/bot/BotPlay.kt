@@ -134,8 +134,17 @@ internal class BotControlTracker {
         val current = control.players[closest]!!
         val frames = control.frame - old.frame
         val moved = current - before
-        if (before.distance(old.ball) > 2.5f || moved.length() !in 0.08f..(frames * 0.45f) ||
-            (control.ball - old.ball - moved).length() > minOf(0.75f, frames * 0.15f)) return control
+        val ballMotion = control.ball - old.ball
+        val distanceMoved = moved.length()
+        if (before.distance(old.ball) > 2.5f || distanceMoved > frames * 0.45f ||
+            (ballMotion - moved).length() > minOf(0.75f, frames * 0.15f)) return control
+        // The selected player can trap the ball and stand still. Require two
+        // unambiguous grounded touches before assigning a stationary ball.
+        if (distanceMoved < 0.08f && !(closest == raw.selected && closest == old.selected && !old.estimatedSelection &&
+                first <= 2.1f && before.distance(old.ball) <= 2.1f && second - first >= 1.2f &&
+                control.height <= 0.55f && old.height <= 0.55f && ballMotion.length() <= 0.18f &&
+                control.velocity.length() <= 1.2f && old.velocity.length() <= 1.2f &&
+                abs(control.ball.x) <= 52.5f && abs(control.ball.z) <= 34f)) return control
         val selected = if (control.estimatedSelection && closest in control.ownPlayers) closest else control.selected
         return control.copy(owner = closest, selected = selected)
     }
@@ -246,20 +255,32 @@ internal class BotBrain {
     private var attackDirection = 0
 
     private var previousState: BotPlayState? = null
+    private var carrier = -1
+    private var receivedAt = 0
+    private var receivedX = 0f
 
     fun resetDirection() {
         attackDirection = 0
         previousState = null
+        carrier = -1
     }
 
     fun decide(state: BotPlayState): BotPlay {
         val previous = previousState
         previousState = state
+        val onBall = state.selected >= 0 && state.owner == state.selected
+        if (!onBall) carrier = -1
         val player = state.players.getOrNull(state.selected)
             ?: return BotPlay(action = BotAction.PRESS.takeIf { state.owner in state.opponents && state.height < 1.7f })
         val toBall = player.distance(state.ball)
         val direction = state.direction
         if (direction != 0) attackDirection = direction
+        if (onBall && (carrier != state.selected || previous == null || previous.side != state.side ||
+                state.frame - previous.frame !in 1..12 || (player.x - receivedX) * attackDirection >= 0.8f)) {
+            carrier = state.selected
+            receivedAt = state.frame
+            receivedX = player.x
+        }
 
         if (state.centreRestart) {
             if (toBall <= 2.5f && state.owner == state.selected) return kickoffPass(state, player)
@@ -404,7 +425,10 @@ internal class BotBrain {
             val escapingChaser = canBurst && forwardRun >= 6f && advance < 12f && state.opponents.any { id ->
                 state.players[id]?.let { (player.x - it.x) * attackDirection > 1f && it.distance(player) < 8f } == true
             }
-            if (isKeeper || attackDirection == 0 || !breakaway && !escapingChaser &&
+            // A clear theoretical run is no advantage if the player actually stalls.
+            // Once the first touch settles, release to a screened, open outlet.
+            val stalled = state.frame - receivedAt >= 6 && (player.x - receivedX) * attackDirection < 0.8f
+            if (isKeeper || attackDirection == 0 || stalled || !breakaway && !escapingChaser &&
                 (closingPressure <= 6f || advance >= 7f || runClearance < 2f)) {
                 return BotPlay(steer(player, receiver), bestAction, receiverId)
             }
@@ -555,14 +579,15 @@ internal class BotBrain {
     private fun passingMargin(state: BotPlayState, from: PitchPoint, to: PitchPoint): Float {
         val dx = to.x - from.x
         val dz = to.z - from.z
-        val length = maxOf(0.1f, sqrt(dx * dx + dz * dz))
+        val squared = maxOf(0.01f, dx * dx + dz * dz)
+        val length = sqrt(squared)
         val travel = length / 15f
         var margin = 100f
         for (id in state.opponents) {
             val marker = state.players[id] ?: continue
             val mx = marker.x - from.x
             val mz = marker.z - from.z
-            val projection = (mx * dx + mz * dz) / (length * length)
+            val projection = (mx * dx + mz * dz) / squared
             if (projection < 0f) continue
             // Check where the defender is when the kick releases, crosses their line, and
             // reaches the receiver. Allow a stationary human to step into the lane as well.
@@ -570,7 +595,7 @@ internal class BotBrain {
                 val t = when (sample) {
                     0 -> projection.coerceIn(0f, 1f)
                     1 -> ((mx + motionX[id] * 9f) * dx + (mz + motionZ[id] * 9f) * dz)
-                        .div(length * length).coerceIn(0f, 1f)
+                        .div(squared).coerceIn(0f, 1f)
                     else -> 1f
                 }
                 val seconds = 0.14f + t * travel
@@ -579,6 +604,9 @@ internal class BotBrain {
                 val z = mz + motionZ[id] * frames - t * dz
                 val reach = (seconds - 0.18f).coerceAtLeast(0f) * 3.8f + t * length * 0.025f
                 margin = minOf(margin, sqrt(x * x + z * z) - reach)
+                // Every caller rejects a lane below this margin. Later
+                // defenders can only reduce the minimum further.
+                if (margin < 1.35f) return margin
             }
         }
         return margin

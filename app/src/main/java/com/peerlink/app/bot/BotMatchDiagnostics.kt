@@ -1,13 +1,22 @@
 package com.peerlink.app.bot
 
 import android.content.Context
+import android.app.ActivityManager
+import android.os.SystemClock
 import com.peerlink.app.core.AppState
 import com.peerlink.app.core.PrimeGameplayTracker
+import com.peerlink.app.godmode.GodModeManager
 import com.peerlink.app.godmode.PrimeClient
 import java.io.File
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 
 internal object BotMatchDiagnostics {
     private const val DIRECTORY = "bot-scheduler"
@@ -20,6 +29,8 @@ internal object BotMatchDiagnostics {
     }
     @Volatile private var active: Recording? = null
     private var lastHeapRelease: Pair<String, Int>? = null
+    private var memoryGuard: Job? = null
+    private val guardLock = Any()
 
     private fun directory(ctx: Context) = File(ctx.filesDir, DIRECTORY)
     private fun key(id: String) = "peerlink-scheduler-$id"
@@ -34,6 +45,41 @@ internal object BotMatchDiagnostics {
     }
 
     enum class RamCleanup { COMPLETED, INCOMPLETE, PRIME_UNAVAILABLE }
+
+    fun startMemoryGuard(ctx: Context, id: String, scope: CoroutineScope) = synchronized(guardLock) {
+        require(validId.matches(id))
+        memoryGuard?.cancel()
+        memoryGuard = scope.launch {
+            try {
+                val manager = ctx.getSystemService(ActivityManager::class.java)
+                val memory = ActivityManager.MemoryInfo()
+                val policy = RoomMemoryPressure()
+                val script = ctx.assets.open("prime-room-cleanup.sh").bufferedReader().use { it.readText() }
+                record(ctx, id, "Room memory guard started")
+                while (isActive) {
+                    delay(4000)
+                    manager.getMemoryInfo(memory)
+                    val before = memory.availMem / 1048576
+                    if (!policy.shouldReclaim(SystemClock.elapsedRealtime(), before, memory.totalMem / 1048576, memory.lowMemory)) continue
+                    val result = GodModeManager.runRoomMemoryGuard("set -- guard\n$script")
+                    delay(1500)
+                    manager.getMemoryInfo(memory)
+                    val after = memory.availMem / 1048576
+                    policy.attempted(SystemClock.elapsedRealtime(), after - before)
+                    record(ctx, id, "Room memory guard beforeMiB=$before afterMiB=$after exit=${result.exitCode}\n${result.output.take(600)}")
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                record(ctx, id, "Room memory guard stopped: ${error.javaClass.simpleName}")
+            }
+        }
+    }
+
+    fun stopMemoryGuard() = synchronized(guardLock) {
+        memoryGuard?.cancel()
+        memoryGuard = null
+    }
 
     @Synchronized fun reclaimBeforeRoom(ctx: Context, id: String): RamCleanup {
         require(validId.matches(id))

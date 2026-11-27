@@ -102,6 +102,38 @@ class GameFileIntegrityTest {
         assertNull(InstalledAssetFingerprints(cacheFile, "installation A")["pack"])
     }
 
+    @Test fun unchangedPacksAvoidContentReadsButReplacementsAndNewInstallationsAreChecked() = withDirectory { root ->
+        val file = File(root, "pack").apply { writeText("game") }
+        val cache = File(root, "proofs")
+        var stamp = "device/1/4/change1/mod1"
+        var reads = 0
+        var opens = 0
+        val checker = GameFileIntegrity({}, {}, { reads++; GameFileIntegrity.fingerprintFile(it) })
+        fun run(installation: String) {
+            val index = InstalledAssetFingerprints(cache, installation)
+            checker.ensurePack(file, "pack", index, { stamp.ifEmpty { null } }) {
+                opens++
+                "game".byteInputStream()
+            }
+            assertTrue(index.save())
+        }
+        run("first")
+        val coldReads = reads
+        run("first")
+        assertEquals(coldReads, reads)
+        assertEquals(1, opens)
+        file.writeText("bad!")
+        stamp = "device/1/4/change2/mod1"
+        run("first")
+        assertEquals("game", file.readText())
+        assertEquals(1, checker.repaired)
+        run("second")
+        val checked = reads
+        stamp = ""
+        run("second")
+        assertTrue(reads > checked)
+    }
+
     @Test fun originalDatabaseSchemaRejectsWrongTableAndPartialRecord() {
         assertEquals(44, GameDatabaseSchema.strides.size)
         assertEquals(2, GameDatabaseSchema.validate("Player.bin", 800))
