@@ -48,6 +48,7 @@ class BotEngineService : Service() {
     private var playTask: ScheduledFuture<*>? = null
     private var stick = BotStick()
     private var reportedRoundEnd: RoomRoundEnd? = null
+    private var lastPublishedMatchFrame = -1L
     private var heldButton: BotAction? = null
     private var keyRelease: ScheduledFuture<*>? = null
     private val actionWindow = BotActionWindow()
@@ -392,8 +393,14 @@ class BotEngineService : Service() {
         if (now < nextNativeSample) return
         nextNativeSample = now + 5000
         if (!enteredGameplay) diagnostic(EngineRuntime.loadingDiagnostics())
+        val checkResult = state.needsResultCheck(enteredGameplay, lastPublishedMatchFrame)
+        lastPublishedMatchFrame = state.commandFrame
         runCatching { observer?.send(Message.obtain(null, EngineProtocol.NATIVE_STATE).apply {
-            data = Bundle().apply { putLongArray("state", state.values) }
+            data = Bundle().apply {
+                putLongArray("state", state.values)
+                putInt("pid", Process.myPid())
+                putBoolean("checkResult", checkResult)
+            }
         }) }
     }
     private fun poll() {

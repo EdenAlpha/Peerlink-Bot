@@ -153,4 +153,19 @@ class BotRoomRoundsTest {
         assertEquals("second match", fixture.events.last())
         assertTrue(fixture.messages.any { "Retrying in 15 seconds" in it })
     }
+
+    @Test fun stalledPlayOnlyAsksForTheResultAndOnlyAFinalServerReplyConfirmsIt() {
+        val playing = LongArray(35).apply {
+            this[2] = 4; this[3] = 4; this[4] = 4; this[8] = 17; this[9] = 54; this[10] = 22; this[30] = 870
+        }
+        assertFalse(EngineSnapshot(playing).needsResultCheck(false, 870))
+        assertFalse(EngineSnapshot(playing).needsResultCheck(true, 800))
+        assertTrue(EngineSnapshot(playing).needsResultCheck(true, 870))
+        assertNull(EngineSnapshot(playing).roundEnd)
+        assertFalse(BotRoomRounds.confirmedResult(mapOf("result" to "NOERR", "get_match_result" to "NO")))
+        assertFalse(BotRoomRounds.confirmedResult(mapOf("result" to "_NET_FAIL", "get_match_result" to "YES")))
+        assertTrue(BotRoomRounds.confirmedResult(mapOf("result" to "NOERR", "get_match_result" to "YES")))
+        playing[8] = 21
+        assertFalse(EngineSnapshot(playing).needsResultCheck(true, 870))
+    }
 }

@@ -384,8 +384,17 @@ object BotMatchDriver {
                 "peerPort=${com.peerlink.app.core.AppState.enginePeerPort}")
             status(EngineHost.snapshot().status())
 
+            var nextResultCheck = Long.MIN_VALUE
             while (running) {
                 EngineHost.roundEnd(pid)?.let { return CompletedRoomMatch(it, connectingStart) }
+                val now = android.os.SystemClock.elapsedRealtime()
+                if (EngineHost.needsResultCheck(pid) && now >= nextResultCheck) {
+                    nextResultCheck = now + 15_000
+                    // If the local result screen stalls, ask about this exact game. A paused
+                    // clock or an empty result is insufficient to abandon a live match.
+                    if (BotRoomRounds.confirmedResult(flow.getGameResult(gate, gameId)))
+                        return CompletedRoomMatch(RoomRoundEnd.RESULT, connectingStart)
+                }
                 Thread.sleep(1000)
                 if (running && EngineHost.roundEnd(pid) == null) turnExchange.pump()
             }

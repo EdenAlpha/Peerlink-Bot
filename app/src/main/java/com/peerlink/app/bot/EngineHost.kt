@@ -21,6 +21,7 @@ object EngineHost {
     @Volatile private var ownerUid = 0L
     @Volatile private var service: Messenger? = null
     @Volatile private var lastRoundEnd: Pair<Int, RoomRoundEnd>? = null
+    @Volatile private var checkResultPid = 0
     private var context: Context? = null
     @Volatile var enginePid = 0
         private set
@@ -46,6 +47,9 @@ object EngineHost {
                 val line = data.getString("status").orEmpty()
                 if (line.isNotBlank()) PeerBotService.status(line)
             } else if (message.what == EngineProtocol.NATIVE_STATE) {
+                val pid = data.getInt("pid")
+                if (pid != enginePid || stopRequestedAt != 0L) return
+                checkResultPid = if (data.getBoolean("checkResult")) pid else 0
                 data.getLongArray("state")?.let { values ->
                     AppState.appendLog("[BOT-NATIVE] state=${values.contentToString()} (frame counter at index 20)")
                     if (BotHeapRecording.observing(enginePid) && EngineSnapshot(values).matchConstructed) {
@@ -171,6 +175,7 @@ object EngineHost {
             stopRequestedAt = 0
             enginePid = 0
             lastRoundEnd = null
+            checkResultPid = 0
             engineStartedAt = System.currentTimeMillis()
             bind(owner)
             val process = request(EngineProtocol.PROCESS_INFO, timeout = 10)
@@ -248,6 +253,8 @@ object EngineHost {
         isReady && pid > 0 && pid == enginePid && request(EngineProtocol.HEAP_RECORDING_PROBE,
             Bundle().apply { putInt("pid", pid) }, timeout = 3).getBoolean("ok")
     internal fun probePreviewCallback(): Boolean = request(EngineProtocol.PROBE_PREVIEW).getBoolean("ok")
+    internal fun needsResultCheck(pid: Int) = pid > 0 && checkResultPid == pid
+
     internal fun roundEnd(pid: Int): RoomRoundEnd? = when {
         !isReady || enginePid != pid -> RoomRoundEnd.ENGINE_STOPPED
         else -> lastRoundEnd?.takeIf { it.first == pid }?.second
@@ -323,6 +330,9 @@ data class EngineSnapshot(val values: LongArray) {
         nativeFailed -> RoomRoundEnd.DISCONNECTED
         else -> null
     }
+    internal fun needsResultCheck(played: Boolean, previousFrame: Long) =
+        played && !matchAtBreak && (!matchConstructed || commandFrame > 0 && commandFrame == previousFrame)
+
     val sessionConnected get() = field(2) == 4L
     // The configured TURN session owns its connection verdict. The NTL
     // fallback uses the separate original SDK verdict as well.

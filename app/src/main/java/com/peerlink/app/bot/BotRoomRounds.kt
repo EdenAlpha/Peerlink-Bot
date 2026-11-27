@@ -79,6 +79,8 @@ internal class BotRoomRounds(
     }
 
     companion object {
+        fun confirmedResult(reply: Map<*, *>) = reply["result"] == "NOERR" && reply["get_match_result"] == "YES"
+
         fun alreadyReady(result: String?): Boolean =
             result?.startsWith("ERR_ALREADY") == true && result.endsWith("READY")
 
