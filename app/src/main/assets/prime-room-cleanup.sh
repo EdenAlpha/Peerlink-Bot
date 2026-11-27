@@ -85,6 +85,13 @@ sleep 3
 after=$(ram) || exit $?
 printf 'Final %s MiB available (%+d MiB)\n' "$after" "$((after - before))"
 
+# Capture the system while the reclaimed apps are still stopped and before the bot loads.
+printf 'Post-cleanup memory from /proc/meminfo (categories overlap)\n'
+awk '/^(MemTotal|MemFree|MemAvailable|Cached|Shmem|SReclaimable|SUnreclaim|SwapTotal|SwapFree):/ {print}' /proc/meminfo
+printf 'Largest remaining processes by RSS in KiB (includes shared pages)\n'
+ps -A -n -o UID,PID,RSS,NAME | awk '$2 ~ /^[0-9]+$/ && $3 ~ /^[0-9]+$/ {print $3, $4, "pid", $2, "uid", $1}' |
+  sort -nr | head -15
+
 if printf '%s\n' "$targets" | grep -Fxq com.google.android.youtube; then
   dumpsys -t 5 package com.google.android.youtube | awk -v user="$user_id" '
     $0 == "Packages:" { installed = 1; next }

@@ -275,7 +275,11 @@ class PeerLinkUiTest {
     }
 
     @Test fun primeMemoryOffersBothActionsAndKeepsLatestReadingsVisible() {
-        val prefs = context.getSharedPreferences("godmode_prefs", Context.MODE_PRIVATE)
+        GodModeManager.init(context)
+        // Robolectric can recreate the test application while Prime's process singleton remains alive.
+        val owner = GodModeManager::class.java.getDeclaredField("appContext").apply { isAccessible = true }
+            .get(GodModeManager) as Context
+        val prefs = owner.getSharedPreferences("godmode_prefs", Context.MODE_PRIVATE)
         val original = prefs.all
         val paired = "paired_trust_confirmed"
         val reading = "prime_last_ram_report"
@@ -283,8 +287,8 @@ class PeerLinkUiTest {
         try {
             prefs.edit().putBoolean(paired, true).putString(reading, "Available  1137 of 3744 MiB")
                 .putString(reclaim, "After 10 seconds  1400 MiB (+40 MiB)").commit()
-            GodModeManager.init(context)
             GodModeManager.refreshSetupState(checkServer = false)
+            assertTrue(GodModeManager.setupSnapshot.value.pairedTrusted)
             compose.setContent { PeerLinkTheme { PrimeSetupScreen(context, onBack = {}, onStartPairing = {}) } }
             compose.onNodeWithText("Advanced controls").performScrollTo().performClick()
             compose.onNodeWithTag("prime-ram-report").performScrollTo().assertIsDisplayed()
