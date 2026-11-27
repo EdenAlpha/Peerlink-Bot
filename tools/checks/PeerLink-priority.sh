@@ -85,7 +85,7 @@ check_windows() {
       printf "Game visible on main=%d, focused on main=%d, focused display=%s, PeerLink visible on display(s)=%s\n",
         gameVisible+0, focus+0, (length(top) ? top : "?"), (count ? ids : "none")
       if (!gameVisible || !focus || top != "0") exit 1
-      if (want == "none" ? count != 0 : (count != 1 || !(want in panels))) exit 1
+      if (want != "game" && (want == "none" ? count != 0 : (count != 1 || !(want in panels)))) exit 1
     }'
 }
 
@@ -128,9 +128,58 @@ release_check() {
   fi
 }
 
-open_game() {
+wait_for_game_focus() {
+  local remaining="$1"
+  while [ "$remaining" -gt 0 ]; do
+    [ ! -f "$work/cancel" ] || stop_check 'Check cancelled.'
+    check_windows game >/dev/null && return 0
+    remaining=$((remaining - 1))
+    [ "$remaining" -eq 0 ] || sleep 3
+  done
+  return 1
+}
+
+game_task() {
+  # A live activity record identifies the Android user, component and task together.
+  dumpsys -t 4 activity activities | awk -v user="u$android_user" -v pkg="$game/" '
+    $1 == "Display" && $2 ~ /^#[0-9]+$/ { main=($2=="#0"); next }
+    main && /ActivityRecord\{/ && (/Hist[[:space:]]+#[0-9]+:/ || /topResumedActivity=/) {
+      for (i=2; i<NF; i++) {
+        if ($(i-1)==user && index($i,pkg)==1 && $(i+1) ~ /^t[0-9]+}$/) {
+          print substr($(i+1),2,length($(i+1))-2); exit
+        }
+      }
+    }'
+}
+
+launch_game() {
+  printf 'Opening %s on the main screen.\n' "$1"
   timeout 8 am start --user "$android_user" --display 0 -a android.intent.action.MAIN \
-    -c android.intent.category.LAUNCHER -p "$game" || stop_check 'eFootball could not be opened.'
+    -c android.intent.category.LAUNCHER -f 0x10200000 -n "$1" && wait_for_game_focus 3
+}
+
+open_game() {
+  local task launcher
+  local stock_launcher="$game/com.epicgames.ue4.SplashActivity"
+  if [ -n "$game_pid" ] && [ "$(process_pid "$game")" != "$game_pid" ]; then
+    stop_check 'eFootball restarted or exited during the check.'
+  fi
+  wait_for_game_focus 1 && return 0
+  task=$(game_task)
+  if [ -n "$task" ]; then
+    printf 'Bringing the existing eFootball task %s to the front.\n' "$task"
+    if timeout 5 am task focus "$task" && wait_for_game_focus 2; then return 0; fi
+  elif [ -z "$game_pid" ]; then
+    launcher=$(timeout 5 cmd package resolve-activity --brief --user "$android_user" \
+      -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p "$game" |
+      awk -v pkg="$game" 'NF==1 && index($1,pkg "/")==1 && $1 ~ /\/[A-Za-z0-9._$]+$/ {print $1; exit}')
+    if [ -n "$launcher" ] && launch_game "$launcher"; then return 0; fi
+    if [ "$launcher" != "$stock_launcher" ] && launch_game "$stock_launcher"; then return 0; fi
+  fi
+  echo 'Waiting up to one minute for you to bring eFootball to the main screen.'
+  wait_for_game_focus 21 && return 0
+  check_windows game || :
+  stop_check 'Game input focus could not be verified on the main screen.'
 }
 
 check_phase() {
@@ -161,7 +210,11 @@ measure() {
   echo "$$" > "$work/pid"
   local previous ids display attempt settle grace base_low base_high panel_low panel_high
   local android_user="$1" bot_pid="$2" game_pid='' low high
-  printf 'PeerLink priority check v2. Android user %s, bot PID %s. Lower scores receive stronger protection against low-memory kills.\n' "$android_user" "$bot_pid"
+  printf 'PeerLink priority check v3. Android user %s, bot PID %s. Lower scores receive stronger protection against low-memory kills.\n' "$android_user" "$bot_pid"
+  local initial_score
+  if initial_score=$(score "$bot_pid" "$engine"); then
+    printf 'At script start, before verifying the game screen: bot score %s (outside the comparison).\n' "$initial_score"
+  fi
   grace=$(dumpsys -t 4 activity settings | awk -F= '
     $1 ~ /^[[:space:]]*top_to_(fgs|almost_perceptible)_grace_duration$/ && $2 ~ /^[0-9]+$/ {
       if ($2 > max+0) max=$2
@@ -241,4 +294,4 @@ fi
 # Android services receive copies of the shell command's descriptors. Only cat
 # should open the Downloads file. Give the worker a pipe for stdout AND stderr.
 (trap '' HUP; sh "$work/run.sh" --measure "$android_user" "$bot_pid" 2>&1 | cat >> "$report") </dev/null >/dev/null 2>&1 &
-printf 'Check started. Leave eFootball on screen until the report finishes.\nDownloads/%s\n' "${report##*/}"
+printf 'Check started. If eFootball stays in the background, open it from Home or Recents. Leave the title screen visible until the report finishes.\nDownloads/%s\n' "${report##*/}"
