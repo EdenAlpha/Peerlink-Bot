@@ -56,35 +56,77 @@ score() {
   value=$(cat "/proc/$1/oom_score_adj" 2>/dev/null) || value=$(
     dumpsys -t 4 activity processes "${2%%:*}" | awk -v key=" $1:$2/" '
       $1 == "*APP*" || $1 == "*PERS*" { active=index($0,key) != 0 }
-      active && $1 == "oom" && $2 == "adj:" {
-        for (i=3; i<=NF; i++) if ($i ~ /^set=-?[0-9]+$/) { print substr($i,5); exit }
+      active && !found && $1 == "oom" && $2 == "adj:" {
+        for (i=3; i<=NF; i++) if ($i ~ /^set=-?[0-9]+$/) { print substr($i,5); found=1; break }
       }'
   )
   printf '%s\n' "$value" | awk '/^-?[0-9]+$/ && $1 >= -1000 && $1 <= 1000 { print; ok=1 } END { if (!ok) exit 1 }'
 }
 
 check_windows() {
-  # visible-apps lists visible activity windows, their display IDs and input focus.
-  dumpsys -t 5 window visible-apps | awk -v want="$1" -v game="$game/" -v peer="$package/" '
-    $1 == "Display:" && $2 ~ /^mDisplayId=/ { display=substr($2,12); next }
-    !windows && $1 ~ /^mCurrentFocus=/ && display == "0" { focus=index($0,game)>0 }
-    $1 ~ /^mTopFocusedDisplayId=/ { split($1,k,"="); top=k[2] }
+  # Activity focus and window input focus differ when Android draws a system window.
+  dumpsys -t 5 window visible-apps | awk -v want="$1" -v game="$game" -v peer="$package" '
+    function component_owner(line, result) {
+      if (!match(line, /[A-Za-z0-9_.]+\/[A-Za-z0-9_.$]+/)) return ""
+      result=substr(line,RSTART,RLENGTH)
+      sub(/\/.*/, "", result)
+      return result
+    }
+    function window_id(line) {
+      if (!match(line, /Window\{[[:xdigit:]]+/)) return ""
+      return substr(line,RSTART+7,RLENGTH-7)
+    }
+    !windows && $1 == "Display:" && $2 ~ /^mDisplayId=/ { display=substr($2,12); next }
+    !windows && display == "0" && $1 ~ /^mCurrentFocus=/ {
+      inputId=window_id($0)
+      input=component_owner($0)
+      if ($1 == "mCurrentFocus=null") input="none"
+      if (input=="" && $0 ~ /Keyguard/) input="lock-screen"
+      if (input=="" && $0 ~ /NotificationShade/) input="notification-shade"
+      if (input=="" && $0 ~ /StatusBar|NavigationBar/) input="system-bars"
+      if (input=="" && $0 ~ /InputMethod/) input="keyboard"
+    }
+    !windows && display == "0" && $1 ~ /^mFocusedApp=/ {
+      app=component_owner($0)
+      if ($1 == "mFocusedApp=null") app="none"
+    }
+    !windows && display == "0" && $1 ~ /^mAwake=(true|false)$/ {
+      awake=substr($1,8)
+      for (i=2; i<=NF; i++) if ($i ~ /^mScreenOnFully=(true|false)$/) screen=substr($i,16)
+    }
+    $1 ~ /^mTopFocusedDisplayId=[0-9]+$/ { top=substr($1,22) }
     /^WINDOW MANAGER WINDOWS/ { windows=1 }
     windows && $1 == "Window" && $2 ~ /^#[0-9]+$/ {
-      peerWindow=index($0,peer)>0 && index($0,".ui.MainActivity")>0
-      gameWindow=index($0,game)>0
+      id=window_id($0)
+      owner=component_owner($0)
+      mainActivity=(owner == peer && index($0,".ui.MainActivity")>0)
+      windowDisplay=""
     }
-    windows && $1 ~ /^mDisplayId=[0-9]+$/ {
-      id=substr($1,12)
-      if (peerWindow) panels[id]=1
-      if (gameWindow && id == "0") gameVisible=1
-      peerWindow=0; gameWindow=0
+    windows && id!="" && $1 ~ /^mDisplayId=[0-9]+$/ {
+      windowDisplay=substr($1,12)
+      if (mainActivity) panels[windowDisplay]=1
+      if (owner == game && windowDisplay == "0") gameVisible=1
+    }
+    windows && id!="" && windowDisplay!="" && $1 ~ /^mOwnerUid=/ {
+      for (i=2; i<=NF; i++) {
+        if ($i !~ /^package=[A-Za-z0-9_.]+$/) continue
+        owner=substr($i,9)
+        if (id == inputId) input=owner
+        if (owner == game && windowDisplay == "0") gameVisible=1
+      }
+    }
+    windows && id!="" && windowDisplay!="" && $1 ~ /^mActivityRecord=/ {
+      if (component_owner($0)==peer && $0 ~ /\.ui\.MainActivity([[:space:]}]|$)/) panels[windowDisplay]=1
     }
     END {
       for (id in panels) { count++; ids=ids " " id }
-      printf "Game visible on main=%d, focused on main=%d, focused display=%s, PeerLink visible on display(s)=%s\n",
-        gameVisible+0, focus+0, (length(top) ? top : "?"), (count ? ids : "none")
-      if (!gameVisible || !focus || top != "0") exit 1
+      printf "input=%s, foreground app=%s, game visible=%d, focused display=%s, screen on=%s, awake=%s, PeerLink displays=%s\n",
+        (input!="" ? input : "unknown"), (app!="" ? app : "unknown"), gameVisible+0,
+        (top!="" ? top : "?"), (screen!="" ? screen : "?"), (awake!="" ? awake : "?"),
+        (count ? ids : "none")
+      if (!gameVisible || top != "0" || awake == "false" || screen == "false" || input == "lock-screen") exit 1
+      if (app != game && (app != "" || input != game)) exit 1
+      if (input != game && awake != "true" && screen != "true") exit 1
       if (want != "game" && (want == "none" ? count != 0 : (count != 1 || !(want in panels)))) exit 1
     }'
 }
@@ -128,7 +170,7 @@ release_check() {
   fi
 }
 
-wait_for_game_focus() {
+wait_for_game_foreground() {
   local remaining="$1"
   while [ "$remaining" -gt 0 ]; do
     [ ! -f "$work/cancel" ] || stop_check 'Check cancelled.'
@@ -143,10 +185,10 @@ game_task() {
   # A live activity record identifies the Android user, component and task together.
   dumpsys -t 4 activity activities | awk -v user="u$android_user" -v pkg="$game/" '
     $1 == "Display" && $2 ~ /^#[0-9]+$/ { main=($2=="#0"); next }
-    main && /ActivityRecord\{/ && (/Hist[[:space:]]+#[0-9]+:/ || /topResumedActivity=/) {
+    main && !found && /ActivityRecord\{/ && (/Hist[[:space:]]+#[0-9]+:/ || /topResumedActivity=/) {
       for (i=2; i<NF; i++) {
         if ($(i-1)==user && index($i,pkg)==1 && $(i+1) ~ /^t[0-9]+}$/) {
-          print substr($(i+1),2,length($(i+1))-2); exit
+          print substr($(i+1),2,length($(i+1))-2); found=1; break
         }
       }
     }'
@@ -155,7 +197,7 @@ game_task() {
 launch_game() {
   printf 'Opening %s on the main screen.\n' "$1"
   timeout 8 am start --user "$android_user" --display 0 -a android.intent.action.MAIN \
-    -c android.intent.category.LAUNCHER -f 0x10200000 -n "$1" && wait_for_game_focus 3
+    -c android.intent.category.LAUNCHER -f 0x10200000 -n "$1" && wait_for_game_foreground 3
 }
 
 open_game() {
@@ -164,53 +206,78 @@ open_game() {
   if [ -n "$game_pid" ] && [ "$(process_pid "$game")" != "$game_pid" ]; then
     stop_check 'eFootball restarted or exited during the check.'
   fi
-  wait_for_game_focus 1 && return 0
+  wait_for_game_foreground 1 && return 0
   task=$(game_task)
   if [ -n "$task" ]; then
     printf 'Bringing the existing eFootball task %s to the front.\n' "$task"
-    if timeout 5 am task focus "$task" && wait_for_game_focus 2; then return 0; fi
+    if timeout 5 am task focus "$task" && wait_for_game_foreground 2; then return 0; fi
   elif [ -z "$game_pid" ]; then
     launcher=$(timeout 5 cmd package resolve-activity --brief --user "$android_user" \
       -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p "$game" |
-      awk -v pkg="$game" 'NF==1 && index($1,pkg "/")==1 && $1 ~ /\/[A-Za-z0-9._$]+$/ {print $1; exit}')
+      awk -v pkg="$game" '!found && NF==1 && index($1,pkg "/")==1 && $1 ~ /\/[A-Za-z0-9._$]+$/ {print $1; found=1}')
     if [ -n "$launcher" ] && launch_game "$launcher"; then return 0; fi
     if [ "$launcher" != "$stock_launcher" ] && launch_game "$stock_launcher"; then return 0; fi
   fi
   echo 'Waiting up to one minute for you to bring eFootball to the main screen.'
-  wait_for_game_focus 21 && return 0
+  wait_for_game_foreground 21 && return 0
   check_windows game || :
-  stop_check 'Game input focus could not be verified on the main screen.'
+  stop_check 'eFootball could not be verified in the foreground on the main screen.'
 }
 
 check_phase() {
-  local label="$1" display="$2" pass value game_value current_game
+  local label="$1" display="$2" value game_value current_game
+  local state last_state='' ready input pass=0 elapsed=0 delay=4
+  local attempt=0 limit=$(( (settle + 3) / 4 + 12 ))
   low=1001; high=-1001
-  printf '\n%s. Waiting %s seconds for Android to settle.\n' "$label" "$settle"
-  sleep "$settle"
-  for pass in 1 2 3; do
+  phase_input=''
+  printf '\n%s. Measuring after %s seconds with eFootball in front.\n' "$label" "$settle"
+  while [ "$attempt" -lt "$limit" ]; do
+    attempt=$((attempt + 1))
     [ ! -f "$work/cancel" ] || stop_check 'Check cancelled.'
-    check_windows "$display" || stop_check 'The required windows or input focus could not be verified.'
     [ "$(process_pid "$engine")" = "$bot_pid" ] || stop_check 'The original bot process exited or changed.'
-    current_game=$(process_pid "$game") || stop_check 'The main eFootball process could not be found.'
-    if [ -z "$game_pid" ]; then game_pid=$current_game; fi
-    [ "$game_pid" = "$current_game" ] || stop_check 'eFootball restarted during the check.'
-    value=$(score "$bot_pid" "$engine") || stop_check 'Android did not expose a valid bot process score.'
-    game_value=$(score "$game_pid" "$game") || stop_check 'Android did not expose a valid game process score.'
-    printf '%s sample %s   bot PID %s score %s   eFootball PID %s score %s\n' \
-      "$label" "$pass" "$bot_pid" "$value" "$game_pid" "$game_value"
-    [ "$value" -ge "$low" ] || low=$value
-    [ "$value" -le "$high" ] || high=$value
-    [ "$pass" = 3 ] || sleep 2
+    ready=0
+    state=$(check_windows "$display") && ready=1
+    input=${state%%,*}; input=${input#input=}
+    if [ "$state" != "$last_state" ] || [ "$attempt" = "$limit" ]; then
+      value=$(score "$bot_pid" "$engine") || value=unavailable
+      printf 'Observed bot score %s. %s\n' "$value" "$state"
+      last_state=$state
+    fi
+    current_game=$(process_pid "$game")
+    if [ -n "$game_pid" ] && [ "$game_pid" != "$current_game" ]; then
+      stop_check 'eFootball restarted or exited during the check.'
+    fi
+    if [ "$ready" -eq 0 ] || [ -z "$current_game" ]; then
+      elapsed=0; pass=0; low=1001; high=-1001; phase_input=''
+    else
+      game_pid=$current_game
+      if [ "$input" != "$phase_input" ]; then
+        elapsed=0; pass=0; low=1001; high=-1001; phase_input=$input
+      fi
+      if [ "$elapsed" -ge "$settle" ]; then
+        value=$(score "$bot_pid" "$engine") || stop_check 'Android did not expose a valid bot process score.'
+        game_value=$(score "$game_pid" "$game") || stop_check 'Android did not expose a valid game process score.'
+        pass=$((pass + 1))
+        printf '%s sample %s   bot PID %s score %s   eFootball PID %s score %s   input %s\n' \
+          "$label" "$pass" "$bot_pid" "$value" "$game_pid" "$game_value" "$input"
+        [ "$value" -ge "$low" ] || low=$value
+        [ "$value" -le "$high" ] || high=$value
+        [ "$pass" -lt 3 ] || return 0
+      fi
+      elapsed=$((elapsed + delay))
+    fi
+    sleep "$delay"
   done
+  stop_check "The \"$label\" phase did not get three stable readings with eFootball in front and the expected PeerLink windows."
 }
 
 measure() {
   trap 'release_check' EXIT
   trap 'exit 1' INT TERM
   echo "$$" > "$work/pid"
-  local previous ids display attempt settle grace base_low base_high panel_low panel_high
-  local android_user="$1" bot_pid="$2" game_pid='' low high
-  printf 'PeerLink priority check v3. Android user %s, bot PID %s. Lower scores receive stronger protection against low-memory kills.\n' "$android_user" "$bot_pid"
+  local previous initial_display_setting ids display attempt settle grace base_low base_high panel_low panel_high
+  local android_user="$1" bot_pid="$2" game_pid='' low high phase_input baseline_input panel_input
+  printf 'PeerLink priority check v4. Android user %s, bot PID %s. Lower scores receive stronger protection against low-memory kills.\n' "$android_user" "$bot_pid"
   local initial_score
   if initial_score=$(score "$bot_pid" "$engine"); then
     printf 'At script start, before verifying the game screen: bot score %s (outside the comparison).\n' "$initial_score"
@@ -222,11 +289,21 @@ measure() {
     END { print (max+0 > 15000 ? max : 15000) }')
   [ "$grace" -le 120000 ] || stop_check 'This phone has a foreground grace period longer than two minutes.'
   settle=$(( (grace + 999) / 1000 + 5 ))
+  previous=$(display_setting) || previous=unavailable
+  case "$previous" in
+    ''|null) echo 'Simulated display setting is off at startup.' ;;
+    unavailable) echo 'Android could not verify the simulated display setting at startup.' ;;
+    *) echo 'A simulated display is already configured at startup.' ;;
+  esac
   open_game
   check_phase 'Before' none
-  base_low=$low; base_high=$high
+  base_low=$low; base_high=$high; baseline_input=$phase_input
 
+  initial_display_setting=$previous
   previous=$(display_setting) || stop_check 'Only the baseline was measured. Android did not confirm the display setting.'
+  if [ "$initial_display_setting" != unavailable ] && [ "$initial_display_setting" != "$previous" ]; then
+    stop_check 'The display setting changed during the baseline.'
+  fi
   case "$previous" in ''|null) ;; *) stop_check 'A simulated display is already configured.' ;; esac
   ids=$(overlay_ids) || stop_check 'Android did not list its displays.'
   [ -z "$ids" ] || stop_check 'A simulated display is already active.'
@@ -247,7 +324,7 @@ measure() {
   sleep 2
   open_game
   check_phase 'With PeerLink visible' "$display"
-  panel_low=$low; panel_high=$high
+  panel_low=$low; panel_high=$high; panel_input=$phase_input
 
   current=$(display_setting) || stop_check 'Android could not verify the temporary display setting.'
   [ "$current" = "$panel" ] || stop_check 'The simulated-display setting was changed separately during the check.'
@@ -257,7 +334,9 @@ measure() {
   check_phase 'After removal' none
   printf '\nBot score ranges   before %s..%s   with window %s..%s   after removal %s..%s\n' \
     "$base_low" "$base_high" "$panel_low" "$panel_high" "$low" "$high"
-  if [ "$panel_high" -lt "$base_low" ] && [ "$panel_high" -lt "$low" ]; then
+  if [ "$baseline_input" != "$panel_input" ] || [ "$baseline_input" != "$phase_input" ]; then
+    echo 'INCONCLUSIVE. Different windows held input during the three phases. The scores above remain available.'
+  elif [ "$panel_high" -lt "$base_low" ] && [ "$panel_high" -lt "$low" ]; then
     echo 'RESULT. Android gave the same bot process stronger protection while PeerLink was visible in this waiting room.'
   elif [ "$base_low" = "$base_high" ] && [ "$panel_low" = "$panel_high" ] && \
        [ "$low" = "$high" ] && [ "$low" = "$panel_low" ] && [ "$low" = "$base_low" ]; then
@@ -266,6 +345,10 @@ measure() {
     echo 'RESULT. The bot had weaker protection while PeerLink was visible.'
   else
     echo 'INCONCLUSIVE. The scores varied or the change did not reverse after the window closed.'
+  fi
+  if [ "$baseline_input" != "$game" ]; then
+    printf 'Baseline measurements had input held by %s while eFootball remained the selected main-screen app. Game controls were only verified where input shows %s.\n' \
+      "$baseline_input" "$game"
   fi
 }
 

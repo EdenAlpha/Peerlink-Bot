@@ -16,7 +16,12 @@ cases = {
     "resolver_stale": "stronger protection while",
     "resume_task": "stronger protection while",
     "manual_open": "stronger protection while",
-    "never_open": "input focus could not be verified",
+    "never_open": "could not be verified in the foreground",
+    "system_input": "stronger protection while",
+    "different_input": "Different windows held input",
+    "oem_window_title": "stronger protection while",
+    "focus_interrupted": "stronger protection while",
+    "screen_off": '\"Before\" phase did not get three stable readings',
     "binder_fds": "stronger protection while",
     "wrapper_failure": "stronger protection while",
     "list_has_value": "already configured",
@@ -30,10 +35,10 @@ cases = {
     "unchanged": "no measured difference",
     "weaker": "weaker protection while",
     "no_reversal": "change did not reverse",
-    "wrong_focus": "input focus could not be verified",
-    "wrong_app": "input focus could not be verified",
-    "no_window": "input focus could not be verified",
-    "wrong_display": "input focus could not be verified",
+    "wrong_focus": "could not be verified in the foreground",
+    "wrong_app": "could not be verified in the foreground",
+    "no_window": "did not get three stable readings",
+    "wrong_display": "did not get three stable readings",
     "no_score": "valid bot process score",
     "no_display": "did not create the simulated display",
     "bot_restarted": "bot process exited or changed",
@@ -99,6 +104,19 @@ def run(case):
             assert 'Waiting up to one minute' in result, result
         if case == 'never_open':
             assert 'outside the comparison' in result and 'Before sample ' not in result, result
+        if case == 'screen_off':
+            assert 'screen on=false, awake=false' in result and 'Before sample ' not in result, result
+            assert '--display 37' not in calls, calls
+        if case == 'different_input':
+            assert 'RESULT.' not in result and 'input notification-shade' in result, result
+        if case == 'system_input':
+            assert 'input held by notification-shade' in result, result
+        if case == 'oem_window_title':
+            assert 'input=jp.konami.pesam' in result and 'input=unknown' not in result, result
+        if case == 'focus_interrupted':
+            assert 'input=none, foreground app=jp.konami.pesam' in result, result
+        if case in ('system_input', 'different_input', 'oem_window_title', 'focus_interrupted'):
+            assert result.count('  bot PID 800002 score') == 9, result
         if case in ('stock_launcher','dynamic_launcher','resolver_other','resolver_stale','resume_task','manual_open'):
             assert result.count('  bot PID 800002 score') == 9
         if case in ('both_reads_denied','invalid_list','list_has_no_output'):

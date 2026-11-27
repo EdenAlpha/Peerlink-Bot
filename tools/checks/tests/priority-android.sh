@@ -16,6 +16,10 @@ fi
 case "$action" in
 sleep)
   if [ "$CASE:$1" = manual_open:3 ] && [ -f "$FIX/launch_failed" ]; then touch "$FIX/game_front"; fi
+  if [ "$CASE" = focus_interrupted ] || [ "$CASE" = screen_off ]; then
+    seconds=$(cat "$FIX/seconds" 2>/dev/null || echo 0)
+    echo "$((seconds + $1))" > "$FIX/seconds"
+  fi
   exit 0 ;;
 am)
   if [ "$1" = get-current-user ]; then echo 0; exit 0; fi
@@ -125,21 +129,47 @@ dumpsys)
     'window visible-apps')
       echo 'WINDOW MANAGER DISPLAY CONTENTS (dumpsys window displays)'
       echo '  Display: mDisplayId=0 (organized)'
-      manual=0
+      input='Window{8 u0 jp.konami.pesam/com.epicgames.ue4.GameActivity}'
+      foreground='ActivityRecord{8 u0 jp.konami.pesam/com.epicgames.ue4.GameActivity t76}'
+      screen=true
       case "$CASE" in
         dynamic_launcher|stock_launcher|resolver_other|resolver_stale|manual_open|resume_task|never_open)
-          [ -f "$FIX/game_front" ] || manual=1 ;;
+          if [ ! -f "$FIX/game_front" ]; then
+            input='Window{8e u0 com.android.settings/.Settings}'
+            foreground='ActivityRecord{8e u0 com.android.settings/.Settings t23}'
+          fi ;;
+        system_input) input='Window{8f u0 NotificationShade}' ;;
+        oem_window_title) input='Window{8 u0 CustomRenderer}' ;;
+        focus_interrupted|screen_off)
+          seconds=$(cat "$FIX/seconds" 2>/dev/null || echo 0)
+          if [ "$seconds" -ge 20 ] && [ "$phase" = before ]; then
+            if [ "$CASE" = screen_off ]; then input=null; screen=false
+            elif [ "$seconds" -lt 24 ]; then input=null; fi
+          fi ;;
       esac
-      if [ "$phase:$CASE" = panel:wrong_app ] || [ "$manual" = 1 ]; then echo '  mCurrentFocus=Window{8 u0 com.android.settings/.Settings}'
-      else echo '  mCurrentFocus=Window{8 u0 jp.konami.pesam/com.epicgames.GameActivity}'; fi
+      case "$phase:$CASE" in
+        panel:wrong_app)
+          input='Window{8e u0 com.android.settings/.Settings}'
+          foreground='ActivityRecord{8e u0 com.android.settings/.Settings t23}' ;;
+        panel:different_input) input='Window{8f u0 NotificationShade}' ;;
+      esac
+      printf '  mCurrentFocus=%s\n  mFocusedApp=%s\n' "$input" "$foreground"
+      printf '  mAwake=%s mScreenOnEarly=%s mScreenOnFully=%s\n' "$screen" "$screen" "$screen"
       [ "$phase" != panel ] || echo '  Display: mDisplayId=37 (organized)'
       echo 'WINDOW MANAGER WINDOWS (dumpsys window windows)'
-      echo '  Window #0 Window{8 u0 jp.konami.pesam/com.epicgames.GameActivity}:'
+      if [ "$CASE" = oem_window_title ]; then
+        echo '  Window #0 Window{8 u0 CustomRenderer}:'
+      else
+        echo '  Window #0 Window{8 u0 jp.konami.pesam/com.epicgames.GameActivity}:'
+      fi
       echo '    mDisplayId=0 rootTaskId=44'
+      echo '    mOwnerUid=10642 showForAllUsers=false package=jp.konami.pesam appop=NONE'
       if [ "$phase" = panel ] && [ "$CASE" != no_window ]; then
-        echo '  Window #1 Window{1 u0 com.peerlink.app/com.peerlink.app.ui.MainActivity}:'
+        if [ "$CASE" = oem_window_title ]; then echo '  Window #1 Window{1 u0 PeerLink}:'
+        else echo '  Window #1 Window{1 u0 com.peerlink.app/com.peerlink.app.ui.MainActivity}:'; fi
         if [ "$CASE" = wrong_display ]; then echo '    mDisplayId=0 rootTaskId=56'
         else echo '    mDisplayId=37 rootTaskId=56'; fi
+        echo '    mActivityRecord=ActivityRecord{18 u0 com.peerlink.app/.ui.MainActivity t56}'
       fi
       if [ "$phase:$CASE" = panel:wrong_focus ]; then echo '  mTopFocusedDisplayId=37'; else echo '  mTopFocusedDisplayId=0'; fi
       if [ "$phase:$CASE" = panel:user_changed ]; then echo '800x600/160' > "$FIX/setting"; fi ;;
