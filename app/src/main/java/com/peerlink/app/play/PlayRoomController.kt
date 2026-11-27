@@ -59,10 +59,10 @@ sealed interface RoomState {
                      val recoveryReason: String? = null) : RoomState
 
     /** Room creation failed (gate down, not logged in, …). */
-    data class Failed(val reason: String, val recordMemoryOnRetry: Boolean = false) : RoomState
+    data class Failed(val reason: String, val clearRamOnRetry: Boolean = false) : RoomState
 
     data class FilesNeeded(val missingFiles: Int, val missingBytes: Long, val totalFiles: Int,
-                           val recordMemoryOnRetry: Boolean = false) : RoomState
+                           val clearRamOnRetry: Boolean = false) : RoomState
 
     /** The local bot and its connection are still shutting down. */
     data object Ending : RoomState
@@ -74,7 +74,7 @@ sealed interface RoomState {
  * copyable, and clears it when the match is done.
  */
 object PlayRoomController {
-    private data class RoomOptions(val allowResourceDownload: Boolean, val recordMemory: Boolean)
+    private data class RoomOptions(val allowResourceDownload: Boolean, val recordMemory: Boolean, val clearRam: Boolean)
 
 
     private val io = kotlinx.coroutines.CoroutineScope(
@@ -89,7 +89,7 @@ object PlayRoomController {
 
     @Volatile
     private var appContext: Context? = null
-    private var roomOptions = RoomOptions(allowResourceDownload = false, recordMemory = false)
+    private var roomOptions = RoomOptions(allowResourceDownload = false, recordMemory = false, clearRam = false)
 
     /** Attach the bot's room service (called once the UI context exists). */
     fun attach(b: BotRoomBackend, ctx: Context) {
@@ -97,11 +97,16 @@ object PlayRoomController {
         appContext = ctx.applicationContext
     }
 
+    fun createRoomForPlay(clearRam: Boolean) {
+        val detailed = clearRam && appContext?.let(BotHeapRecording::enabledForRooms) == true
+        createRoom(recordMemory = detailed, clearRam = clearRam)
+    }
+
     /**
      * Ask the bot to create a room: login at the gate, CMD_CREATEJOIN_ROOM,
      * surface the returned number. Never invents one on failure.
      */
-    @Synchronized fun createRoom(allowResourceDownload: Boolean = false, recordMemory: Boolean = false) {
+    @Synchronized fun createRoom(allowResourceDownload: Boolean = false, recordMemory: Boolean = false, clearRam: Boolean = recordMemory) {
         if (_state.value is RoomState.Creating || _state.value is RoomState.Ready || _state.value is RoomState.Ending) return
         val be = backend
         val ctx = appContext
@@ -112,24 +117,29 @@ object PlayRoomController {
             )
             return
         }
-        roomOptions = RoomOptions(allowResourceDownload, recordMemory)
-        _state.value = RoomState.Creating(if (recordMemory) "Freeing RAM before loading the bot…" else "The bot is opening a room at Konami…")
+        val cleanup = clearRam || recordMemory
+        roomOptions = RoomOptions(allowResourceDownload, recordMemory, cleanup)
+        _state.value = RoomState.Creating(if (cleanup) "Freeing RAM before loading the bot…" else "The bot is opening a room at Konami…")
         io.launch {
-            val recording = if (recordMemory) BotHeapRecording.newId() else null
+            val cleanupId = if (cleanup) BotHeapRecording.newId() else null
+            val recording = cleanupId?.takeIf { recordMemory }
             var heapVerified = false
             var cleanupNote: String? = null
             var heapNote: String? = null
             var opened = false
             try {
-                val verify: ((Int) -> Unit)? = recording?.let { id ->
-                    when (BotMatchDiagnostics.reclaimBeforeRoom(ctx, id)) {
+                if (cleanupId != null) {
+                    when (BotMatchDiagnostics.reclaimBeforeRoom(ctx, cleanupId)) {
                         BotMatchDiagnostics.RamCleanup.PRIME_UNAVAILABLE ->
                             error("Activate Prime in Settings, then tap Clear RAM and create room.")
                         BotMatchDiagnostics.RamCleanup.INCOMPLETE ->
                             cleanupNote = "RAM cleanup was incomplete. See Export diagnostics for details."
                         BotMatchDiagnostics.RamCleanup.COMPLETED -> Unit
                     }
-                    BotMatchDiagnostics.startMemoryGuard(ctx, id, io)
+                    BotMatchDiagnostics.startMemoryGuard(ctx, cleanupId, io)
+                    preparationNote(cleanupNote ?: "Opening the bot’s room…")
+                }
+                val verify: ((Int) -> Unit)? = recording?.let { id ->
                     heapNote = BotHeapRecording.prepare(ctx, id)
                     preparationNote(heapNote ?: cleanupNote ?: "Opening the bot’s room…")
                     if (heapNote != null) return@let null
@@ -160,13 +170,13 @@ object PlayRoomController {
                 onRoomCreated(number, diagnosticsNote)
                 opened = true
             } catch (missing: com.peerlink.app.bot.GameResourcePacks.MissingResources) {
-                _state.value = RoomState.FilesNeeded(missing.missingFiles, missing.missingBytes, missing.totalFiles, recordMemory)
+                _state.value = RoomState.FilesNeeded(missing.missingFiles, missing.missingBytes, missing.totalFiles, cleanup)
             } catch (t: Throwable) {
-                _state.value = RoomState.Failed(t.message ?: "Room creation failed.", recordMemory)
+                _state.value = RoomState.Failed(t.message ?: "Room creation failed.", cleanup)
             } finally {
-                if (!opened) recording?.let { id ->
+                if (!opened && cleanup) {
                     BotMatchDiagnostics.stopMemoryGuard()
-                    runCatching { BotHeapRecording.finish(ctx, id, "preparation_ended") }
+                    recording?.let { id -> runCatching { BotHeapRecording.finish(ctx, id, "preparation_ended") } }
                 }
             }
         }
@@ -243,14 +253,14 @@ object PlayRoomController {
                 synchronized(this@PlayRoomController) {
                     _state.value = if (stopped) RoomState.Idle
                     else RoomState.Failed("The bot is still closing. Wait a moment, then try again.",
-                        recordMemoryOnRetry = replacement?.recordMemory == true)
+                        clearRamOnRetry = replacement?.clearRam == true)
                     if (stopped && replacement != null) {
-                        createRoom(replacement.allowResourceDownload, replacement.recordMemory)
+                        createRoom(replacement.allowResourceDownload, replacement.recordMemory, replacement.clearRam)
                     }
                 }
             } catch (error: Exception) {
                 _state.value = RoomState.Failed(error.message ?: "Couldn't end the bot session.",
-                    recordMemoryOnRetry = replacement?.recordMemory == true)
+                    clearRamOnRetry = replacement?.clearRam == true)
             }
         }
     }

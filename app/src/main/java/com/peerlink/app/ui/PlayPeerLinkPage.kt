@@ -62,9 +62,9 @@ internal fun PlayPeerLinkPage(
     PlayPeerLinkContent(
         ctx, room, primeReady, primeActive, botSession, traffic, onExportLogs,
         data, onChooseUpdate, onUseInstalled, onOpenPrime,
-        onCreateRoom = { recordMemory ->
+        onCreateRoom = { clearRam ->
             if (!BuildConfig.DEBUG || BotDataSelection.state.value.canCreateRoom) {
-                PlayRoomController.createRoom(recordMemory = recordMemory)
+                PlayRoomController.createRoomForPlay(clearRam)
             }
         },
     )
@@ -84,7 +84,7 @@ internal fun PlayPeerLinkContent(
     onChooseUpdate: () -> Unit = {},
     onUseInstalled: () -> Unit = {},
     onOpenPrime: () -> Unit = {},
-    onCreateRoom: (Boolean) -> Unit = { PlayRoomController.createRoom(recordMemory = it) },
+    onCreateRoom: (Boolean) -> Unit = PlayRoomController::createRoomForPlay,
     onReplaceRoom: (String) -> Unit = PlayRoomController::replaceRoom,
 ) {
     var confirmEnd by rememberSaveable { mutableStateOf(false) }
@@ -281,15 +281,15 @@ private fun MatchRoomCard(
                 Text("Couldn't read game files", color = PL.ink, fontSize = 22.sp, fontWeight = FontWeight.Bold)
                 Text("${room.missingFiles} files were missing or unreadable. Check that eFootball is installed, then try again.",
                     color = PL.inkSoft, fontSize = 13.sp, lineHeight = 19.sp)
-                MatchPrimaryButton(if (room.recordMemoryOnRetry) "Retry RAM cleanup and create room" else "Check again", Icons.Rounded.Refresh, enabled = canCreate) {
-                    onCreateRoom(room.recordMemoryOnRetry)
+                MatchPrimaryButton(if (room.clearRamOnRetry) "Retry RAM cleanup and create room" else "Check again", Icons.Rounded.Refresh, enabled = canCreate) {
+                    onCreateRoom(room.clearRamOnRetry)
                 }
             }
             is RoomState.Failed -> {
                 Text("Couldn't open the room", color = PL.ink, fontSize = 22.sp, fontWeight = FontWeight.Bold)
                 Text(room.reason, color = PL.inkSoft, fontSize = 13.sp, lineHeight = 19.sp)
-                MatchPrimaryButton(if (room.recordMemoryOnRetry) "Retry RAM cleanup and create room" else "Try again", Icons.Rounded.Refresh, enabled = canCreate) {
-                    onCreateRoom(room.recordMemoryOnRetry)
+                MatchPrimaryButton(if (room.clearRamOnRetry) "Retry RAM cleanup and create room" else "Try again", Icons.Rounded.Refresh, enabled = canCreate) {
+                    onCreateRoom(room.clearRamOnRetry)
                 }
             }
             RoomState.Ending -> {
@@ -300,11 +300,11 @@ private fun MatchRoomCard(
             }
         }
         if (BuildConfig.DEBUG && room.canEditGameData) {
-            val retryRecords = (room is RoomState.Failed && room.recordMemoryOnRetry) ||
-                (room is RoomState.FilesNeeded && room.recordMemoryOnRetry)
-            if (retryRecords) {
+            val retryCleanup = (room is RoomState.Failed && room.clearRamOnRetry) ||
+                (room is RoomState.FilesNeeded && room.clearRamOnRetry)
+            if (retryCleanup) {
                 if (primeSetup != null) TextButton(onClick = primeSetup) { Text("Open Prime Mode") }
-                MatchSecondaryButton("Create room without recording", Icons.Rounded.ArrowForward, enabled = canCreate) {
+                MatchSecondaryButton("Create room without cleanup", Icons.Rounded.ArrowForward, enabled = canCreate) {
                     onCreateRoom(false)
                 }
             } else {

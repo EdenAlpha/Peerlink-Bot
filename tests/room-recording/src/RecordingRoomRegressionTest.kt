@@ -152,6 +152,10 @@ class RecordingRoomRegressionTest {
     private fun create(scenario: Scenario, record: Boolean = true): RoomState {
         Phone.scenario = scenario
         PlayRoomController.createRoom(recordMemory = record)
+        return awaitRoom()
+    }
+
+    private fun awaitRoom(): RoomState {
         val deadline = System.nanoTime() + 40_000_000_000L
         while (PlayRoomController.state.value is RoomState.Creating && System.nanoTime() < deadline) Thread.sleep(20)
         return PlayRoomController.state.value
@@ -258,6 +262,47 @@ class RecordingRoomRegressionTest {
         assertTrue((room as RoomState.Failed).reason.contains("Activate Prime"))
         assertEquals(0, Phone.heapStarts)
         assertEquals(0, Phone.roomsOpened)
+    }
+
+    @Test fun clearRamButtonOpensTheRoomWithOneCleanupAndNoHeavyProbesByDefault() {
+        Phone.scenario = Scenario.EMPTY_TRACE
+        val directory = File(context.filesDir, "bot-scheduler").apply { mkdirs() }
+        val previous = File(directory, "1700000000000-0123456789ab.pending")
+        previous.writeText("scheduler")
+        assertFalse(BotHeapRecording.enabledForRooms(context))
+        PlayRoomController.createRoomForPlay(clearRam = true)
+        val room = awaitRoom() as RoomState.Ready
+        assertNull(room.diagnosticsNote)
+        assertEquals(1, Phone.cleanups)
+        assertEquals(1, Phone.roomsOpened)
+        assertEquals(0, Phone.heapStarts)
+        assertEquals(0, Phone.probes)
+        assertTrue(previous.isFile)
+        assertTrue(Phone.stoppedTraces.isEmpty())
+        assertNull(startMatch)
+        assertTrue(schedulerReport().contains("RAM cleanup exit=0"))
+    }
+
+    @Test fun detailedRecordingCanBeSelectedForTheClearRamButton() {
+        Phone.scenario = Scenario.SLOTS_FULL
+        BotHeapRecording.setEnabledForRooms(context, true)
+        try {
+            PlayRoomController.createRoomForPlay(clearRam = true)
+            val room = awaitRoom() as RoomState.Ready
+            assertTrue(room.diagnosticsNote.orEmpty().contains("tracing slots were full"))
+            assertEquals(1, Phone.heapStarts)
+            assertNotNull(startMatch)
+        } finally {
+            BotHeapRecording.setEnabledForRooms(context, false)
+        }
+    }
+
+    @Test fun primeUnavailableDuringCleanupOffersTheSameCleanupOnRetry() {
+        Phone.scenario = Scenario.PRIME_OFF
+        PlayRoomController.createRoomForPlay(clearRam = true)
+        assertTrue((awaitRoom() as RoomState.Failed).clearRamOnRetry)
+        assertEquals(0, Phone.roomsOpened)
+        assertEquals(0, Phone.heapStarts)
     }
 
     @Test fun ordinaryRoomSkipsCleanupAndRecording() {

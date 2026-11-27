@@ -55,7 +55,8 @@ class BotEngineService : Service() {
     private var lastPlayFrame = 0
     private var lastPlayAt: Long? = null
     private var nextPlaySample = 0L
-    @Volatile private var pss = 0L
+    private var detailedMemory = false
+    @Volatile private var pss = -1L
     private var memorySample: Future<*>? = null
     private var nextMemorySample = 0L
     private val setupMemorySamples = SetupMemorySamples()
@@ -133,6 +134,7 @@ class BotEngineService : Service() {
                     result.putString("foreground", foregroundStatus)
                 }
                 EngineProtocol.PREPARE -> {
+                    detailedMemory = args.getBoolean("detailedMemory")
                     result.putBoolean("ok", EngineRuntime.prepare(this, args.getLong("uid")))
                     result.putInt("pid", Process.myPid())
                     result.putBoolean("retryable", EngineRuntime.startupRetryable)
@@ -278,7 +280,8 @@ class BotEngineService : Service() {
                         "frame=${state.commandFrame} schedstat=${counters?.trim()?.replace(' ', ',') ?: "unavailable"}")
                 }
                 if (sampleMemory) {
-                    if (!playing) pss = Debug.getPss()
+                    // Keep page-table walks out of normal team loading on low-RAM phones.
+                    if (detailedMemory && !playing) pss = Debug.getPss()
                     // The kernel maintains these counters without walking the engine's page tables.
                     val usage = runCatching { File("/proc/self/status").useLines { lines ->
                         lines.filter { it.startsWith("VmRSS:") || it.startsWith("VmSwap:") ||
@@ -304,7 +307,7 @@ class BotEngineService : Service() {
                         "sampleStartMs=$started sampleDurationMs=${SystemClock.elapsedRealtime() - started}"
                     if (playing) EngineRuntime.journal(line) else {
                         diagnostic(line)
-                        setupMemorySamples.next(state.metadataReady, inSetup, started, pss)?.let { checkpoint ->
+                        if (detailedMemory) setupMemorySamples.next(state.metadataReady, inSetup, started, pss)?.let { checkpoint ->
                             val scanStart = SystemClock.elapsedRealtime()
                             val groups = EngineRuntime.setupMemoryGroups(checkpoint)
                             EngineRuntime.journal("BOT_MEMORY_GROUPS phase=$phase checkpoint=$checkpoint $groups " +

@@ -78,10 +78,9 @@ for app in $targets; do
   printf 'Force-stop %s\n' "$app"
   am force-stop --user "$user_id" "$app" || result=1
 done
-sleep 3
 printf 'After force-stops %s MiB available\n' "$(ram)"
 am kill-all || result=1
-sleep 3
+sleep 2
 after=$(ram) || exit $?
 printf 'Final %s MiB available (%+d MiB)\n' "$after" "$((after - before))"
 

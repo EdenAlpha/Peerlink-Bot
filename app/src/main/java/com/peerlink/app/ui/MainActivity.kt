@@ -389,6 +389,8 @@ class MainActivity : AppCompatActivity(), NsdDiscovery.NsdCallback {
                                 entries.add(ZipEntryData(name = "match_log.txt", text = fullLog))
                                 entries.add(ZipEntryData(name = "engine_exit_report.txt", text =
                                     com.peerlink.app.bot.EngineProcessExitReports.export(this@MainActivity)))
+                                val gameExits = runCatching { com.peerlink.app.bot.BotMatchDiagnostics.gameExitReport() }.getOrNull()
+                                if (gameExits != null) entries.add(ZipEntryData("game_exit_report.txt", text = gameExits))
                                 val ramReport = listOf(GodModeManager.lastRamReport(), GodModeManager.lastSystemReclaim())
                                     .filter { it.isNotBlank() }.joinToString("\n\n")
                                 if (ramReport.isNotBlank())
@@ -464,6 +466,7 @@ class MainActivity : AppCompatActivity(), NsdDiscovery.NsdCallback {
                                             appendLine("Contents:")
                                             appendLine("- match_log.txt : full session log")
                                             appendLine("- engine_exit_report.txt : Android bot-process exit history queried at export, including retained earlier attempts")
+                                            if (gameExits != null) appendLine("- game_exit_report.txt  Android exit history for eFootball at export")
                                             if (ramReport.isNotBlank()) appendLine("- prime_ram.txt  Latest manual RAM readings and system reclaim measurement, with capture times")
                                             appendLine("- engine_events/ : native frame checks, ball transitions, match states, and process stop events")
                                             if (keeperLogs.isNotEmpty()) appendLine("- keeper_events/ : goalkeeper and scene state around goals and replays, plus local player positions at the first frame check disagreement")

@@ -13,11 +13,15 @@ import org.robolectric.annotation.ConscryptMode
 class BotRematchSocketTest {
     @Test fun secondRoundKeepsTheRoomsLocalPortAndForgetsThePreviousOpponent() {
         val port = PeerSlot.reserveEndpoint()
+        val socketField = PeerSlot::class.java.getDeclaredField("socket").apply { isAccessible = true }
+        val listener = socketField.get(PeerSlot) as java.net.DatagramSocket
         try {
             PeerSlot.arm(31L, 30L, "", "127.0.0.1", 42232)
             PeerSlot.engineAttached = true
             assertTrue(PeerSlot.ownsListener(port))
             PeerSlot.finishRound()
+            assertSame(listener, socketField.get(PeerSlot))
+            assertFalse(listener.isClosed)
             assertFalse(PeerSlot.engineAttached)
             assertFalse(PeerSlot.ownsListener(port))
             assertEquals(port, PeerSlot.reserveEndpoint())
@@ -26,5 +30,6 @@ class BotRematchSocketTest {
             assertEquals(52L, PeerSlot.gameUid)
             assertTrue(PeerSlot.ENGINE_PORT > 0 && PeerSlot.ENGINE_REFLEXIVE_PORT > 0)
         } finally { PeerSlot.disarm("test_end") }
+        assertTrue(listener.isClosed)
     }
 }

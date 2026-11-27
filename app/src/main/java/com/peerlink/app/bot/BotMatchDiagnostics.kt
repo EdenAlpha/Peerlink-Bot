@@ -44,6 +44,17 @@ internal object BotMatchDiagnostics {
         }.onFailure { AppState.appendLog("[BOT-DIAGNOSTICS] Could not save the report: ${it.javaClass.simpleName}") }
     }
 
+    fun gameExitReport(): String? {
+        if (android.os.Build.VERSION.SDK_INT < 30 || !PrimeClient.isAlive(timeoutMs = 500)) return null
+        val queriedAt = System.currentTimeMillis()
+        val reply = BotPerfetto.shell("dumpsys -t 3 activity exit-info jp.konami.pesam", 5_000)
+        return buildString {
+            appendLine("Android exit history for eFootball. Match the timestamps to the room.")
+            appendLine("queriedAtMs=$queriedAt exit=${reply.exitCode}")
+            appendLine(reply.output.take(32 * 1024).ifBlank { "Android returned no exit history." })
+        }
+    }
+
     enum class RamCleanup { COMPLETED, INCOMPLETE, PRIME_UNAVAILABLE }
 
     fun startMemoryGuard(ctx: Context, id: String, scope: CoroutineScope) = synchronized(guardLock) {
@@ -99,7 +110,6 @@ internal object BotMatchDiagnostics {
         }
         return runCatching {
             val dir = directory(ctx)
-            for (previous in pendingIds(dir)) runCatching { finish(ctx, previous, "next_room") }
             val script = ctx.assets.open("prime-room-cleanup.sh").bufferedReader().use { it.readText() }
             val result = BotPerfetto.shell(script, 30_000)
             record(ctx, id, "RAM cleanup exit=${result.exitCode}\n${result.output}")
@@ -121,6 +131,7 @@ internal object BotMatchDiagnostics {
         return runCatching {
             val dir = directory(ctx)
             check(dir.isDirectory || dir.mkdirs()) { "Could not open the scheduler recording folder" }
+            for (previous in pendingIds(dir)) runCatching { finish(ctx, previous, "next_recording") }
             val marker = File(dir, "$id.pending")
             check(marker.createNewFile()) { "Scheduler recording already exists" }
             val recording = Recording(id, pid, heapVerified)

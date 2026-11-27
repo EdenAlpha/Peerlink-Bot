@@ -157,16 +157,14 @@ object PeerSlot {
     }
 
     /** Reserve before the gate advertises a port; do not collide with the game's own UDP socket. */
-    @Synchronized fun reserveEndpoint(): Int = reserveEndpoint(0)
-
-    private fun reserveEndpoint(port: Int): Int {
+    @Synchronized fun reserveEndpoint(): Int {
         val existing = socket
         if (existing != null && !existing.isClosed) return existing.localPort
         val reserved = DatagramSocket(null)
         try {
             // A real game's host candidate can reach this phone directly;
             // fabricated-address packets arrive from the VPN on loopback.
-            reserved.bind(InetSocketAddress("0.0.0.0", port))
+            reserved.bind(InetSocketAddress("0.0.0.0", 0))
             socket = reserved
             return reserved.localPort
         } catch (error: Exception) { reserved.close(); throw error }
@@ -223,9 +221,10 @@ object PeerSlot {
         try {
             gameTargetPort = reserveEndpoint()
             val listener = requireNotNull(socket)
-            armed = true
-            openEngineSockets()
-            worker = thread(name = "peer-slot-rx") { receiveLoop(listener) }
+            armEngineSockets()
+            if (worker?.isAlive != true) {
+                worker = thread(name = "peer-slot-rx") { receiveLoop(listener) }
+            }
             AppState.appendLog("[BOT-SLOT  ] ferry armed: game uid=$oppUid bot uid=$botUid " +
                 (if (localIp.isNotBlank() && localPort > 0) "local=$localIp:$localPort" else "local address pending") +
                 " -- on $LOOPBACK_PEER_IP:${listener.localPort}")
@@ -237,21 +236,22 @@ object PeerSlot {
     }
 
     @Synchronized internal fun finishRound() {
-        val port = socket?.localPort ?: return
-        disarm("match_ended")
-        // Keep the port already advertised for this room. New round-specific sockets and
-        // learned routes are installed by arm() once both players are ready again.
-        reserveEndpoint(port)
+        if (socket == null) return
+        endRound("match_ended")
     }
 
-    @Synchronized fun disarm(reason: String = "peer_slot_disarm") {
+    private fun endRound(reason: String) {
         AppState.appendLog("[BOT-DIAG] PEERLINK_STOP component=packet_ferry reason=$reason observedAtMs=${SystemClock.elapsedRealtime()}")
         logFlow("before_disarm")
         armed = false
         engineAttached = false
         engineHeard = false
-        directGamePeer = null
         closeEngineSockets()
+        directGamePeer = null
+    }
+
+    @Synchronized fun disarm(reason: String = "peer_slot_disarm") {
+        endRound(reason)
         runCatching { socket?.close() }
         socket = null
         worker = null
@@ -270,7 +270,9 @@ object PeerSlot {
         val buf = ByteArray(UDP_RECEIVE_CAPACITY)
         val pkt = DatagramPacket(buf, buf.size)
         var rxCount = 0
-        while (armed && !s.isClosed) {
+        // The room owns its advertised port until it closes. Drain late datagrams
+        // between games so they cannot sit in the receive queue for the next round.
+        while (!s.isClosed) {
             pkt.length = buf.size
             val receiveCall = System.nanoTime()
             val receipt = try {
@@ -278,8 +280,9 @@ object PeerSlot {
                 FerryReceipt.now(receiveCall)
             } catch (error: Throwable) {
                 if (armed && !s.isClosed) noteDrop("game_receive_${error.javaClass.simpleName}")
-                if (!armed) break else continue
+                if (s.isClosed) break else continue
             }
+            if (!armed || socket !== s) continue
             val n = pkt.length
             if (n <= 0) continue
             rxCount++
@@ -411,7 +414,7 @@ object PeerSlot {
         }
     }
 
-    private fun openEngineSockets() {
+    private fun armEngineSockets() {
         val s4 = boundEngineSocket(LOOPBACK_PEER_IP, 0, true)
         engineSock4 = s4
         val reflexive = boundEngineSocket(REFLEXIVE_PEER_IP, 0, false)
@@ -426,6 +429,7 @@ object PeerSlot {
         AppState.appendLog("[BOT-SLOT  ] the engine's peer is $LOOPBACK_PEER_IP:$ENGINE_PORT" +
             " (host), $REFLEXIVE_PEER_IP:$ENGINE_REFLEXIVE_PORT (reflexive)" +
             (if (s6 != null) " and [::1]:$ENGINE_PORT" else " (IPv4 only)"))
+        armed = true
         startEngineReplyLoop(s4, reflexive, s6)
     }
 
@@ -483,6 +487,7 @@ object PeerSlot {
                         if (armed && !s.isClosed) noteDrop("engine_receive_${error.javaClass.simpleName}")
                         continue
                     }
+                    if (s.isClosed || !armed) break
                     val n = pkt.length
                     if (n > 0) {
                         val from = pkt.socketAddress as? InetSocketAddress

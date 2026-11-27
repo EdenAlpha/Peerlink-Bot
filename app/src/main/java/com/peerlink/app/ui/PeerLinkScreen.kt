@@ -54,6 +54,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import com.peerlink.app.BuildConfig
+import com.peerlink.app.bot.BotHeapRecording
 import com.peerlink.app.R
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -1588,6 +1589,7 @@ fun PrimeSetupScreen(
     val activationBusy = state == GodModeManager.State.CONNECTING || state == GodModeManager.State.BOOTSTRAPPING
     val isBusy = pairingBusy || activationBusy
     var master by remember { mutableStateOf(GodModeManager.isApexMasterEnabled()) }
+    var detailedRoomRecording by remember { mutableStateOf(BotHeapRecording.enabledForRooms(ctx)) }
     var instantVault by remember { mutableStateOf(GodModeManager.isInstantVaultEnabled()) }
     var memoryAggression by remember { mutableStateOf(GodModeManager.getMemoryAggression()) }
     var graphicsMode by remember { mutableStateOf(GodModeManager.getGraphicsMode()) }
@@ -1891,6 +1893,12 @@ fun PrimeSetupScreen(
                         }
                     }
                     Spacer(Modifier.height(11.dp))
+                    if (BuildConfig.DEBUG) {
+                        PrimeSwitchRow("Detailed room recording", "Collect allocation and CPU traces when you use Clear RAM and create room. Rooms can take longer to open.", detailedRoomRecording) {
+                            detailedRoomRecording = it
+                            BotHeapRecording.setEnabledForRooms(ctx, it)
+                        }
+                    }
                     if (capabilities.processFreeze) {
                         PrimeSwitchRow(
                             title = "Instant Vault",

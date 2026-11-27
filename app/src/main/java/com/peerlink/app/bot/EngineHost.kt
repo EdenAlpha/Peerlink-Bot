@@ -182,7 +182,10 @@ object EngineHost {
             enginePid = process.getInt("pid")
             AppState.appendLog("[BOT-DIAG] ENGINE_PROCESS pid=$enginePid " +
                 "foreground=${process.getString("foreground")} importance=${process.getInt("importance")}")
-            val result = request(EngineProtocol.PREPARE, Bundle().apply { putLong("uid", uid) }, 300)
+            val result = request(EngineProtocol.PREPARE, Bundle().apply {
+                putLong("uid", uid)
+                putBoolean("detailedMemory", BotHeapRecording.requested)
+            }, 300)
             startupRetryable = result.getBoolean("retryable", true)
             savedDatabaseSha256 = result.getString("savedDatabaseSha256")
             isReady = result.getBoolean("ok") && savedDatabaseSha256 == selected

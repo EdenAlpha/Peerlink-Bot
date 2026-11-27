@@ -54,6 +54,17 @@ internal object BotHeapRecording {
         AppState.appendLog("[BOT-MEMORY] $message")
     }
 
+    val requested get() = activeId != null
+
+    private const val DETAIL_KEY = "detailed_bot_room_recording"
+
+    fun enabledForRooms(ctx: Context) =
+        ctx.getSharedPreferences("peerlink_prefs", Context.MODE_PRIVATE).getBoolean(DETAIL_KEY, false)
+
+    fun setEnabledForRooms(ctx: Context, enabled: Boolean) {
+        ctx.getSharedPreferences("peerlink_prefs", Context.MODE_PRIVATE).edit().putBoolean(DETAIL_KEY, enabled).apply()
+    }
+
     fun newId() = "${System.currentTimeMillis()}-${UUID.randomUUID().toString().replace("-", "").take(12)}"
 
     private class RecorderUnavailable(message: String) : Exception(message)

@@ -155,13 +155,13 @@ class PeerLinkUiTest {
         val requested = mutableListOf<Boolean>()
         compose.setContent {
             PeerLinkTheme {
-                PlayPeerLinkContent(context, RoomState.Failed("Prime did not respond.", recordMemoryOnRetry = true),
+                PlayPeerLinkContent(context, RoomState.Failed("Prime did not respond.", clearRamOnRetry = true),
                     primeReady = true, primeActive = false, botSession = false, traffic = BotPacketCounts(),
                     onExportLogs = {}, onCreateRoom = { requested.add(it) })
             }
         }
         compose.onNodeWithText("Retry RAM cleanup and create room").performClick()
-        compose.onNodeWithText("Create room without recording").performClick()
+        compose.onNodeWithText("Create room without cleanup").performClick()
         compose.runOnIdle { assertEquals(listOf(true, false), requested) }
     }
 
