@@ -274,6 +274,33 @@ class PeerLinkUiTest {
         screenshot("prime-setup")
     }
 
+    @Test fun primeMemoryOffersBothActionsAndKeepsLatestReadingsVisible() {
+        val prefs = context.getSharedPreferences("godmode_prefs", Context.MODE_PRIVATE)
+        val original = prefs.all
+        val paired = "paired_trust_confirmed"
+        val reading = "prime_last_ram_report"
+        val reclaim = "prime_last_system_reclaim"
+        try {
+            prefs.edit().putBoolean(paired, true).putString(reading, "Available  1137 of 3744 MiB")
+                .putString(reclaim, "After 10 seconds  1400 MiB (+40 MiB)").commit()
+            GodModeManager.init(context)
+            GodModeManager.refreshSetupState(checkServer = false)
+            compose.setContent { PeerLinkTheme { PrimeSetupScreen(context, onBack = {}, onStartPairing = {}) } }
+            compose.onNodeWithText("Advanced controls").performScrollTo().performClick()
+            compose.onNodeWithTag("prime-ram-report").performScrollTo().assertIsDisplayed()
+            compose.onNodeWithTag("prime-system-reclaim").performScrollTo().assertIsDisplayed()
+            compose.onNodeWithText("Available  1137 of 3744 MiB").assertExists()
+            compose.onNodeWithText("After 10 seconds  1400 MiB (+40 MiB)").assertExists()
+        } finally {
+            prefs.edit().apply {
+                if (paired in original) putBoolean(paired, original[paired] as Boolean) else remove(paired)
+                putString(reading, original[reading] as? String)
+                putString(reclaim, original[reclaim] as? String)
+            }.commit()
+            GodModeManager.refreshSetupState(checkServer = false)
+        }
+    }
+
     @Test fun launcherIconRendersAsAnAndroidDrawable() {
         val icon = context.packageManager.getApplicationIcon(context.packageName)
         val bitmap = Bitmap.createBitmap(256, 256, Bitmap.Config.ARGB_8888)

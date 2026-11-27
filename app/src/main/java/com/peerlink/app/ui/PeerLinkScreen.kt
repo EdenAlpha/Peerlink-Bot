@@ -1615,9 +1615,31 @@ fun PrimeSetupScreen(
     var shellOk by remember { mutableStateOf<Boolean?>(null) }
     var shellBusy by remember { mutableStateOf(false) }
     var ramReport by remember { mutableStateOf(GodModeManager.lastRamReport()) }
+    var systemReclaim by remember { mutableStateOf(GodModeManager.lastSystemReclaim()) }
     var ramReportError by remember { mutableStateOf("") }
     var readingRam by remember { mutableStateOf(false) }
+    var reclaimingSystem by remember { mutableStateOf(false) }
     val shellScope = rememberCoroutineScope()
+
+    fun checkRam(system: Boolean) {
+        if (readingRam || reclaimingSystem) return
+        readingRam = !system
+        reclaimingSystem = system
+        ramReportError = ""
+        shellScope.launch {
+            try {
+                val result = withContext(Dispatchers.IO) {
+                    if (system) GodModeManager.trySystemReclaim() else GodModeManager.readRamReport()
+                }
+                if (!result.ok) ramReportError = result.output.ifBlank { "Prime could not get a response from Android." }
+                else if (system) systemReclaim = result.output
+                else ramReport = result.output
+            } finally {
+                readingRam = false
+                reclaimingSystem = false
+            }
+        }
+    }
     val (heroLabel, heroColor) = when {
         isActive -> "Prime Mode Active" to PL.green
         state == GodModeManager.State.PAIRED_IDLE && snap.bootstrapped -> "Prime Mode Ready" to PL.green
@@ -1847,22 +1869,21 @@ fun PrimeSetupScreen(
                     GhostBtn(
                         if (readingRam) "Reading RAM use…" else "Check RAM use",
                         Icons.Rounded.Memory, Modifier.testTag("prime-ram-report"),
-                        enabled = snap.primeServerAlive && !readingRam,
-                    ) {
-                        readingRam = true
-                        ramReportError = ""
-                        shellScope.launch {
-                            try {
-                                val result = withContext(Dispatchers.IO) { GodModeManager.readRamReport() }
-                                if (result.ok) ramReport = result.output
-                                else ramReportError = result.output.ifBlank { "Prime could not read Android’s RAM report." }
-                            } finally {
-                                readingRam = false
-                            }
-                        }
-                    }
+                        enabled = snap.primeServerAlive && !readingRam && !reclaimingSystem,
+                    ) { checkRam(false) }
+                    Spacer(Modifier.height(6.dp))
+                    GhostBtn(
+                        if (reclaimingSystem) "Measuring system reclaim…" else "Try system memory reclaim",
+                        Icons.Rounded.Tune, Modifier.testTag("prime-system-reclaim"),
+                        enabled = snap.primeServerAlive && !readingRam && !reclaimingSystem && !gameplay.matchActive,
+                    ) { checkRam(true) }
+                    Text("Use before a room to measure how much RAM Android can reclaim from system processes.", fontSize = 12.sp, color = PL.muted)
                     if (!snap.primeServerAlive) Text("Start the Prime engine to check RAM use.", fontSize = 12.sp, color = PL.muted)
                     if (ramReportError.isNotBlank()) Text(ramReportError, fontSize = 12.sp, color = PL.red)
+                    if (systemReclaim.isNotBlank()) {
+                        Spacer(Modifier.height(8.dp))
+                        SelectionContainer { Text(systemReclaim, fontSize = 12.sp, lineHeight = 17.sp, color = PL.inkSoft) }
+                    }
                     if (ramReport.isNotBlank()) {
                         Spacer(Modifier.height(8.dp))
                         SelectionContainer {

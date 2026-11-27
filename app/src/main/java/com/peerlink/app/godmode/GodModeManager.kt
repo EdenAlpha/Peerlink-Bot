@@ -10,8 +10,11 @@ import android.net.NetworkCapabilities
 import android.net.wifi.WifiManager
 import android.os.Build
 import android.provider.Settings
+import com.peerlink.app.bot.BotMode
 import com.peerlink.app.core.AppState
 import com.peerlink.app.core.PrimeGameplayTracker
+import com.peerlink.app.play.PlayRoomController
+import com.peerlink.app.play.RoomState
 import com.peerlink.app.service.LanLinkForegroundService
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -1056,6 +1059,8 @@ object GodModeManager {
         runLoggedShell(command, 15_000, "Reclaim eligible cached apps for the bot room")
 
     internal fun lastRamReport(): String = prefs().getString("prime_last_ram_report", "").orEmpty()
+    internal fun lastSystemReclaim(): String = prefs().getString("prime_last_system_reclaim", "").orEmpty()
+    private val systemReclaimRunning = AtomicBoolean(false)
 
     internal fun readRamReport(): PrimeExecResult {
         val result = runLoggedShell(PrimeRamReport.command, 22_000, "Read Android RAM usage")
@@ -1065,9 +1070,30 @@ object GodModeManager {
         } catch (_: IllegalArgumentException) {
             return PrimeExecResult("Android did not return a complete RAM report. Try again when the phone is idle.", -1, false)
         }
+        return saveRamReading("prime_last_ram_report", usage)
+    }
+
+    internal fun trySystemReclaim(): PrimeExecResult {
+        val room = PlayRoomController.state.value
+        if (AppState.isRunning.get() || BotMode.active || PrimeGameplayTracker.isMatchProtected() ||
+            (room != RoomState.Idle && room !is RoomState.Failed && room !is RoomState.FilesNeeded)) {
+            return PrimeExecResult("End the current session before trying system reclaim.", -1, false)
+        }
+        if (!systemReclaimRunning.compareAndSet(false, true))
+            return PrimeExecResult("A system reclaim measurement is already running.", -1, false)
+        return try {
+            val script = appContext.assets.open("prime-system-reclaim.sh").bufferedReader().use { it.readText() }
+            val result = runLoggedShell(script, 25_000, "Measure system memory reclaim")
+            if (result.ok) saveRamReading("prime_last_system_reclaim", result.output) else result
+        } finally {
+            systemReclaimRunning.set(false)
+        }
+    }
+
+    private fun saveRamReading(key: String, usage: String): PrimeExecResult {
         val time = java.text.DateFormat.getDateTimeInstance().format(java.util.Date())
         val report = "$time\n$usage"
-        prefs().edit().putString("prime_last_ram_report", report).apply()
+        prefs().edit().putString(key, report).apply()
         return PrimeExecResult(report, 0, true)
     }
 
