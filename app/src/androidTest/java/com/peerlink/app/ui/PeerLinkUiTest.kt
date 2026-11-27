@@ -201,6 +201,24 @@ class PeerLinkUiTest {
         screenshot("bot-traffic")
     }
 
+    @Test fun blockedBotRoomOffersANewRoomInsteadOfSendingThePlayerBackToTheOldCode() {
+        var replaced: String? = null
+        val reason = "eFootball is still holding this room for the previous match."
+        compose.setContent {
+            PeerLinkTheme {
+                Surface(Modifier.fillMaxSize(), color = PL.bg) {
+                    PlayPeerLinkContent(context, RoomState.Ready("123456789", recoveryReason = reason),
+                        false, false, true, BotPacketCounts(), onExportLogs = {},
+                        onReplaceRoom = { replaced = it })
+                }
+            }
+        }
+        compose.onNodeWithText(reason).assertIsDisplayed()
+        compose.onNodeWithTag("bot-open-game").assertDoesNotExist()
+        compose.onNodeWithTag("bot-replace-room").assertTextEquals("Create a new room").performClick()
+        compose.runOnIdle { assertEquals("123456789", replaced) }
+    }
+
     @Test fun failedBotRoomOffersDiagnostics() {
         var exported = 0
         compose.setContent {

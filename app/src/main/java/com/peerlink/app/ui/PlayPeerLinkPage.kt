@@ -85,6 +85,7 @@ internal fun PlayPeerLinkContent(
     onUseInstalled: () -> Unit = {},
     onOpenPrime: () -> Unit = {},
     onCreateRoom: (Boolean) -> Unit = { PlayRoomController.createRoom(recordMemory = it) },
+    onReplaceRoom: (String) -> Unit = PlayRoomController::replaceRoom,
 ) {
     var confirmEnd by rememberSaveable { mutableStateOf(false) }
     val copyRoom = { number: String ->
@@ -114,6 +115,7 @@ internal fun PlayPeerLinkContent(
         item(key = "room") {
             MatchRoomCard(room, onCopyRoom = copyRoom, onOpenGame = openGame, onExportLogs = onExportLogs,
                 onEnd = { confirmEnd = true }, canCreate = data.canCreateRoom, onCreateRoom = onCreateRoom,
+                onReplaceRoom = onReplaceRoom,
                 primeSetup = if (primeActive) null else onOpenPrime)
         }
         if (BuildConfig.DEBUG && room.canEditGameData) {
@@ -192,6 +194,7 @@ private fun MatchRoomCard(
     onEnd: () -> Unit,
     canCreate: Boolean,
     onCreateRoom: (Boolean) -> Unit,
+    onReplaceRoom: (String) -> Unit,
     primeSetup: (() -> Unit)?,
 ) {
     val shape = RoundedCornerShape(28.dp)
@@ -211,7 +214,7 @@ private fun MatchRoomCard(
                 Text("PEERLINK BOT", color = PL.gold, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp)
                 Text(
                     when (room) {
-                        is RoomState.Ready -> "Room ready"
+                        is RoomState.Ready -> if (room.recoveryReason == null) "Room ready" else "Room recovery"
                         is RoomState.Creating -> "Preparing your room"
                         is RoomState.Ending -> "Ending session"
                         is RoomState.Failed, is RoomState.FilesNeeded -> "Let's try again"
@@ -220,7 +223,8 @@ private fun MatchRoomCard(
                     color = PL.ink, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
                 )
             }
-            if (room is RoomState.Ready) Icon(Icons.Rounded.CheckCircle, null, tint = PL.green, modifier = Modifier.size(21.dp))
+            if (room is RoomState.Ready && room.recoveryReason == null)
+                Icon(Icons.Rounded.CheckCircle, null, tint = PL.green, modifier = Modifier.size(21.dp))
         }
 
         when (room) {
@@ -249,19 +253,26 @@ private fun MatchRoomCard(
                         fontWeight = FontWeight.Bold, letterSpacing = 1.sp),
                     maxLines = 1, softWrap = false,
                     autoSize = TextAutoSize.StepBased(minFontSize = 14.sp, maxFontSize = 34.sp, stepSize = 1.sp))
-                Text("Enter this number in eFootball to join the bot.", color = PL.inkSoft, fontSize = 13.sp, lineHeight = 19.sp)
-                if (room.note.isNotBlank()) {
-                    Text(roomStatusText(room.note), color = PL.goldSoft, fontSize = 12.sp, lineHeight = 17.sp)
-                }
-                room.diagnosticsNote?.let {
-                    Text(it, color = PL.inkSoft, fontSize = 12.sp, lineHeight = 17.sp,
+                if (room.recoveryReason != null) {
+                    Text(room.recoveryReason, color = PL.goldSoft, fontSize = 13.sp, lineHeight = 19.sp,
                         modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
+                    MatchPrimaryButton("Create a new room", Icons.Rounded.Refresh, Modifier.testTag("bot-replace-room"),
+                        enabled = canCreate) { onReplaceRoom(room.number) }
+                } else {
+                    Text("Enter this number in eFootball to join the bot.", color = PL.inkSoft, fontSize = 13.sp, lineHeight = 19.sp)
+                    if (room.note.isNotBlank()) {
+                        Text(roomStatusText(room.note), color = PL.goldSoft, fontSize = 12.sp, lineHeight = 17.sp)
+                    }
+                    room.diagnosticsNote?.let {
+                        Text(it, color = PL.inkSoft, fontSize = 12.sp, lineHeight = 17.sp,
+                            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
+                    }
+                    MatchPrimaryButton("Copy and open eFootball", Icons.Rounded.NorthEast, Modifier.testTag("bot-open-game")) {
+                        onCopyRoom(room.number)
+                        onOpenGame()
+                    }
+                    MatchSecondaryButton("Copy room number", Icons.Rounded.ContentCopy) { onCopyRoom(room.number) }
                 }
-                MatchPrimaryButton("Copy and open eFootball", Icons.Rounded.NorthEast, Modifier.testTag("bot-open-game")) {
-                    onCopyRoom(room.number)
-                    onOpenGame()
-                }
-                MatchSecondaryButton("Copy room number", Icons.Rounded.ContentCopy) { onCopyRoom(room.number) }
                 TextButton(onClick = onEnd, modifier = Modifier.align(Alignment.CenterHorizontally).testTag("bot-end-session")) {
                     Text("End bot session", color = PL.inkSoft, fontSize = 12.sp)
                 }

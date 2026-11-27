@@ -80,6 +80,12 @@ class PeerBotService : Service() {
             AppState.appendLog("[BOT-SVC   ] $text")
             active?.refresh()
         }
+
+        internal fun roomRecovery(number: String, reason: String?) {
+            if (number != roomNumber) return
+            com.peerlink.app.play.PlayRoomController.roomRecovery(number, reason)
+            if (reason != null) status("$reason Open PeerLink to create a new room.")
+        }
     }
 
     override fun onCreate() {

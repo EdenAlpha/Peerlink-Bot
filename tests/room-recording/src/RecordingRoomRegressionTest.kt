@@ -157,6 +157,33 @@ class RecordingRoomRegressionTest {
         return PlayRoomController.state.value
     }
 
+    @Test fun replacingABlockedRoomUsesTheNormalRoomBackendOnce() {
+        val oldRoom = create(Scenario.ENGINE_DIED, record = false) as RoomState.Ready
+        PlayRoomController.roomRecovery("00000000", "The old match is still assigned.")
+        PlayRoomController.replaceRoom(oldRoom.number)
+        assertEquals(oldRoom, PlayRoomController.state.value)
+
+        PlayRoomController.attach(object : BotRoomBackend {
+            override suspend fun createRoom(ctx: Context, allowResourceDownload: Boolean,
+                    verifyEngine: ((Int) -> Unit)?, onMatchStarting: (() -> Unit)?): String {
+                Phone.roomsOpened++
+                assertNull(verifyEngine)
+                return "87654321"
+            }
+        }, context)
+        PlayRoomController.roomRecovery(oldRoom.number, "The old match is still assigned.")
+        PlayRoomController.replaceRoom(oldRoom.number)
+        PlayRoomController.replaceRoom(oldRoom.number)
+        val deadline = System.nanoTime() + 5_000_000_000L
+        while ((PlayRoomController.state.value is RoomState.Ending || PlayRoomController.state.value is RoomState.Creating) &&
+            System.nanoTime() < deadline) Thread.sleep(20)
+
+        val replacement = PlayRoomController.state.value as RoomState.Ready
+        assertEquals("87654321", replacement.number)
+        assertNull(replacement.recoveryReason)
+        assertEquals(2, Phone.roomsOpened)
+    }
+
     @Test fun quotaDoesNotCloseTheRoomOrLeaveTheSchedulerWaitingForAMissingHeapTrace() {
         val room = create(Scenario.SLOTS_FULL)
         assertTrue(room.toString(), room is RoomState.Ready)

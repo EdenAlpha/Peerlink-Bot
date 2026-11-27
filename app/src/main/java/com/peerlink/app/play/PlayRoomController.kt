@@ -55,7 +55,8 @@ sealed interface RoomState {
     data class Creating(val note: String) : RoomState
 
     /** The bot has a room; [number] is shown copyable to type into eFootball. */
-    data class Ready(val number: String, val note: String = "", val diagnosticsNote: String? = null) : RoomState
+    data class Ready(val number: String, val note: String = "", val diagnosticsNote: String? = null,
+                     val recoveryReason: String? = null) : RoomState
 
     /** Room creation failed (gate down, not logged in, …). */
     data class Failed(val reason: String, val recordMemoryOnRetry: Boolean = false) : RoomState
@@ -73,6 +74,8 @@ sealed interface RoomState {
  * copyable, and clears it when the match is done.
  */
 object PlayRoomController {
+    private data class RoomOptions(val allowResourceDownload: Boolean, val recordMemory: Boolean)
+
 
     private val io = kotlinx.coroutines.CoroutineScope(
         kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO
@@ -86,6 +89,7 @@ object PlayRoomController {
 
     @Volatile
     private var appContext: Context? = null
+    private var roomOptions = RoomOptions(allowResourceDownload = false, recordMemory = false)
 
     /** Attach the bot's room service (called once the UI context exists). */
     fun attach(b: BotRoomBackend, ctx: Context) {
@@ -108,6 +112,7 @@ object PlayRoomController {
             )
             return
         }
+        roomOptions = RoomOptions(allowResourceDownload, recordMemory)
         _state.value = RoomState.Creating(if (recordMemory) "Freeing RAM before loading the bot…" else "The bot is opening a room at Konami…")
         io.launch {
             val recording = if (recordMemory) BotHeapRecording.newId() else null
@@ -193,8 +198,23 @@ object PlayRoomController {
         }
     }
 
+    internal fun roomRecovery(number: String, reason: String?) {
+        val code = number.filter { it.isLetterOrDigit() }
+        _state.update { current ->
+            if (current is RoomState.Ready && current.number == code) current.copy(recoveryReason = reason)
+            else current
+        }
+    }
+
+    @Synchronized internal fun replaceRoom(number: String) {
+        val current = _state.value as? RoomState.Ready ?: return
+        if (current.number == number && current.recoveryReason != null) stopSession(replacement = roomOptions)
+    }
+
     /** End the local bot session before allowing another room to be opened. */
-    @Synchronized fun endSession() {
+    @Synchronized fun endSession() = stopSession()
+
+    private fun stopSession(replacement: RoomOptions? = null) {
         if (_state.value is RoomState.Creating || _state.value is RoomState.Ending) return
         val ctx = appContext ?: return
         _state.value = RoomState.Ending
@@ -217,13 +237,20 @@ object PlayRoomController {
                     if (EngineHost.isReady) EngineHost.stop("user_end_session")
                 }
                 val stopped = withTimeoutOrNull(45_000L) {
-                    while (PeerBotService.running || EngineHost.isReady) delay(100L)
+                    while (PeerBotService.running || EngineHost.isReady || !BotMatchDriver.isIdle) delay(100L)
                     true
                 } == true
-                _state.value = if (stopped) RoomState.Idle
-                else RoomState.Failed("The bot is still closing. Wait a moment, then try again.")
+                synchronized(this@PlayRoomController) {
+                    _state.value = if (stopped) RoomState.Idle
+                    else RoomState.Failed("The bot is still closing. Wait a moment, then try again.",
+                        recordMemoryOnRetry = replacement?.recordMemory == true)
+                    if (stopped && replacement != null) {
+                        createRoom(replacement.allowResourceDownload, replacement.recordMemory)
+                    }
+                }
             } catch (error: Exception) {
-                _state.value = RoomState.Failed(error.message ?: "Couldn't end the bot session.")
+                _state.value = RoomState.Failed(error.message ?: "Couldn't end the bot session.",
+                    recordMemoryOnRetry = replacement?.recordMemory == true)
             }
         }
     }

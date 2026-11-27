@@ -10,11 +10,12 @@ class BotRoomRoundsTest {
     private class Fixture(val end: RoomRoundEnd, val replies: MutableList<Map<*, *>>) {
         var active = true
         var finalResult = false
-        var acceptReady = false
+        var lobbyAvailability = LobbyAvailability.WAITING
         var failedPreparations = 0
         var onWait: () -> Unit = {}
         val events = mutableListOf<String>()
         val messages = mutableListOf<String>()
+        val recovery = mutableListOf<Pair<Long, String?>>()
         val roomId = 4286L
         private var elapsed = 0L
 
@@ -41,8 +42,9 @@ class BotRoomRoundsTest {
             requestLobbyReady = { id, old ->
                 assertEquals(roomId, id); assertEquals(245L, old)
                 events += "ready"
-                acceptReady
+                lobbyAvailability
             },
+            reportRecovery = { recovery += elapsed to it },
             now = { elapsed },
             waitForRoom = { elapsed += 3000; onWait() },
         ).run(roomId, "412345")
@@ -66,7 +68,7 @@ class BotRoomRoundsTest {
 
     @Test fun readyCanReturnFromDisconnectWhenTheOldGoFlagIsStillSet() {
         val fixture = Fixture(RoomRoundEnd.DISCONNECTED, mutableListOf(room(2, "YES")))
-        fixture.acceptReady = true
+        fixture.lobbyAvailability = LobbyAvailability.OPEN
         fixture.run()
         assertEquals(listOf("first match", "room", "ready", "release", "prepare", "second match"), fixture.events)
     }
@@ -103,7 +105,36 @@ class BotRoomRoundsTest {
         val closed = Fixture(RoomRoundEnd.DISCONNECTED, mutableListOf(mapOf("result" to "ERR_ROOM_NOT_FOUND")))
         closed.run()
         assertEquals(listOf("first match", "room", "release"), closed.events)
-        assertTrue(closed.messages.last().contains("no longer available"))
+        assertTrue(closed.recovery.single().second.orEmpty().contains("no longer available"))
+    }
+
+    @Test fun releasedBotOffersNewRoomAfterRepeatedOldAssignmentsAndStillRecoversTheSameRoom() {
+        val replies = MutableList<Map<*, *>>(14) { room(2, "YES") }.apply { add(room(2)) }
+        val fixture = Fixture(RoomRoundEnd.DISCONNECTED, replies)
+        fixture.lobbyAvailability = BotRoomRounds.lobbyAvailability("ERR_ALREADY_MATCH",
+            mapOf("result" to "NOERR", "connecting_start_time" to 245L), 245L)
+        fixture.onWait = { if (replies.size == 14) fixture.finalResult = true }
+
+        fixture.run()
+
+        // Engine exited just after the first poll. The first stale reply observed
+        // with the process gone was at six seconds.
+        assertEquals(36_000L, fixture.recovery.first().first)
+        assertTrue(fixture.recovery.first().second.orEmpty().contains("previous match"))
+        assertEquals(listOf("prepare", "second match"), fixture.events.takeLast(2))
+        assertEquals(1, fixture.events.count { it == "release" })
+        assertNull(fixture.recovery.last().second)
+    }
+
+    @Test fun transientFailuresAndAnEngineStillReportingResultsCannotOfferReplacement() {
+        for (end in listOf(RoomRoundEnd.DISCONNECTED, RoomRoundEnd.ENGINE_STOPPED)) {
+            val fixture = Fixture(end, MutableList(15) { room(2, "YES") })
+            if (end == RoomRoundEnd.DISCONNECTED) fixture.lobbyAvailability = LobbyAvailability.PREVIOUS_MATCH
+            fixture.onWait = { if (fixture.replies.isEmpty()) fixture.active = false }
+            fixture.run()
+            assertTrue(fixture.recovery.isEmpty())
+            assertFalse("prepare" in fixture.events)
+        }
     }
 
     @Test fun actualReadyLoopRunsTwiceInSameRoomAndWaitsOutOldGoAndOldSession() {
@@ -125,7 +156,7 @@ class BotRoomRoundsTest {
                 if (old == null) CompletedRoomMatch(RoomRoundEnd.RESULT, start) else null
             },
             readRoom = { room(2) }, finishEngine = {}, prepareEngine = { null }, status = {},
-            resultOrProcessExit = { true }, requestLobbyReady = { _, _ -> false },
+            resultOrProcessExit = { true }, requestLobbyReady = { _, _ -> LobbyAvailability.WAITING },
         )
         rounds.run(id, "111222")
         assertEquals(listOf(id, id), ready)
@@ -162,6 +193,19 @@ class BotRoomRoundsTest {
         assertEquals(listOf(4, 7), lookups)
         assertEquals(400L, go?.confirmedSession?.get("connecting_start_time"))
         assertTrue(records.any { "state=previous" in it })
+    }
+
+    @Test fun aStaleAssignmentDuringRematchReadyAlsoOffersRecoveryUntilANewMatchArrives() {
+        var tick = 0
+        val notices = mutableListOf<String?>()
+        val go = BotRoomRounds.awaitGo(245L, { tick < 40 }, setReady = { "ERR_ALREADY_MATCH" },
+            readRoom = { room(2, "YES") },
+            readSession = { mapOf("result" to "NOERR", "connecting_start_time" to if (tick < 36) 245L else 246L) },
+            status = {}, log = {}, reportRecovery = notices::add, nowMs = { tick * 1000L }, wait = { tick++ })
+        assertEquals(246L, go?.confirmedSession?.get("connecting_start_time"))
+        assertEquals(2, notices.size)
+        assertTrue(notices.first().orEmpty().contains("previous match"))
+        assertNull(notices.last())
     }
 
     @Test fun firstRoomWaitsForBothSeatsAndRetriesReadyAfterReentry() {

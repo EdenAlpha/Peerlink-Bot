@@ -49,6 +49,7 @@ object BotMatchDriver {
     @Volatile private var driver: Thread? = null
     @Volatile private var stopping = false
     private val running get() = Thread.currentThread() === driver && !stopping
+    internal val isIdle get() = driver == null
 
     @Synchronized fun start(gate: KgsGate, rid: Long, roomNumber: String, onMatchStarting: (() -> Unit)?,
                             prepareNextEngine: (() -> Boolean) -> String?): Boolean {
@@ -105,11 +106,12 @@ object BotMatchDriver {
                     val result = flow.matchReady(gate, room, BotMode.declaredProfile())["result"]?.toString()
                     log("ROOM_RETURN_READY result=$result")
                     if (BotRoomRounds.canCheckSession(result)) {
-                        val assignment = BotRoomRounds.sessionAge(flow.gameSession(gate, room), lastStart)
-                        log("ROOM_RETURN_SESSION state=$assignment")
-                        assignment == "new"
-                    } else false
+                        val session = flow.gameSession(gate, room)
+                        log("ROOM_RETURN_SESSION state=${BotRoomRounds.sessionAge(session, lastStart)}")
+                        BotRoomRounds.lobbyAvailability(result, session, lastStart)
+                    } else LobbyAvailability.WAITING
                 },
+                reportRecovery = { PeerBotService.roomRecovery(roomNumber, it) },
             ).run(rid, roomNumber)
         } catch (error: Exception) {
             if (running) {
@@ -242,6 +244,7 @@ object BotMatchDriver {
                 setReady = { flow.matchReady(gate, rid, BotMode.declaredProfile())["result"]?.toString() },
                 readRoom = { flow.roomReply(gate, rid) }, readSession = { flow.gameSession(gate, rid) },
                 status = ::status, log = ::log,
+                reportRecovery = { PeerBotService.roomRecovery(roomNumber, it) },
             ) ?: return lostEngine()
             var gs = go.confirmedSession
             if (!running) return null
