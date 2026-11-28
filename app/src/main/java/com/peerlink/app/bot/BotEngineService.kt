@@ -433,7 +433,10 @@ class BotEngineService : Service() {
                 "$reason (native stage $advance)"
             }
             val state = snapshot()
-            if (state.matchConstructed && state.simulationInputReady) enteredGameplay = true
+            if (!enteredGameplay && state.matchConstructed && state.simulationInputReady) {
+                enteredGameplay = true
+                nextNativeSample = 0L
+            }
             sampleDiagnostics(state)
             logNativeState(state)
             val line = state.status(afterKickoff = enteredGameplay)

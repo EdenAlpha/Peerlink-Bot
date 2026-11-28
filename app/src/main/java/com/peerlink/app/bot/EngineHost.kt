@@ -21,6 +21,7 @@ object EngineHost {
     @Volatile private var ownerUid = 0L
     @Volatile private var service: Messenger? = null
     @Volatile private var lastRoundEnd: Pair<Int, RoomRoundEnd>? = null
+    @Volatile private var pitchLoadedPid = 0
     @Volatile private var checkResultPid = 0
     private var context: Context? = null
     @Volatile var enginePid = 0
@@ -51,9 +52,11 @@ object EngineHost {
                 if (pid != enginePid || stopRequestedAt != 0L) return
                 checkResultPid = if (data.getBoolean("checkResult")) pid else 0
                 data.getLongArray("state")?.let { values ->
+                    val pitchLoaded = EngineSnapshot(values).matchConstructed
+                    if (pitchLoaded) pitchLoadedPid = pid
                     AppState.appendLog("[BOT-NATIVE] state=${values.contentToString()} (frame counter at index 20)")
-                    if (BotHeapRecording.observing(enginePid) && EngineSnapshot(values).matchConstructed) {
-                        context?.let { BotHeapRecording.completed(it, enginePid, "pitch_loaded") }
+                    if (pitchLoaded && BotHeapRecording.observing(pid)) {
+                        context?.let { BotHeapRecording.completed(it, pid, "pitch_loaded") }
                     }
                 }
             } else if (message.what == EngineProtocol.DIAGNOSTIC) {
@@ -175,6 +178,7 @@ object EngineHost {
             stopRequestedAt = 0
             enginePid = 0
             lastRoundEnd = null
+            pitchLoadedPid = 0
             checkResultPid = 0
             engineStartedAt = System.currentTimeMillis()
             bind(owner)
@@ -257,6 +261,7 @@ object EngineHost {
             Bundle().apply { putInt("pid", pid) }, timeout = 3).getBoolean("ok")
     internal fun probePreviewCallback(): Boolean = request(EngineProtocol.PROBE_PREVIEW).getBoolean("ok")
     internal fun needsResultCheck(pid: Int) = pid > 0 && checkResultPid == pid
+    internal fun isPitchLoaded(pid: Int) = pid > 0 && pitchLoadedPid == pid
 
     internal fun roundEnd(pid: Int): RoomRoundEnd? = when {
         !isReady || enginePid != pid -> RoomRoundEnd.ENGINE_STOPPED

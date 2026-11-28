@@ -4,6 +4,21 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class RoomMemoryPressureTest {
+    @Test fun skipsRoutineCachedSweepOnceThePitchLoads() {
+        val policy = RoomMemoryPressure()
+        val totalMiB = 3743L
+        assertFalse(policy.shouldReclaim(0, 550, totalMiB, false))
+        assertTrue(policy.shouldReclaim(4_000, 544, totalMiB, false))
+        policy.attempted(4_000, 18)
+
+        // Repeated readings at the RAM level in the recorded match.
+        assertFalse(policy.shouldReclaim(124_000, 470, totalMiB, false, pitchLoaded = true))
+        assertFalse(policy.shouldReclaim(128_000, 467, totalMiB, false, pitchLoaded = true))
+        assertTrue(policy.shouldReclaim(132_000, 210, totalMiB, true, pitchLoaded = true))
+        policy.attempted(132_000, 0)
+        assertFalse(policy.shouldReclaim(136_000, 210, totalMiB, true, pitchLoaded = true))
+    }
+
     @Test fun requiresSustainedPressureAndBacksOffIfThereIsLittleToReclaim() {
         val policy = RoomMemoryPressure()
         assertFalse(policy.shouldReclaim(0, 1402, 3743, false))

@@ -9,8 +9,15 @@ internal class RoomMemoryPressure {
     private var criticalSample = false
     private var handledCritical = false
 
-    fun shouldReclaim(now: Long, availableMiB: Long, totalMiB: Long, androidLow: Boolean): Boolean {
+    fun shouldReclaim(
+        now: Long, availableMiB: Long, totalMiB: Long, androidLow: Boolean, pitchLoaded: Boolean = false,
+    ): Boolean {
         if (totalMiB <= 0 || availableMiB < 0) return false
+        // After the pitch loads, avoid a system-wide sweep for the setup reserve.
+        if (pitchLoaded && !androidLow) {
+            lowSamples = 0
+            return false
+        }
         val target = (totalMiB / 4).coerceIn(384, 1024)
         criticalSample = androidLow || availableMiB <= target / 2
         if (!androidLow && availableMiB >= target) {
