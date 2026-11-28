@@ -16,6 +16,7 @@ import com.peerlink.app.bot.BotMatchDiagnostics
 import com.peerlink.app.bot.BotMode
 import com.peerlink.app.bot.EngineHost
 import com.peerlink.app.bot.PeerSlot
+import com.peerlink.app.core.AppState
 import com.peerlink.app.godmode.OffscreenRoomProtection
 import com.peerlink.app.service.PeerBotService
 import com.peerlink.app.service.PeerLinkVpnService
@@ -57,7 +58,7 @@ sealed interface RoomState {
 
     /** The bot has a room; [number] is shown copyable to type into eFootball. */
     data class Ready(val number: String, val note: String = "", val diagnosticsNote: String? = null,
-                     val recoveryReason: String? = null) : RoomState
+                     val recoveryReason: String? = null, val offscreenNote: String? = null) : RoomState
 
     /** Room creation failed (gate down, not logged in, …). */
     data class Failed(val reason: String, val clearRamOnRetry: Boolean = false) : RoomState
@@ -170,6 +171,10 @@ object PlayRoomController {
                 val diagnosticsNote = listOfNotNull(cleanupNote, heapNote).joinToString(" ").ifBlank { null }
                 onRoomCreated(number, diagnosticsNote)
                 opened = true
+                val ready = _state.value as? RoomState.Ready
+                if (ready != null && (cleanup || AppState.isGodModeActive.get())) {
+                    OffscreenRoomProtection.startForRoom(ctx, ready.number)
+                }
             } catch (missing: com.peerlink.app.bot.GameResourcePacks.MissingResources) {
                 _state.value = RoomState.FilesNeeded(missing.missingFiles, missing.missingBytes, missing.totalFiles, cleanup)
             } catch (t: Throwable) {
@@ -207,6 +212,14 @@ object PlayRoomController {
                 is RoomState.Ready -> current.copy(note = note)
                 else -> current
             }
+        }
+    }
+
+    internal fun offscreenNote(number: String, note: String) {
+        _state.update { current ->
+            if (current is RoomState.Ready && current.number == number && current.recoveryReason == null)
+                current.copy(offscreenNote = note)
+            else current
         }
     }
 

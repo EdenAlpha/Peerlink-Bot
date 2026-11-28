@@ -109,10 +109,17 @@ internal fun PlayPeerLinkContent(
             return@open
         }
         val activity = ctx as? Activity
-        if (!primeActive || activity == null || roomNumber == null) {
-            if (runCatching { ctx.startActivity(launch) }.isFailure) {
+        fun launchOnMainDisplay() {
+            val options = ActivityOptions.makeBasic().setLaunchDisplayId(Display.DEFAULT_DISPLAY).toBundle()
+            if (runCatching { ctx.startActivity(launch, options) }.isFailure &&
+                runCatching { ctx.startActivity(launch) }.isFailure) {
                 Toast.makeText(ctx, "Open eFootball from your home screen", Toast.LENGTH_SHORT).show()
             }
+        }
+        val startsInBackground = OffscreenRoomProtection.canStartInBackground
+        if (startsInBackground && primeActive && roomNumber != null) OffscreenRoomProtection.startForRoom(ctx, roomNumber)
+        if (startsInBackground || !primeActive || activity == null || roomNumber == null) {
+            launchOnMainDisplay()
             return@open
         }
         openingGame = true
@@ -127,11 +134,7 @@ internal fun PlayPeerLinkContent(
                 }
                 if (activity.isFinishing || activity.isDestroyed || !OffscreenRoomProtection.roomReady(roomNumber)) return@launch
                 if (!prepared) Toast.makeText(ctx, "Off-screen protection unavailable", Toast.LENGTH_SHORT).show()
-                val options = ActivityOptions.makeBasic().setLaunchDisplayId(Display.DEFAULT_DISPLAY).toBundle()
-                if (runCatching { activity.startActivity(launch, options) }.isFailure &&
-                    runCatching { activity.startActivity(launch) }.isFailure) {
-                    Toast.makeText(ctx, "Open eFootball from your home screen", Toast.LENGTH_SHORT).show()
-                }
+                launchOnMainDisplay()
             } finally {
                 openingGame = false
             }
@@ -304,6 +307,10 @@ private fun MatchRoomCard(
                         Text(roomStatusText(room.note), color = PL.goldSoft, fontSize = 12.sp, lineHeight = 17.sp)
                     }
                     room.diagnosticsNote?.let {
+                        Text(it, color = PL.inkSoft, fontSize = 12.sp, lineHeight = 17.sp,
+                            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
+                    }
+                    room.offscreenNote?.let {
                         Text(it, color = PL.inkSoft, fontSize = 12.sp, lineHeight = 17.sp,
                             modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
                     }

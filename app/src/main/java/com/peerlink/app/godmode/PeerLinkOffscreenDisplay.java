@@ -4,6 +4,7 @@ import android.content.Context;
 import android.content.ContextWrapper;
 import android.hardware.display.DisplayManager;
 import android.hardware.display.VirtualDisplay;
+import android.os.Build;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.Process;
@@ -20,6 +21,11 @@ public final class PeerLinkOffscreenDisplay {
     private static final int SHELL_UID = 2000;
     // Framework's Android 15 DisplayManager.VIRTUAL_DISPLAY_FLAG_TRUSTED.
     private static final int TRUSTED = 1 << 10;
+    private static final int DESTROY_CONTENT_ON_REMOVAL = 1 << 8;
+    private static final int OWN_FOCUS = 1 << 14;
+    private static final int STEAL_TOP_FOCUS_DISABLED = 1 << 16;
+    // Display.getFlags() uses different bits from the virtual display request.
+    private static final int DISPLAY_STEAL_TOP_FOCUS_DISABLED = 1 << 12;
     private static final int WIDTH = 320;
     private static final int HEIGHT = 480;
     private static final int DENSITY_DPI = 160;
@@ -39,13 +45,19 @@ public final class PeerLinkOffscreenDisplay {
         try (BotRenderSurface surface = new BotRenderSurface(WIDTH, HEIGHT, new Handler(frames.getLooper()))) {
             // The display has no physical output and only renders its own content.
             // Android checks that the shell has ADD_TRUSTED_DISPLAY.
+            boolean separateFocus = room && Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM;
+            int flags = DisplayManager.VIRTUAL_DISPLAY_FLAG_OWN_CONTENT_ONLY | TRUSTED;
+            if (room) flags |= DESTROY_CONTENT_ON_REMOVAL;
+            if (separateFocus) flags |= OWN_FOCUS | STEAL_TOP_FOCUS_DISABLED;
             VirtualDisplay display = manager.createVirtualDisplay(
-                    "PeerLink off-screen", WIDTH, HEIGHT, DENSITY_DPI, surface.getSurface(),
-                    DisplayManager.VIRTUAL_DISPLAY_FLAG_OWN_CONTENT_ONLY | TRUSTED);
+                    "PeerLink off-screen", WIDTH, HEIGHT, DENSITY_DPI, surface.getSurface(), flags);
             if (display == null) {
                 throw new IllegalStateException("Android refused to allocate a virtual display.");
             }
             try {
+                if (separateFocus && (display.getDisplay().getFlags() & DISPLAY_STEAL_TOP_FOCUS_DISABLED) == 0) {
+                    throw new IllegalStateException("Android did not keep the main screen's focus.");
+                }
                 publishDisplayId(directory, display.getDisplay().getDisplayId());
                 published = true;
                 if (room) awaitRoomEnd(directory);
@@ -95,6 +107,7 @@ public final class PeerLinkOffscreenDisplay {
         new File(directory, "display-stop").delete();
         new File(directory, "helper-pid").delete();
         new File(directory, "display-helper.log").delete();
+        new File(directory, "launch.log").delete();
         new File(directory, "lease").delete();
         directory.delete();
     }
