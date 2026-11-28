@@ -57,7 +57,11 @@ internal class BotWireCapture(
         writer.write(header)
         writer.flush()
         bytesWritten = header.length.toLong()
-        thread = Thread(::writeLoop, "bot-wire-capture").apply { isDaemon = true; start() }
+        thread = Thread(::writeLoop, "bot-wire-capture").apply {
+            isDaemon = true
+            priority = Thread.NORM_PRIORITY - 1
+            start()
+        }
     }
 
     fun record(point: PacketFlowTrace.Point, vpn: Boolean, payload: ByteArray) {

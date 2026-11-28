@@ -4,10 +4,11 @@ import com.peerlink.app.core.AppState
 import android.os.Process
 import android.os.SystemClock
 import com.peerlink.app.bot.PacketFlowTrace.Point
-import java.net.DatagramPacket
-import java.net.DatagramSocket
+import java.io.IOException
 import java.net.InetSocketAddress
 import java.net.NetworkInterface
+import java.nio.ByteBuffer
+import java.nio.channels.DatagramChannel
 import kotlin.concurrent.thread
 
 /**
@@ -63,6 +64,7 @@ object PeerSlot {
     /** NativeBackendConfig.localPort -- the backend's bound peer socket. */
     const val BACKEND_PORT = 17024
 
+    private val DatagramChannel.localPort: Int get() = socket().localPort
     private const val UDP_RECEIVE_CAPACITY = 65535
     private const val DIAG_MAGIC = 0x504C4447
     private const val DIAG_VERSION = 2
@@ -98,7 +100,7 @@ object PeerSlot {
     private var gameTargetPort = 0
     @Volatile private var directGamePeer: InetSocketAddress? = null
 
-    @Volatile private var socket: DatagramSocket? = null
+    @Volatile private var socket: DatagramChannel? = null
     private val acceptedLocalSources = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
     private var worker: Thread? = null
     private val loggedClasses = java.util.Collections.synchronizedSet(HashSet<Int>())
@@ -115,7 +117,9 @@ object PeerSlot {
     private fun prioritizeForwarder() {
         val tid = Process.myTid()
         val name = Thread.currentThread().name
-        val target = Process.THREAD_PRIORITY_DISPLAY
+        // These workers block in receive between packets. Match the priority already
+        // used by our native packet loops when Android schedules a short transfer.
+        val target = Process.THREAD_PRIORITY_URGENT_DISPLAY
         runCatching {
             val before = Process.getThreadPriority(tid)
             if (before > target) Process.setThreadPriority(tid, target)
@@ -137,37 +141,44 @@ object PeerSlot {
         BotWireRecorder.recordTransfer(point, reflexive, payload, receipt)
     }
 
-    private fun forward(socket: DatagramSocket, packet: DatagramPacket, payload: ByteArray, point: Point,
-                        reflexive: Boolean, receipt: FerryReceipt, errorPrefix: String) {
+    private fun ByteBuffer.captureBytes(): ByteArray = ByteArray(remaining()).also { get(it) }
+
+    // A direct host datagram goes from the receive buffer to the socket before
+    // allocating its diagnostic copy. Each receiver owns its buffer until this returns.
+    private fun forward(socket: DatagramChannel, destination: InetSocketAddress, wire: ByteBuffer,
+                        point: Point, reflexive: Boolean, receipt: FerryReceipt, errorPrefix: String,
+                        capturedPayload: ByteArray? = null): ByteArray {
+        val start = wire.position()
+        val length = wire.remaining()
         val sendStart = System.nanoTime()
         try {
-            socket.send(packet)
+            if (socket.send(wire, destination) != length) throw IOException("Incomplete UDP send")
         } catch (error: Exception) {
+            wire.position(start)
+            val payload = capturedPayload ?: wire.captureBytes()
             recordUnsent(point, reflexive, payload, receipt)
             noteDrop(errorPrefix + error.javaClass.simpleName)
-            return
+            return payload
         }
         val sent = System.nanoTime()
         val sentWall = System.currentTimeMillis()
         val cpu = android.os.Debug.threadCpuTimeNanos()
         val cpuDelta = if (cpu >= receipt.cpu && receipt.cpu >= 0) cpu - receipt.cpu else -1
+        wire.position(start)
+        val payload = capturedPayload ?: wire.captureBytes()
         flowTrace.record(point, reflexive, payload.size)
         flowTrace.record(if (point == Point.GAME_RX) Point.ENGINE_TX else Point.GAME_TX, reflexive, payload.size)
         BotWireRecorder.recordTransfer(point, reflexive, payload, receipt, sendStart, sent, sentWall, cpuDelta)
+        return payload
     }
 
     /** Reserve before the gate advertises a port; do not collide with the game's own UDP socket. */
     @Synchronized fun reserveEndpoint(): Int {
         val existing = socket
-        if (existing != null && !existing.isClosed) return existing.localPort
-        val reserved = DatagramSocket(null)
-        try {
-            // A real game's host candidate can reach this phone directly;
-            // fabricated-address packets arrive from the VPN on loopback.
-            reserved.bind(InetSocketAddress("0.0.0.0", 0))
-            socket = reserved
-            return reserved.localPort
-        } catch (error: Exception) { reserved.close(); throw error }
+        if (existing != null && existing.isOpen) return existing.localPort
+        val reserved = boundSocket("0.0.0.0", 0, false)
+        socket = reserved
+        return reserved.localPort
     }
 
     /**
@@ -182,7 +193,7 @@ object PeerSlot {
     var onArmed: ((Int) -> Unit)? = null
 
     /** Observe without reserving a new socket during a service-stop race. */
-    internal fun ownsListener(port: Int): Boolean = armed && socket?.let { !it.isClosed && it.localPort == port } == true
+    internal fun ownsListener(port: Int): Boolean = armed && socket?.let { it.isOpen && it.localPort == port } == true
 
     /** TunnelEngine installs (and re-installs) the legacy injector lambda. */
     fun installInjector(fn: (ByteArray, String, Int, Int) -> Unit) {
@@ -265,72 +276,72 @@ object PeerSlot {
      * answers nothing: if the engine is not attached the frame is logged and
      * dropped, honestly.
      */
-    private fun receiveLoop(s: DatagramSocket) {
+    private fun receiveLoop(s: DatagramChannel) {
         prioritizeForwarder()
-        val buf = ByteArray(UDP_RECEIVE_CAPACITY)
-        val pkt = DatagramPacket(buf, buf.size)
+        val buf = ByteBuffer.allocateDirect(UDP_RECEIVE_CAPACITY)
         var rxCount = 0
         // The room owns its advertised port until it closes. Drain late datagrams
         // between games so they cannot sit in the receive queue for the next round.
-        while (!s.isClosed) {
-            pkt.length = buf.size
+        while (s.isOpen) {
+            buf.clear()
             val receiveCall = System.nanoTime()
-            val receipt = try {
-                s.receive(pkt)
-                FerryReceipt.now(receiveCall)
-            } catch (error: Throwable) {
-                if (armed && !s.isClosed) noteDrop("game_receive_${error.javaClass.simpleName}")
-                if (s.isClosed) break else continue
+            val source = try {
+                s.receive(buf) as InetSocketAddress
+            } catch (error: Exception) {
+                if (armed && s.isOpen) noteDrop("game_receive_${error.javaClass.simpleName}")
+                continue
             }
+            val receipt = FerryReceipt.now(receiveCall)
             if (!armed || socket !== s) continue
-            val n = pkt.length
+            buf.flip()
+            val n = buf.remaining()
             if (n <= 0) continue
             rxCount++
-            val data = buf.copyOf(n)
             if (rxCount <= 8 || rxCount % 1000 == 0) {
                 AppState.appendLog("[BOT-SLOT  ] game transport rx #$rxCount n=$n")
             }
 
-            val fromBackend = pkt.address.isLoopbackAddress && pkt.port == BACKEND_PORT
+            val fromBackend = source.address.isLoopbackAddress && source.port == BACKEND_PORT
             if (!fromBackend) {
                 // Raw traffic addressed to the server-advertised host candidate
                 // has no inner IP header. Carry it unchanged and reply to the
                 // same local socket (including the VPN's ordinary UDP proxy).
-                val sourceIp = pkt.address.hostAddress.orEmpty()
-                val ownedAddress = pkt.address.isLoopbackAddress || sourceIp == gameHostIp ||
-                    sourceIp in acceptedLocalSources || runCatching {
-                        NetworkInterface.getByInetAddress(pkt.address) != null
-                    }.getOrDefault(false).also { if (it) acceptedLocalSources.add(sourceIp) }
-                if (!ownedAddress) {
-                    noteDrop("unexpected_game_source")
-                    if (loggedClasses.add(-3)) AppState.appendLog(
-                        "[BOT-SLOT] rejected source=$sourceIp:${pkt.port} expectedGame=$gameHostIp:$gameHostPort " +
-                            "declaredBot=${BotMode.hostIp} listener=${s.localPort}")
-                    continue
+                if (directGamePeer != source) {
+                    val sourceIp = source.address.hostAddress.orEmpty()
+                    val ownedAddress = source.address.isLoopbackAddress || sourceIp == gameHostIp ||
+                        sourceIp in acceptedLocalSources || runCatching {
+                            NetworkInterface.getByInetAddress(source.address) != null
+                        }.getOrDefault(false).also { if (it) acceptedLocalSources.add(sourceIp) }
+                    if (!ownedAddress) {
+                        noteDrop("unexpected_game_source")
+                        if (loggedClasses.add(-3)) AppState.appendLog(
+                            "[BOT-SLOT] rejected source=$sourceIp:${source.port} expectedGame=$gameHostIp:$gameHostPort " +
+                                "declaredBot=${BotMode.hostIp} listener=${s.localPort}")
+                        continue
+                    }
+                    directGamePeer = source
                 }
-                directGamePeer = pkt.socketAddress as? InetSocketAddress
                 if (engineAttached) {
-                    sendToEngine(data, false, receipt)
-                    noteGameFrame(data)
+                    noteGameFrame(sendToEngine(buf, false, receipt))
                 } else {
-                    recordUnsent(Point.GAME_RX, false, data, receipt)
+                    recordUnsent(Point.GAME_RX, false, buf.captureBytes(), receipt)
                     noteDrop("game_to_engine_not_attached")
                 }
                 continue
             }
             if (n == 1) {
-                when (data[0].toInt() and 0xFF) {
+                when (buf.get(0).toInt() and 0xFF) {
                     0xFC -> runCatching {
                         // the native backend's own probe -- transport, not the
                         // game's P2P; acknowledged like any local socket.
-                        s.send(DatagramPacket(byteArrayOf(0xFDu.toByte()), 1, pkt.socketAddress))
+                        s.send(ByteBuffer.wrap(byteArrayOf(0xFDu.toByte())), source)
                     }
                     0xFF -> Unit // native keepalive -- nothing to answer
                 }
                 continue
             }
 
-            val stripped = stripDiagHeader(data)
+            val stripped = stripDiagHeader(buf.captureBytes())
             if (stripped == null) {
                 noteDrop("invalid_tunnel_header")
                 AppState.appendLog("[BOT-SLOT  ] rx #$rxCount diag-strip -> null (dropped)")
@@ -369,8 +380,7 @@ object PeerSlot {
                 }
                 continue
             }
-            sendToEngine(inner.udpPayload, true, receipt)
-            noteGameFrame(inner.udpPayload)
+            noteGameFrame(sendToEngine(ByteBuffer.wrap(inner.udpPayload), true, receipt, inner.udpPayload))
         }
     }
 
@@ -380,12 +390,12 @@ object PeerSlot {
      * transport is translated to the appropriate game route.
      */
     @Volatile
-    private var engineSock4: DatagramSocket? = null
-    @Volatile private var engineReflexiveSock4: DatagramSocket? = null
+    private var engineSock4: DatagramChannel? = null
+    @Volatile private var engineReflexiveSock4: DatagramChannel? = null
     @Volatile private var engineReflexivePeer4: InetSocketAddress? = null
 
     @Volatile
-    private var engineSock6: DatagramSocket? = null
+    private var engineSock6: DatagramChannel? = null
 
     /**
      * Where the engine's own packets come from: the engine binds its own UDP
@@ -402,10 +412,10 @@ object PeerSlot {
     @Volatile
     private var engineRxThread: Thread? = null
 
-    private fun boundEngineSocket(address: String, port: Int, reuse: Boolean): DatagramSocket {
-        val opened = DatagramSocket(null)
+    private fun boundSocket(address: String, port: Int, reuse: Boolean): DatagramChannel {
+        val opened = DatagramChannel.open()
         try {
-            opened.reuseAddress = reuse
+            opened.socket().reuseAddress = reuse
             opened.bind(InetSocketAddress(address, port))
             return opened
         } catch (error: Exception) {
@@ -415,12 +425,12 @@ object PeerSlot {
     }
 
     private fun armEngineSockets() {
-        val s4 = boundEngineSocket(LOOPBACK_PEER_IP, 0, true)
+        val s4 = boundSocket(LOOPBACK_PEER_IP, 0, true)
         engineSock4 = s4
-        val reflexive = boundEngineSocket(REFLEXIVE_PEER_IP, 0, false)
+        val reflexive = boundSocket(REFLEXIVE_PEER_IP, 0, false)
         engineReflexiveSock4 = reflexive
         val s6 = try {
-            boundEngineSocket("::1", s4.localPort, true)
+            boundSocket("::1", s4.localPort, true)
         } catch (error: Exception) {
             AppState.appendLog("[BOT-SLOT  ] no IPv6 loopback peer: ${error.message}")
             null
@@ -451,18 +461,19 @@ object PeerSlot {
      * the engine's OWN socket -- the address its own packets come from (see
      * [enginePeer4]). Until the engine has spoken there is nowhere to send.
      */
-    private fun sendToEngine(payload: ByteArray, reflexive: Boolean, receipt: FerryReceipt) {
+    private fun sendToEngine(wire: ByteBuffer, reflexive: Boolean, receipt: FerryReceipt, capturedPayload: ByteArray? = null): ByteArray {
         val v4Peer = if (reflexive) engineReflexivePeer4 ?: enginePeer4 else enginePeer4 ?: engineReflexivePeer4
         val v4Socket = if (reflexive) engineReflexiveSock4 else engineSock4
         val useV4 = v4Peer != null && v4Socket != null
         val peer = if (useV4) v4Peer else enginePeer6
         val sender = if (useV4) v4Socket else engineSock6
         if (peer == null || sender == null) {
+            val payload = capturedPayload ?: wire.captureBytes()
             recordUnsent(Point.GAME_RX, reflexive, payload, receipt)
             noteDrop("game_to_engine_no_socket")
-            return
+            return payload
         }
-        forward(sender, DatagramPacket(payload, payload.size, peer), payload, Point.GAME_RX, reflexive, receipt, "engine_send_")
+        return forward(sender, peer, wire, Point.GAME_RX, reflexive, receipt, "engine_send_", capturedPayload)
     }
 
     /**
@@ -470,38 +481,33 @@ object PeerSlot {
      * the VPN carrier and fabricated peer address. The originating candidate
      * selects its route; traffic on the other candidate cannot change it.
      */
-    private fun startEngineReplyLoop(s4: DatagramSocket, reflexive4: DatagramSocket, s6: DatagramSocket?) {
+    private fun startEngineReplyLoop(s4: DatagramChannel, reflexive4: DatagramChannel, s6: DatagramChannel?) {
         engineRxThread?.interrupt()
         engineRxThread = thread(name = "bot-engine-rx") {
-            fun pump(s: DatagramSocket, isV6: Boolean, reflexive: Boolean) {
+            fun pump(s: DatagramChannel, isV6: Boolean, reflexive: Boolean) {
                 prioritizeForwarder()
-                val buf = ByteArray(UDP_RECEIVE_CAPACITY)
-                val pkt = DatagramPacket(buf, buf.size)
-                while (armed && !s.isClosed) {
-                    pkt.length = buf.size
+                val buf = ByteBuffer.allocateDirect(UDP_RECEIVE_CAPACITY)
+                while (armed && s.isOpen) {
+                    buf.clear()
                     val receiveCall = System.nanoTime()
-                    val receipt = try {
-                        s.receive(pkt)
-                        FerryReceipt.now(receiveCall)
-                    } catch (error: Throwable) {
-                        if (armed && !s.isClosed) noteDrop("engine_receive_${error.javaClass.simpleName}")
+                    val from = try {
+                        s.receive(buf) as InetSocketAddress
+                    } catch (error: Exception) {
+                        if (armed && s.isOpen) noteDrop("engine_receive_${error.javaClass.simpleName}")
                         continue
                     }
-                    if (s.isClosed || !armed) break
-                    val n = pkt.length
-                    if (n > 0) {
-                        val from = pkt.socketAddress as? InetSocketAddress
-                        if (from != null) {
-                            val known = if (isV6) enginePeer6 != null else if (reflexive) engineReflexivePeer4 != null else enginePeer4 != null
-                            if (isV6) enginePeer6 = from else if (reflexive) engineReflexivePeer4 = from else enginePeer4 = from
-                            if (!known) {
-                                AppState.appendLog("[BOT-SLOT  ] the engine's own socket " +
-                                    "is $from (${if (isV6) "IPv6" else if (reflexive) "IPv4 reflexive" else "IPv4 host"}) -- " +
-                                    "the game's frames go there")
-                            }
-                        }
-                        forwardEngineFrame(buf.copyOf(n), reflexive, receipt)
+                    val receipt = FerryReceipt.now(receiveCall)
+                    if (!s.isOpen || !armed) break
+                    buf.flip()
+                    if (!buf.hasRemaining()) continue
+                    val known = if (isV6) enginePeer6 else if (reflexive) engineReflexivePeer4 else enginePeer4
+                    if (known != from) {
+                        if (isV6) enginePeer6 = from else if (reflexive) engineReflexivePeer4 = from else enginePeer4 = from
+                        if (known == null) AppState.appendLog("[BOT-SLOT  ] the engine's own socket " +
+                            "is $from (${if (isV6) "IPv6" else if (reflexive) "IPv4 reflexive" else "IPv4 host"}) -- " +
+                            "the game's frames go there")
                     }
+                    forwardEngineFrame(buf, reflexive, receipt)
                 }
             }
             val tr = thread(name = "bot-engine-reflexive-rx") { pump(reflexive4, false, true) }
@@ -512,11 +518,11 @@ object PeerSlot {
         }
     }
 
-    private fun forwardEngineFrame(payload: ByteArray, reflexive: Boolean, receipt: FerryReceipt) {
+    private fun forwardEngineFrame(wire: ByteBuffer, reflexive: Boolean, receipt: FerryReceipt) {
         if (!engineHeard) {
             engineHeard = true
             AppState.appendLog("[BOT-SLOT  ] the engine's own bytes are flowing " +
-                "(${payload.size} B first frame) -- the whole exchange is the " +
+                "(${wire.remaining()} B first frame) -- the whole exchange is the " +
                 "engine's from here")
         }
         if (!reflexive) {
@@ -524,13 +530,14 @@ object PeerSlot {
                 InetSocketAddress(gameHostIp, gameHostPort) else null
             val sender = socket
             if (direct == null || sender == null) {
-                recordUnsent(Point.ENGINE_RX, false, payload, receipt)
+                recordUnsent(Point.ENGINE_RX, false, wire.captureBytes(), receipt)
                 noteDrop("engine_to_game_no_host_route")
             } else {
-                forward(sender, DatagramPacket(payload, payload.size, direct), payload, Point.ENGINE_RX, false, receipt, "game_host_send_")
+                forward(sender, direct, wire, Point.ENGINE_RX, false, receipt, "game_host_send_")
             }
             return
         }
+        val payload = wire.captureBytes()
         if (gameIp.isBlank() || gamePort <= 0) {
             recordUnsent(Point.ENGINE_RX, true, payload, receipt)
             noteDrop("engine_to_game_no_vpn_route")
@@ -549,8 +556,8 @@ object PeerSlot {
             noteDrop("engine_to_game_no_ferry_socket")
             return
         }
-        forward(to, DatagramPacket(out, out.size, InetSocketAddress(LOOPBACK_PEER_IP, BACKEND_PORT)),
-            payload, Point.ENGINE_RX, true, receipt, "game_vpn_send_")
+        forward(to, InetSocketAddress(LOOPBACK_PEER_IP, BACKEND_PORT), ByteBuffer.wrap(out),
+            Point.ENGINE_RX, true, receipt, "game_vpn_send_", payload)
     }
 
     // ------------------------------------------------ wire helpers
@@ -696,7 +703,7 @@ object PeerSlot {
             noteDrop("game_to_engine_not_attached")
             return false
         }
-        sendToEngine(p.payload, true, receipt)
+        sendToEngine(ByteBuffer.wrap(p.payload), true, receipt, p.payload)
         return true
     }
 

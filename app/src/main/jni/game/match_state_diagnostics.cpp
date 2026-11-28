@@ -3,7 +3,9 @@
 #include "restart_diagnostics.h"
 #include <array>
 #include <atomic>
+#include <charconv>
 #include <cstring>
+#include <limits>
 #include <mutex>
 #include <unistd.h>
 
@@ -188,10 +190,19 @@ void capture(Snapshot &output, uintptr_t controller, const Checksum *verified = 
         kind, output.command_frame, output.check.state_frame, output.check.value);
 }
 
-template<class T, size_t N> void append_array(std::string &text, const std::array<T, N> &values) {
-    text += '[';
-    for (size_t i = 0; i < N; ++i) { if (i) text += ','; text += std::to_string(values[i]); }
-    text += ']';
+template<size_t N> void append_array(std::string &text, const std::array<uint32_t, N> &values) {
+    // A gameplay checksum alone has two arrays of 71 integers. Format a whole
+    // array in one pass on the calling thread without a string per value.
+    constexpr size_t per_value = std::numeric_limits<uint32_t>::digits10 + 2; // digits and comma
+    char buffer[2 + N * per_value];
+    char *out = buffer;
+    *out++ = '[';
+    for (size_t i = 0; i < N; ++i) {
+        if (i) *out++ = ',';
+        out = std::to_chars(out, buffer + sizeof(buffer), values[i]).ptr;
+    }
+    *out++ = ']';
+    text.append(buffer, static_cast<size_t>(out - buffer));
 }
 
 template<size_t N> std::array<uint32_t, N> copy_words(uintptr_t source) {
@@ -403,6 +414,7 @@ void record_keeper_sample(const KeeperScene &trace, const KeeperClock &clock, co
 }
 
 KeeperScene keeper_scene_at(uintptr_t controller, uint32_t frame) {
+    if (!peerlink_keeper_journal_active()) return {};
     std::lock_guard<std::mutex> lock(keeper_scene_mutex);
     const auto &trace = keeper_scene;
     // The state checksum can refer to the command frame immediately before the scene.
