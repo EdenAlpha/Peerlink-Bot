@@ -3,6 +3,7 @@
 # With no argument, compare priority before, during and after the second display.
 # With match, hold the display through gameplay and record priority and memory.
 # With offscreen, compare a room with and without a display that has no on-screen window.
+# With offscreen-match, keep the display off-screen throughout a match.
 # With restore, stop the running check and restore its temporary display setting.
 umask 077
 package=com.peerlink.app
@@ -153,7 +154,7 @@ offscreen_registered() {
 }
 
 start_offscreen() {
-  local checksum attempt
+  local lifetime="$1" checksum attempt
   [ -n "$offscreen_payload" ] || stop_check 'Use the packaged off-screen priority check.'
   printf '%s' "$offscreen_payload" | base64 -d > "$work/display-helper.jar" ||
     stop_check 'Could not unpack the off-screen display helper.'
@@ -161,7 +162,7 @@ start_offscreen() {
   [ "${checksum%% *}" = "$offscreen_sha256" ] || stop_check 'The display helper failed its checksum.'
   chmod 0444 "$work/display-helper.jar" || stop_check 'Could not protect the display helper.'
   (
-    CLASSPATH="$work/display-helper.jar" exec app_process /system/bin PeerLinkOffscreenDisplay "$work"
+    CLASSPATH="$work/display-helper.jar" exec app_process /system/bin PeerLinkOffscreenDisplay "$work" "$lifetime" "$$"
   ) </dev/null > "$work/display-helper.log" 2>&1 &
   for attempt in 1 2 3 4 5 6 7 8; do
     [ ! -f "$work/cancel" ] || stop_check 'Check cancelled.'
@@ -397,7 +398,7 @@ measure() {
   echo "$$" > "$work/pid"
   local previous initial_display_setting ids display attempt settle grace base_low base_high panel_low panel_high
   local android_user="$1" bot_pid="$2" mode="$3" game_pid='' low high phase_input baseline_input panel_input
-  printf 'PeerLink priority check v7 (%s). Android user %s, bot PID %s. Lower scores receive stronger protection against low-memory kills.\n' "$mode" "$android_user" "$bot_pid"
+  printf 'PeerLink priority check v8 (%s). Android user %s, bot PID %s. Lower scores receive stronger protection against low-memory kills.\n' "$mode" "$android_user" "$bot_pid"
   local initial_score
   if initial_score=$(score "$bot_pid" "$engine"); then
     printf 'At script start, before verifying the game screen: bot score %s (outside the comparison).\n' "$initial_score"
@@ -456,18 +457,20 @@ measure() {
   local current
   current=$(display_setting) || stop_check 'Android could not recheck the display setting.'
   [ "$current" = "$previous" ] || stop_check 'The display setting changed before the test.'
-  if [ "$mode" = offscreen ]; then
-    start_offscreen
-  else
-    printf '%s\n' "$previous" > "$work/previous" || stop_check 'Could not save the display setting.'
-    write_display_setting put global "$key" "$panel" || stop_check 'Android could not enable the simulated display.'
-    display=''
-    for attempt in 1 2 3 4 5; do
-      ids=$(overlay_ids) || stop_check 'Android stopped reporting its displays.'
-      case "$ids" in '') sleep 1 ;; *[!0-9]*) stop_check 'The new display could not be identified uniquely.' ;; *) display=$ids; break ;; esac
-    done
-    [ -n "$display" ] || stop_check 'Android did not create the simulated display.'
-  fi
+  case "$mode" in
+    offscreen) start_offscreen 180 ;;
+    offscreen-match) start_offscreen 1020 ;;
+    *)
+      printf '%s\n' "$previous" > "$work/previous" || stop_check 'Could not save the display setting.'
+      write_display_setting put global "$key" "$panel" || stop_check 'Android could not enable the simulated display.'
+      display=''
+      for attempt in 1 2 3 4 5; do
+        ids=$(overlay_ids) || stop_check 'Android stopped reporting its displays.'
+        case "$ids" in '') sleep 1 ;; *[!0-9]*) stop_check 'The new display could not be identified uniquely.' ;; *) display=$ids; break ;; esac
+      done
+      [ -n "$display" ] || stop_check 'Android did not create the simulated display.'
+      ;;
+  esac
   timeout 8 am start --user "$android_user" --display "$display" -a android.intent.action.MAIN \
     -c android.intent.category.LAUNCHER -n "$package/.ui.MainActivity" || stop_check 'Android could not open PeerLink on the second display.'
   sleep 2
@@ -488,7 +491,11 @@ measure() {
           fi
           echo 'Off-screen priority check finished.'
         else
-          printf '\nWindow ready. Join the room and play one match. Recording for up to 15 minutes.\n'
+          if [ "$mode" = offscreen-match ]; then
+            printf '\nOff-screen display ready. Join the room and play one match. Recording for up to 15 minutes.\n'
+          else
+            printf '\nWindow ready. Join the room and play one match. Recording for up to 15 minutes.\n'
+          fi
           record_priorities "$display" 900 || return 1
           echo 'Recording reached its time limit.'
         fi
@@ -538,10 +545,10 @@ case "${1-}" in
     release_check; exit $? ;;
   '') mode=compare ;;
   match) mode=match ;;
-  offscreen)
+  offscreen|offscreen-match)
     [ -n "$offscreen_payload" ] || stop_check 'Use the packaged off-screen priority check.'
-    mode=offscreen ;;
-  *) echo 'Run without arguments to compare priority, with match to record a match, with offscreen to check an off-screen display, or with restore to stop.'; exit 1 ;;
+    mode=$1 ;;
+  *) echo 'Use match, offscreen, offscreen-match, or restore. Run without arguments for the visible priority comparison.'; exit 1 ;;
 esac
 
 android_user=$(timeout 3 am get-current-user) || stop_check 'Prime could not read the current Android user.'
@@ -564,6 +571,8 @@ if [ "$mode" = match ]; then
   printf 'Recording started. When the small PeerLink window appears in eFootball, join your room and play one match.\n'
 elif [ "$mode" = offscreen ]; then
   printf 'Off-screen check started. Leave eFootball on its title screen for about two and a half minutes.\n'
+elif [ "$mode" = offscreen-match ]; then
+  printf 'Off-screen match recording started. When eFootball opens, wait about 10 seconds, then join your room.\n'
 else
   printf 'Check started. If eFootball stays in the background, open it from Home or Recents. Leave the title screen visible until the report finishes.\n'
 fi

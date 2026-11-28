@@ -57,6 +57,7 @@ cases = {
     "match_no_window": "The window could not be verified on the second display",
     "offscreen_ready": "Off-screen priority check finished.",
     "offscreen_denied": "Requires ADD_TRUSTED_DISPLAY permission",
+    "offscreen_match_bot_exit": "process=com.peerlink.app:botengine reason=3 (LOW_MEMORY)",
 }
 
 def run(case):
@@ -88,8 +89,9 @@ def run(case):
         (base / 'setting').write_text(initial + '\n')
         env = dict(os.environ, PATH=str(exe) + ':' + os.environ['PATH'], FIX=temp, CASE=case)
         live = case.startswith("match_")
+        offscreen_match = case.startswith("offscreen_match_")
         command = ["sh", str(downloaded)]
-        mode = ["offscreen"] if offscreen else ["match"] if live else []
+        mode = ["offscreen-match"] if offscreen_match else ["offscreen"] if offscreen else ["match"] if live else []
         start = subprocess.run(
             command + mode,
             text=True, capture_output=True, env=env, timeout=4,
@@ -97,7 +99,12 @@ def run(case):
         if case == 'no_bot':
             assert start.returncode != 0 and cases[case] in start.stdout and not lock.exists(), start
             return
-        expected_start = "Off-screen check started" if offscreen else "Recording started" if live else "Check started"
+        if offscreen_match:
+            expected_start = "Off-screen match recording started"
+        elif offscreen:
+            expected_start = "Off-screen check started"
+        else:
+            expected_start = "Recording started" if live else "Check started"
         assert start.returncode == 0 and expected_start in start.stdout, start
         report = next(download.glob('PeerLink-priority-*.txt'))
         stop_requested = False
@@ -125,11 +132,16 @@ def run(case):
             else:
                 assert "Window ready" in result and "MemAvailable:" in result, result
             assert "Restored the original simulated-display setting" in result, result
-        if case in ("match_bot_exit", "match_game_exit"):
+        if case in ("match_bot_exit", "match_game_exit", "offscreen_match_bot_exit"):
             assert "Process changed" in result and "pid=17099" not in result, result
         if offscreen:
             assert not (base / "setting-writes").exists() and not (base / "virtual-display").exists(), result
+        if offscreen and not offscreen_match:
             assert "Without a second display." in result, result
+        if offscreen_match:
+            assert "Without a second display." not in result, result
+            assert "Off-screen display ready." in result and "Off-screen display closed." in result, result
+            assert "--display 52" in calls, calls
         if case == "offscreen_ready":
             assert "--display 52" in calls and "Off-screen display closed." in result, (calls, result)
             baseline, projected = result.split("On the off-screen display.", 1)

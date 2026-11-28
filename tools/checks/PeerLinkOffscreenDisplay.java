@@ -21,13 +21,19 @@ public final class PeerLinkOffscreenDisplay {
     private static final int WIDTH = 320;
     private static final int HEIGHT = 480;
     private static final int DENSITY_DPI = 160;
-    private static final long MAX_LIFETIME_MS = 180_000;
+    private static final int MAX_LIFETIME_SECONDS = 1_020;
 
     public static void main(String[] args) throws Exception {
-        if (args.length != 1 || Process.myUid() != SHELL_UID) {
+        if (args.length != 3 || Process.myUid() != SHELL_UID) {
             throw new IllegalArgumentException("Run the display check from Prime Shell.");
         }
         File directory = new File(args[0]);
+        int lifetime = Integer.parseInt(args[1]);
+        int ownerPid = Integer.parseInt(args[2]);
+        if (lifetime < 1 || lifetime > MAX_LIFETIME_SECONDS || ownerPid < 2) {
+            throw new IllegalArgumentException("Invalid display lifetime or recorder PID.");
+        }
+        File recorder = new File("/proc/" + ownerPid);
         File stop = new File(directory, "display-stop");
         DisplayManager manager = shellDisplayManager();
         HandlerThread frames = new HandlerThread("PeerLink-display-frames");
@@ -43,8 +49,8 @@ public final class PeerLinkOffscreenDisplay {
             }
             try {
                 publishDisplayId(directory, display.getDisplay().getDisplayId());
-                long deadline = SystemClock.elapsedRealtime() + MAX_LIFETIME_MS;
-                while (directory.isDirectory() && !stop.exists()
+                long deadline = SystemClock.elapsedRealtime() + 1_000L * lifetime;
+                while (recorder.isDirectory() && directory.isDirectory() && !stop.exists()
                         && SystemClock.elapsedRealtime() < deadline) {
                     Thread.sleep(250);
                 }

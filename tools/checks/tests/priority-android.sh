@@ -23,7 +23,8 @@ sleep)
   esac
   if [ "$CASE:$1" = manual_open:3 ] && [ -f "$FIX/launch_failed" ]; then touch "$FIX/game_front"; fi
   case "$CASE:$1" in
-    match_bot_exit:10|match_game_exit:10) touch "$FIX/exit" ;;
+    match_bot_exit:10|offscreen_match_bot_exit:10) touch "$FIX/bot-exited" ;;
+    match_game_exit:10) touch "$FIX/game-exited" ;;
     match_cancel:10)
       touch "$FIX/recording"
       for attempt in 1 2 3 4 5 6 7 8 9 10; do
@@ -114,6 +115,9 @@ cmd)
 app_process)
   [ "$1" = /system/bin ] && [ "$2" = PeerLinkOffscreenDisplay ] || exit 1
   [ "$(stat -c %a "$CLASSPATH")" = 444 ] || exit 1
+  lifetime=180
+  [ "$CASE" != offscreen_match_bot_exit ] || lifetime=1020
+  [ "$4" = "$lifetime" ] && [ "$5" = "$(cat "$3/pid")" ] || exit 1
   if [ "$CASE" = offscreen_denied ]; then
     echo 'SecurityException: Requires ADD_TRUSTED_DISPLAY permission to create a trusted virtual display.'
     exit 1
@@ -131,11 +135,11 @@ ps)
   echo '10541 800001 com.peerlink.app'
   echo '1010541 800018 com.peerlink.app:botengine'
   p=800002; [ "$phase:$CASE" != panel:bot_restarted ] || p=810002
-  if [ "$CASE" != no_bot ] && { [ "$CASE" != match_bot_exit ] || [ ! -f "$FIX/exit" ]; }; then
+  if [ "$CASE" != no_bot ] && [ ! -f "$FIX/bot-exited" ]; then
     echo "10541 $p com.peerlink.app:botengine"
   fi
   g=800003; [ "$phase:$CASE" != panel:game_restarted ] || g=810003
-  if [ "$CASE" != match_game_exit ] || [ ! -f "$FIX/exit" ]; then
+  if [ ! -f "$FIX/game-exited" ]; then
     echo "10642 $g jp.konami.pesam"
   fi ;;
 dumpsys)
