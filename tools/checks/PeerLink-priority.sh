@@ -334,18 +334,20 @@ measure() {
   echo "$$" > "$work/pid"
   local previous initial_display_setting ids display attempt settle grace base_low base_high panel_low panel_high
   local android_user="$1" bot_pid="$2" mode="$3" game_pid='' low high phase_input baseline_input panel_input
-  printf 'PeerLink priority check v5. Android user %s, bot PID %s. Lower scores receive stronger protection against low-memory kills.\n' "$android_user" "$bot_pid"
+  printf 'PeerLink priority check v6 (%s). Android user %s, bot PID %s. Lower scores receive stronger protection against low-memory kills.\n' "$mode" "$android_user" "$bot_pid"
   local initial_score
   if initial_score=$(score "$bot_pid" "$engine"); then
     printf 'At script start, before verifying the game screen: bot score %s (outside the comparison).\n' "$initial_score"
   fi
-  grace=$(dumpsys -t 4 activity settings | awk -F= '
-    $1 ~ /^[[:space:]]*top_to_(fgs|almost_perceptible)_grace_duration$/ && $2 ~ /^[0-9]+$/ {
-      if ($2 > max+0) max=$2
-    }
-    END { print (max+0 > 15000 ? max : 15000) }')
-  [ "$grace" -le 120000 ] || stop_check 'This phone has a foreground grace period longer than two minutes.'
-  settle=$(( (grace + 999) / 1000 + 5 ))
+  if [ "$mode" = compare ]; then
+    grace=$(dumpsys -t 4 activity settings | awk -F= '
+      $1 ~ /^[[:space:]]*top_to_(fgs|almost_perceptible)_grace_duration$/ && $2 ~ /^[0-9]+$/ {
+        if ($2 > max+0) max=$2
+      }
+      END { print (max+0 > 15000 ? max : 15000) }')
+    [ "$grace" -le 120000 ] || stop_check 'This phone has a foreground grace period longer than two minutes.'
+    settle=$(( (grace + 999) / 1000 + 5 ))
+  fi
   previous=$(display_setting) || previous=unavailable
   case "$previous" in
     ''|null) echo 'Simulated display setting is off at startup.' ;;
@@ -353,13 +355,29 @@ measure() {
     *) echo 'A simulated display is already configured at startup.' ;;
   esac
   open_game
-  check_phase 'Before' none
-  base_low=$low; base_high=$high; baseline_input=$phase_input
+  if [ "$mode" = match ]; then
+    # Opening the window for a live match only requires the two game processes.
+    # A foreground comparison is already available from the separate check.
+    for attempt in 1 2 3 4 5; do
+      game_pid=$(process_pid "$game") && break
+      [ "$attempt" -eq 5 ] || sleep 1
+    done
+    [ -n "$game_pid" ] || stop_check 'The eFootball process could not be found.'
+    if [ "$(process_pid "$engine")" != "$bot_pid" ]; then
+      record_exit "$package" "$bot_pid"
+      stop_check 'The original bot process ended before the match window opened.'
+    fi
+    initial_score=$(score "$bot_pid" "$engine") || initial_score=unavailable
+    printf 'Immediate reading before opening the window. Bot score %s, eFootball PID %s.\n' "$initial_score" "$game_pid"
+  else
+    check_phase 'Before' none
+    base_low=$low; base_high=$high; baseline_input=$phase_input
+  fi
 
   initial_display_setting=$previous
-  previous=$(display_setting) || stop_check 'Only the baseline was measured. Android did not confirm the display setting.'
+  previous=$(display_setting) || stop_check 'Android did not confirm the display setting.'
   if [ "$initial_display_setting" != unavailable ] && [ "$initial_display_setting" != "$previous" ]; then
-    stop_check 'The display setting changed during the baseline.'
+    stop_check 'The display setting changed during setup.'
   fi
   case "$previous" in ''|null) ;; *) stop_check 'A simulated display is already configured.' ;; esac
   ids=$(overlay_ids) || stop_check 'Android did not list its displays.'
@@ -384,7 +402,6 @@ measure() {
     for attempt in 1 2 3 4 5; do
       [ ! -f "$work/cancel" ] || stop_check 'Check cancelled.'
       if check_windows "$display"; then
-        printf 'Baseline bot score %s..%s before the window.\n' "$base_low" "$base_high"
         record_match "$display"
         return $?
       fi
@@ -444,9 +461,13 @@ mkdir "$work" 2>/dev/null || stop_check 'A check is already active. After an int
 if ! mkdir -p "$downloads" || ! : > "$report" || ! cp "$0" "$work/run.sh"; then
   release_check; stop_check 'Prime could not prepare the report in Downloads.'
 fi
-# Android services receive copies of the shell command's descriptors. Only cat
-# should open the Downloads file. Give the worker a pipe for stdout AND stderr.
-(trap '' HUP; sh "$work/run.sh" --measure "$android_user" "$bot_pid" "$mode" 2>&1 | cat >> "$report") </dev/null >/dev/null 2>&1 &
+# Exec a fresh shell so mksh closes the saved Prime Shell output descriptors.
+# Only cat opens the Downloads file. Android services receive a pipe.
+(
+  trap '' HUP
+  exec sh -c 'sh "$1" --measure "$2" "$3" "$4" 2>&1 | cat >> "$5"' \
+    sh "$work/run.sh" "$android_user" "$bot_pid" "$mode" "$report"
+) </dev/null >/dev/null 2>&1 &
 if [ "$mode" = match ]; then
   printf 'Recording started. When the small PeerLink window appears in eFootball, join your room and play one match.\n'
 else

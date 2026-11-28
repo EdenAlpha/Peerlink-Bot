@@ -27,9 +27,9 @@ cases = {
     "list_has_value": "already configured",
     "list_empty_value": "stronger protection while",
     "error_as_success": "stronger protection while",
-    "both_reads_denied": "Only the baseline was measured",
-    "invalid_list": "Only the baseline was measured",
-    "list_has_no_output": "Only the baseline was measured",
+    "both_reads_denied": "Android did not confirm the display setting",
+    "invalid_list": "Android did not confirm the display setting",
+    "list_has_no_output": "Android did not confirm the display setting",
     "put_denied": "could not enable the simulated display",
     "better": "stronger protection while",
     "unchanged": "no measured difference",
@@ -49,6 +49,10 @@ cases = {
     "user_changed": "Kept your current selection",
     "restore_denied": "Display restore needs attention",
     "no_bot": "First tap Create room",
+    "match_bot_exit": "process=com.peerlink.app:botengine reason=3 (LOW_MEMORY)",
+    "match_game_exit": "process=jp.konami.pesam reason=3 (LOW_MEMORY)",
+    "match_cancel": "Recording stopped from Prime Shell",
+    "match_no_window": "The window could not be verified on the second display",
 }
 
 def run(case):
@@ -71,15 +75,26 @@ def run(case):
         initial = {'already_set':'640x480/160','list_has_value':'640x480/160','list_empty_value':'','original_empty':''}.get(case,'null')
         (base / 'setting').write_text(initial + '\n')
         env = dict(os.environ, PATH=str(exe) + ':' + os.environ['PATH'], FIX=temp, CASE=case)
-        start = subprocess.run(['sh', str(downloaded)], text=True, capture_output=True, env=env, timeout=4)
+        live = case.startswith("match_")
+        command = ["sh", str(downloaded)]
+        start = subprocess.run(
+            command + (["match"] if live else []),
+            text=True, capture_output=True, env=env, timeout=4,
+        )
         if case == 'no_bot':
             assert start.returncode != 0 and cases[case] in start.stdout and not lock.exists(), start
             return
-        assert start.returncode == 0 and 'Check started' in start.stdout, start
+        expected_start = "Recording started" if live else "Check started"
+        assert start.returncode == 0 and expected_start in start.stdout, start
         report = next(download.glob('PeerLink-priority-*.txt'))
+        stop_requested = False
         deadline = time.monotonic() + 12
         while time.monotonic() < deadline:
             contents = report.read_text()
+            if case == "match_cancel" and not stop_requested and (base / "recording").exists():
+                stopped = subprocess.run(command + ["restore"], text=True, capture_output=True, env=env, timeout=4)
+                assert stopped.returncode == 0 and "Cancellation requested" in stopped.stdout, stopped
+                stop_requested = True
             if cases[case] in contents and not lock.exists():
                 break
             if case == 'restore_denied' and 'Display restore needs attention' in contents:
@@ -90,6 +105,15 @@ def run(case):
         assert 'DO_NOT_EXPORT' not in result, (case,result)
         calls = (base/'am_calls').read_text() if (base/'am_calls').exists() else ''
         assert '-p jp.konami.pesam' not in calls and 'force-stop' not in calls, (case,calls)
+        if live:
+            assert "Before sample" not in result and "--display 37" in calls, (case, result, calls)
+            if case == "match_no_window":
+                assert "Window ready" not in result, result
+            else:
+                assert "Window ready" in result and "MemAvailable:" in result, result
+            assert "Restored the original simulated-display setting" in result, result
+        if case in ("match_bot_exit", "match_game_exit"):
+            assert "Process changed" in result and "pid=17099" not in result, result
         if case in ('stock_launcher', 'resolver_other', 'resolver_stale'):
             assert calls.count('-n jp.konami.pesam/com.epicgames.ue4.SplashActivity') == 1, (case,calls)
         if case == 'resolver_other':

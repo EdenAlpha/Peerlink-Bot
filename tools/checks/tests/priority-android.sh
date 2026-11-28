@@ -16,6 +16,15 @@ fi
 case "$action" in
 sleep)
   if [ "$CASE:$1" = manual_open:3 ] && [ -f "$FIX/launch_failed" ]; then touch "$FIX/game_front"; fi
+  case "$CASE:$1" in
+    match_bot_exit:10|match_game_exit:10) touch "$FIX/exit" ;;
+    match_cancel:10)
+      touch "$FIX/recording"
+      for attempt in 1 2 3 4 5 6 7 8 9 10; do
+        [ ! -f "$FIX/lock/cancel" ] || break
+        /bin/sleep 0.1
+      done ;;
+  esac
   if [ "$CASE" = focus_interrupted ] || [ "$CASE" = screen_off ]; then
     seconds=$(cat "$FIX/seconds" 2>/dev/null || echo 0)
     echo "$((seconds + $1))" > "$FIX/seconds"
@@ -88,14 +97,19 @@ cmd)
     echo 'Display id 37: DisplayInfo{"Écran simulé", displayId 37, type OVERLAY, uniqueId "overlay:1"}, isValid=true'
   fi ;;
 ps)
+  if [ "$1" = -p ]; then exec /bin/ps -p "$2" -o args=; fi
   [ "$1" = -A ] || exit 0
   echo 'UID PID NAME'
   echo '10541 800001 com.peerlink.app'
   echo '1010541 800018 com.peerlink.app:botengine'
   p=800002; [ "$phase:$CASE" != panel:bot_restarted ] || p=810002
-  [ "$CASE" = no_bot ] || echo "10541 $p com.peerlink.app:botengine"
+  if [ "$CASE" != no_bot ] && { [ "$CASE" != match_bot_exit ] || [ ! -f "$FIX/exit" ]; }; then
+    echo "10541 $p com.peerlink.app:botengine"
+  fi
   g=800003; [ "$phase:$CASE" != panel:game_restarted ] || g=810003
-  echo "10642 $g jp.konami.pesam" ;;
+  if [ "$CASE" != match_game_exit ] || [ ! -f "$FIX/exit" ]; then
+    echo "10642 $g jp.konami.pesam"
+  fi ;;
 dumpsys)
   shift 2
   case "$1 $2" in
@@ -109,6 +123,17 @@ dumpsys)
         echo '    * Hist  #0: ActivityRecord{abc u0 jp.konami.pesam/com.epicgames.ue4.GameActivity t76}'
       fi ;;
     'activity settings') echo '  top_to_fgs_grace_duration=15000'; echo '  top_to_almost_perceptible_grace_duration=15000' ;;
+    'activity exit-info')
+      case "$3" in
+        com.peerlink.app) pid=800002; process=com.peerlink.app:botengine ;;
+        jp.konami.pesam) pid=800003; process=jp.konami.pesam ;;
+        *) exit 1 ;;
+      esac
+      echo '  ApplicationExitInfo #0:'
+      echo "    timestamp=2026-11-28 07:37:01.662 pid=$pid user=0"
+      echo "    process=$process reason=3 (LOW_MEMORY)"
+      echo '  ApplicationExitInfo #1:'
+      echo '    timestamp=2026-11-27 22:15:03.320 pid=17099 user=0' ;;
     'activity processes')
       case "$3" in
         com.peerlink.app)
@@ -140,6 +165,12 @@ dumpsys)
           fi ;;
         system_input) input='Window{8f u0 NotificationShade}' ;;
         oem_window_title) input='Window{8 u0 CustomRenderer}' ;;
+        match_bot_exit)
+          if [ "$phase" = before ]; then
+            calls=$(cat "$FIX/focus_calls" 2>/dev/null || echo 0)
+            echo "$((calls + 1))" > "$FIX/focus_calls"
+            if [ "$((calls % 2))" -eq 1 ]; then input='Window{8f u0 NotificationShade}'; fi
+          fi ;;
         focus_interrupted|screen_off)
           seconds=$(cat "$FIX/seconds" 2>/dev/null || echo 0)
           if [ "$seconds" -ge 20 ] && [ "$phase" = before ]; then
@@ -164,7 +195,7 @@ dumpsys)
       fi
       echo '    mDisplayId=0 rootTaskId=44'
       echo '    mOwnerUid=10642 showForAllUsers=false package=jp.konami.pesam appop=NONE'
-      if [ "$phase" = panel ] && [ "$CASE" != no_window ]; then
+      if [ "$phase" = panel ] && [ "$CASE" != no_window ] && [ "$CASE" != match_no_window ]; then
         if [ "$CASE" = oem_window_title ]; then echo '  Window #1 Window{1 u0 PeerLink}:'
         else echo '  Window #1 Window{1 u0 com.peerlink.app/com.peerlink.app.ui.MainActivity}:'; fi
         if [ "$CASE" = wrong_display ]; then echo '    mDisplayId=0 rootTaskId=56'
