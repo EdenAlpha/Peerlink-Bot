@@ -34,6 +34,7 @@
 #include "game/network_startup_diagnostics.h"
 #include "game/match_lifecycle_diagnostics.h"
 #include "game/match_stop_diagnostics.h"
+#include "game/restart_diagnostics.h"
 #include "game/match_state_diagnostics.h"
 #include "game/diagnostic_journal.h"
 #include "game/input_readiness.h"
@@ -401,6 +402,16 @@ JNIEXPORT jboolean JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeOpenKee
     const char *value = env->GetStringUTFChars(path, nullptr);
     if (!value) return JNI_FALSE;
     const bool opened = peerlink_open_keeper_journal(value);
+    env->ReleaseStringUTFChars(path, value);
+    return opened ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT jboolean JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeOpenRestartJournal(
+        JNIEnv *env, jobject, jstring path) {
+    if (!path) return JNI_FALSE;
+    const char *value = env->GetStringUTFChars(path, nullptr);
+    if (!value) return JNI_FALSE;
+    const bool opened = peerlink_open_restart_journal(value);
     env->ReleaseStringUTFChars(path, value);
     return opened ? JNI_TRUE : JNI_FALSE;
 }
@@ -1140,6 +1151,7 @@ JNIEXPORT jlongArray JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeSnaps
             peerlink_match_stop_diagnostics(inner ? *reinterpret_cast<uintptr_t *>(inner + 0xa0) : 0, stop, sizeof(stop));
         }
     }
+    peerlink_flush_restart_trace(); // Outside the engine task lock.
     if (journal_sample) {
         peerlink_journal("SIMULATION_OBSERVATION engineFrame=%lld outer=%lld core=%lld players=%lld ballX=%lld ballY=%lld ballZ=%lld channel14=%lld channel15=%lld modelPhase=%lld modelError=%lld reasonCode=%lld setupComplete=%u inputReady=%u %s",
             static_cast<long long>(state[20]), static_cast<long long>(state[8]), static_cast<long long>(state[9]),
@@ -1341,6 +1353,7 @@ JNIEXPORT jboolean JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativePreview
 JNIEXPORT void JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeStopPreview(
         JNIEnv *, jobject, jlong base) {
     if (valid(base)) peerlink_preview_stop();
+    peerlink_flush_restart_trace();
 }
 JNIEXPORT jlong JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativeLoad(
         JNIEnv *env, jobject, jstring path) {

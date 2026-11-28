@@ -55,6 +55,7 @@ add_library(peerlinkbackend SHARED
         game/match_lifecycle_diagnostics.cpp
         game/match_stop_diagnostics.cpp
         game/match_state_diagnostics.cpp
+        game/restart_diagnostics.cpp
         game/match_frame_hooks.cpp
         game/diagnostic_journal.cpp
         game/network_socket_diagnostics.cpp

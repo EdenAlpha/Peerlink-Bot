@@ -1,5 +1,6 @@
 #include "match_state_diagnostics.h"
 #include "diagnostic_journal.h"
+#include "restart_diagnostics.h"
 #include <array>
 #include <atomic>
 #include <cstring>
@@ -596,6 +597,8 @@ void peerlink_record_check_comparison(uintptr_t checker, uintptr_t context) {
     if (!frame || frame != word(context + 8)) return;
     const uint32_t stored = half(context + 2), current = half(context + 4);
     const bool local_second = byte(context + 1) == 255;
+    const uint16_t local = local_second ? current : stored, peer = local_second ? stored : current;
+    peerlink_record_restart_comparison(frame, local, peer);
     const uint32_t first_mismatch = word(checker + 12);
     peerlink_journal("MATCH_CHECK_COMPARE frame=%u localValue=%u peerValue=%u equal=%u verdict=%u mismatchCount=%u firstMismatchFrame=%u",
         frame, local_second ? current : stored, local_second ? stored : current,

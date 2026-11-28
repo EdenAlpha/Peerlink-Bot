@@ -417,6 +417,12 @@ class MainActivity : AppCompatActivity(), NsdDiscovery.NsdCallback {
                                 for (log in keeperLogs) {
                                     entries.add(ZipEntryData(name = "keeper_events/${log.name}", file = log))
                                 }
+                                val restartLogs = java.io.File(filesDir, "restart-events").listFiles()
+                                    ?.filter { it.isFile && it.name.matches(Regex("[0-9]+-[0-9]+\\.log")) }
+                                    ?.sortedBy { it.name }?.takeLast(8).orEmpty()
+                                for (log in restartLogs) {
+                                    entries.add(ZipEntryData(name = "restart_events/${log.name}", file = log))
+                                }
                                 val fileAudit = com.peerlink.app.bot.GameAssets.auditReportFile(this@MainActivity)
                                 entries.add(ZipEntryData(name = "game_file_audit.txt", text =
                                     runCatching { fileAudit.readText() }.getOrDefault("No completed startup file audit is available.\n")))
@@ -470,6 +476,7 @@ class MainActivity : AppCompatActivity(), NsdDiscovery.NsdCallback {
                                             if (ramReport.isNotBlank()) appendLine("- prime_ram.txt  Latest manual RAM readings and system reclaim measurement, with capture times")
                                             appendLine("- engine_events/ : native frame checks, ball transitions, match states, and process stop events")
                                             if (keeperLogs.isNotEmpty()) appendLine("- keeper_events/ : goalkeeper and scene state around goals and replays, plus local player positions at the first frame check disagreement")
+                                            if (restartLogs.isNotEmpty()) appendLine("- restart_events/ : decoded command kinds and local state for each recent synchronized frame leading up to the first mismatch")
                                             if (heap.files.isNotEmpty() || heap.pending) appendLine("- bot_memory/ : requested bot allocation profiles and recording status")
                                             if (matchDiagnostics.files.isNotEmpty() || matchDiagnostics.pending)
                                                 appendLine("- scheduler_trace/ : RAM cleanup reports and scheduler trace for the latest recording attempt")

@@ -12,7 +12,7 @@ struct Journal {
     std::atomic<int> output{-1};
     std::atomic<size_t> written{0};
 };
-Journal events, keeper;
+Journal events, keeper, restart;
 constexpr size_t limit = 2 * 1024 * 1024;
 struct PreserveErrno { int value = errno; ~PreserveErrno() { errno = value; } };
 
@@ -77,5 +77,21 @@ void peerlink_keeper_journal(const char *format, ...) {
     va_list args;
     va_start(args, format);
     append(keeper, format, args);
+    va_end(args);
+}
+
+bool peerlink_open_restart_journal(const char *path) {
+    return open_journal(restart, path, peerlink_restart_journal);
+}
+
+bool peerlink_restart_journal_active() {
+    return restart.output.load(std::memory_order_acquire) >= 0 &&
+        restart.written.load(std::memory_order_relaxed) < limit;
+}
+
+void peerlink_restart_journal(const char *format, ...) {
+    va_list args;
+    va_start(args, format);
+    append(restart, format, args);
     va_end(args);
 }

@@ -19,8 +19,8 @@ android {
         applicationId = "com.peerlink.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 76
-        versionName = "5.0.72"
+        versionCode = 77
+        versionName = "5.0.73"
         buildConfigField("String", "SOURCE_COMMIT", "\"${providers.environmentVariable("GITHUB_SHA").orElse("local").get()}\"")
         // User-facing name, kept separate from applicationId so existing installs keep their data.
         resValue("string", "app_displayed_name", "PeerLink")

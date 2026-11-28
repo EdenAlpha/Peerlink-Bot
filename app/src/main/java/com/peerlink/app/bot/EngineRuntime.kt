@@ -162,11 +162,14 @@ internal object EngineRuntime {
             val journalOpened = nativeOpenJournal(journalFile.absolutePath)
             val keeperDirectory = File(app.filesDir, "keeper-events").apply { mkdirs() }
             val keeperOpened = nativeOpenKeeperJournal(File(keeperDirectory, journalName).absolutePath)
-            audit("ENGINE_EVENT_JOURNAL opened=$journalOpened keeperTrace=$keeperOpened pid=${android.os.Process.myPid()}")
+            val restartDirectory = File(app.filesDir, "restart-events").apply { mkdirs() }
+            val restartOpened = nativeOpenRestartJournal(File(restartDirectory, journalName).absolutePath)
+            audit("ENGINE_EVENT_JOURNAL opened=$journalOpened keeperTrace=$keeperOpened restartTrace=$restartOpened pid=${android.os.Process.myPid()}")
             if (journalOpened) {
                 journal("APP_BUILD version=${com.peerlink.app.BuildConfig.VERSION_NAME} source=${com.peerlink.app.BuildConfig.SOURCE_COMMIT}")
             }
-            for ((directory, opened) in listOf(journalDirectory to journalOpened, keeperDirectory to keeperOpened)) {
+            for ((directory, opened) in listOf(journalDirectory to journalOpened, keeperDirectory to keeperOpened,
+                restartDirectory to restartOpened)) {
                 if (!opened) continue
                 directory.listFiles()?.filter { it.isFile && it.name.matches(Regex("[0-9]+-[0-9]+\\.log")) }
                     ?.sortedByDescending { it.name }?.drop(8)?.forEach { it.delete() }
@@ -472,6 +475,7 @@ internal object EngineRuntime {
     private external fun nativeLoad(path: String): Long
     private external fun nativeOpenJournal(path: String): Boolean
     private external fun nativeOpenKeeperJournal(path: String): Boolean
+    private external fun nativeOpenRestartJournal(path: String): Boolean
     private external fun nativeJournal(line: String)
     private external fun nativeEnableHeadless(base: Long, missingMatchResources: Boolean): Boolean
     private external fun nativeHeadlessState(base: Long): Int

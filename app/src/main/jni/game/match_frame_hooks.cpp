@@ -2,6 +2,7 @@
 #include "diagnostic_journal.h"
 #include "executable_patch.h"
 #include "fallback_cut_clock.h"
+#include "restart_diagnostics.h"
 
 #include <array>
 #include <cerrno>
@@ -14,6 +15,8 @@ namespace {
 constexpr uintptr_t kCompareCall = 0x70539c4;
 constexpr uintptr_t kChecksumCall = 0x7053bb8;
 constexpr uintptr_t kBallCall = 0x6af6d0c;
+constexpr uintptr_t kRestartDispatchCall = 0x70180b0;
+constexpr uintptr_t kRestartDispatch = 0x7018270;
 uintptr_t image_base = 0;
 bool attempted = false;
 
@@ -41,6 +44,15 @@ uint64_t observe_comparison(uintptr_t checker, uintptr_t context) {
     peerlink_record_check_comparison(checker, context);
     errno = saved_errno;
     return result;
+}
+
+void observe_restart_dispatch(uintptr_t controller, uintptr_t slots, uintptr_t participants) {
+    // The previous call has assembled this frame's decoded slots. The original
+    // dispatch still chooses which commands to act on and runs exactly once.
+    const int saved_errno = errno;
+    peerlink_record_restart_frame(image_base, controller, slots);
+    errno = saved_errno;
+    native<void (*)(uintptr_t, uintptr_t, uintptr_t)>(kRestartDispatch)(controller, slots, participants);
 }
 
 extern "C" __attribute__((used, noinline))
@@ -393,14 +405,18 @@ void peerlink_observe_match_frames(uintptr_t base) {
     const long page_size = sysconf(_SC_PAGESIZE);
     const bool check_verified = original_call(kCompareCall, 0x7053ea0) && original_call(kChecksumCall, 0x7053d8c);
     const bool ball_verified = original_call(kBallCall, 0x6f57860);
-    bool checks_installed = false, ball_installed = false;
+    const bool restart_verified = check_verified && peerlink_restart_journal_active() &&
+        original_call(kRestartDispatchCall, kRestartDispatch);
+    bool checks_installed = false, ball_installed = false, restart_installed = false;
     peerlink::CodePatchFailure failure{"instruction_check", 0, 0};
-    const std::array<Thunk, 3> thunks{{
+    peerlink::CodePatchFailure restart_failure = failure;
+    const std::array<Thunk, 4> thunks{{
         {0x58000050, 0xd61f0200, reinterpret_cast<uintptr_t>(&observe_comparison)},
         {0x58000050, 0xd61f0200, reinterpret_cast<uintptr_t>(&observe_checksum)},
         {0x58000050, 0xd61f0200, reinterpret_cast<uintptr_t>(&observe_ball_placement)},
+        {0x58000050, 0xd61f0200, reinterpret_cast<uintptr_t>(&observe_restart_dispatch)},
     }};
-    if ((check_verified || ball_verified) && page_size >= 4096 && page_size <= 65536) {
+    if ((check_verified || ball_verified || restart_verified) && page_size >= 4096 && page_size <= 65536) {
         constexpr uintptr_t range = 1 << 27;
         const uintptr_t first = base + kBallCall;
         const uintptr_t last = base + kChecksumCall;
@@ -408,11 +424,13 @@ void peerlink_observe_match_frames(uintptr_t base) {
         void *page = peerlink::reserve_writable_page(lower, first + range, page_size);
         if (page == MAP_FAILED) {
             failure = {"observer_mapping", errno, static_cast<size_t>(page_size)};
+            restart_failure = failure;
         } else {
             const uintptr_t entry = reinterpret_cast<uintptr_t>(page);
             const uint32_t compare = branch_link(base + kCompareCall, entry);
             const uint32_t checksum = branch_link(base + kChecksumCall, entry + sizeof(Thunk));
             const uint32_t ball = branch_link(base + kBallCall, entry + 2 * sizeof(Thunk));
+            const uint32_t restart = branch_link(base + kRestartDispatchCall, entry + 3 * sizeof(Thunk));
             const bool checks_in_range = check_verified && compare && checksum;
             const bool ball_in_range = ball_verified && ball;
             if (checks_in_range == check_verified && ball_in_range == ball_verified) {
@@ -435,19 +453,28 @@ void peerlink_observe_match_frames(uintptr_t base) {
                                                                              &ball_failure);
                         if (!ball_installed || !check_verified) failure = ball_failure;
                     }
+                    if (checks_installed && restart_verified && restart) {
+                        restart_installed = peerlink::replace_executable_bytes(base + kRestartDispatchCall,
+                            &restart, sizeof(restart), &restart_failure);
+                    }
                 } else {
                     failure = {"observer_execute", errno, static_cast<size_t>(page_size)};
+                    restart_failure = failure;
                 }
             } else {
                 failure = {"observer_branch_range", 0, static_cast<size_t>(page_size)};
+                restart_failure = failure;
             }
             // Installed branches own the thunk mapping.
-            if (!checks_installed && !ball_installed) munmap(page, page_size);
+            if (!checks_installed && !ball_installed && !restart_installed) munmap(page, page_size);
         }
     }
     peerlink_journal("MATCH_FRAME_OBSERVERS checksum=%u ballPark=%u checksumCallSitesVerified=%u ballCallSiteVerified=%u operation=%s errno=%d",
         unsigned(checks_installed), unsigned(ball_installed), unsigned(check_verified), unsigned(ball_verified),
         failure.operation, failure.error);
+    peerlink_restart_journal("RESTART_TRACE_OBSERVER schema=1 installed=%u comparator=%u operation=%s errno=%d",
+        unsigned(restart_installed), unsigned(checks_installed),
+        restart_installed ? "none" : restart_failure.operation, restart_failure.error);
     install_scene_observers(base, page_size);
     errno = saved_errno;
 #else
