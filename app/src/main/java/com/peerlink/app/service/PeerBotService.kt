@@ -17,6 +17,7 @@ import com.peerlink.app.bot.BotMatchDriver
 import com.peerlink.app.bot.BotMatchDiagnostics
 import com.peerlink.app.bot.PeerSlot
 import com.peerlink.app.core.AppState
+import com.peerlink.app.godmode.OffscreenRoomProtection
 
 /**
  * Bot mode's lifeline: a foreground service that keeps the whole bot session
@@ -131,6 +132,7 @@ class PeerBotService : Service() {
 
     override fun onDestroy() {
         active = null
+        OffscreenRoomProtection.stop()
         BotMatchDiagnostics.stopMemoryGuard()
         BotMatchDriver.stop("bot_service_onDestroy")
         PeerSlot.disarm("bot_service_onDestroy")

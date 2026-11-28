@@ -16,6 +16,7 @@ import com.peerlink.app.bot.BotMatchDiagnostics
 import com.peerlink.app.bot.BotMode
 import com.peerlink.app.bot.EngineHost
 import com.peerlink.app.bot.PeerSlot
+import com.peerlink.app.godmode.OffscreenRoomProtection
 import com.peerlink.app.service.PeerBotService
 import com.peerlink.app.service.PeerLinkVpnService
 import android.content.Intent
@@ -194,8 +195,9 @@ object PlayRoomController {
 
     /** Called by the wiring when room creation failed. */
     fun onRoomFailed(reason: String) {
-        BotMatchDiagnostics.stopMemoryGuard()
         _state.value = RoomState.Failed(reason)
+        OffscreenRoomProtection.stop()
+        BotMatchDiagnostics.stopMemoryGuard()
     }
 
     fun preparationNote(note: String) {
@@ -228,6 +230,7 @@ object PlayRoomController {
         if (_state.value is RoomState.Creating || _state.value is RoomState.Ending) return
         val ctx = appContext ?: return
         _state.value = RoomState.Ending
+        OffscreenRoomProtection.stop()
         BotMatchDiagnostics.stopMemoryGuard()
         io.launch {
             try {

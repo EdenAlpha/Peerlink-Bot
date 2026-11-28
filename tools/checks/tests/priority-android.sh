@@ -113,7 +113,7 @@ cmd)
     echo 'Display id 52: DisplayInfo{"PeerLink off-screen", displayId 52, type VIRTUAL, uniqueId "virtual:test"}, isValid=true'
   fi ;;
 app_process)
-  [ "$1" = /system/bin ] && [ "$2" = PeerLinkOffscreenDisplay ] || exit 1
+  [ "$1" = /system/bin ] && [ "$2" = com.peerlink.app.godmode.PeerLinkOffscreenDisplay ] || exit 1
   [ "$(stat -c %a "$CLASSPATH")" = 444 ] || exit 1
   lifetime=180
   [ "$CASE" != offscreen_match_bot_exit ] || lifetime=1020

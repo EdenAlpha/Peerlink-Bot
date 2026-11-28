@@ -100,6 +100,15 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".godmode.RoomDisplayActivity"
+            android:exported="true"
+            android:permission="android.permission.INTERNAL_SYSTEM_WINDOW"
+            android:excludeFromRecents="true"
+            android:taskAffinity="${applicationId}.roomdisplay"
+            android:resizeableActivity="true"
+            android:theme="@android:style/Theme.Material.NoActionBar" />
+
         <provider
             android:name=".bot.GameResourceImportProvider"
             android:authorities="${applicationId}.bot-resource-import"

@@ -68,7 +68,7 @@ object PrimeClient {
     }
 
     /** Internal high-frequency path: same authenticated command protocol, no log I/O. */
-    private fun executeQuiet(command: String, timeoutMs: Int): String? {
+    internal fun executeQuiet(command: String, timeoutMs: Int): String? {
         val response = request(command, timeoutMs) ?: return null
         if (!response.optBoolean("ok", false)) return null
         return response.optString("output", "")

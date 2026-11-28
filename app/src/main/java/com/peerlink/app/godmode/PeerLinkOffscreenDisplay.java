@@ -1,3 +1,5 @@
+package com.peerlink.app.godmode;
+
 import android.content.Context;
 import android.content.ContextWrapper;
 import android.hardware.display.DisplayManager;
@@ -13,7 +15,7 @@ import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
 
-/** Creates one shell-owned display on a private surface for the priority check. */
+/** Owns the private display until the room or diagnostic recorder releases it. */
 public final class PeerLinkOffscreenDisplay {
     private static final int SHELL_UID = 2000;
     // Framework's Android 15 DisplayManager.VIRTUAL_DISPLAY_FLAG_TRUSTED.
@@ -22,22 +24,18 @@ public final class PeerLinkOffscreenDisplay {
     private static final int HEIGHT = 480;
     private static final int DENSITY_DPI = 160;
     private static final int MAX_LIFETIME_SECONDS = 1_020;
+    private static final long ROOM_LEASE_MS = 65_000L;
 
     public static void main(String[] args) throws Exception {
-        if (args.length != 3 || Process.myUid() != SHELL_UID) {
-            throw new IllegalArgumentException("Run the display check from Prime Shell.");
+        boolean room = args.length == 2 && "room".equals(args[1]);
+        if ((!room && args.length != 3) || Process.myUid() != SHELL_UID) {
+            throw new IllegalArgumentException("Run the display helper from Prime Shell.");
         }
         File directory = new File(args[0]);
-        int lifetime = Integer.parseInt(args[1]);
-        int ownerPid = Integer.parseInt(args[2]);
-        if (lifetime < 1 || lifetime > MAX_LIFETIME_SECONDS || ownerPid < 2) {
-            throw new IllegalArgumentException("Invalid display lifetime or recorder PID.");
-        }
-        File recorder = new File("/proc/" + ownerPid);
-        File stop = new File(directory, "display-stop");
         DisplayManager manager = shellDisplayManager();
         HandlerThread frames = new HandlerThread("PeerLink-display-frames");
         frames.start();
+        boolean published = false;
         try (BotRenderSurface surface = new BotRenderSurface(WIDTH, HEIGHT, new Handler(frames.getLooper()))) {
             // The display has no physical output and only renders its own content.
             // Android checks that the shell has ADD_TRUSTED_DISPLAY.
@@ -49,17 +47,56 @@ public final class PeerLinkOffscreenDisplay {
             }
             try {
                 publishDisplayId(directory, display.getDisplay().getDisplayId());
-                long deadline = SystemClock.elapsedRealtime() + 1_000L * lifetime;
-                while (recorder.isDirectory() && directory.isDirectory() && !stop.exists()
-                        && SystemClock.elapsedRealtime() < deadline) {
-                    Thread.sleep(250);
-                }
+                published = true;
+                if (room) awaitRoomEnd(directory);
+                else awaitRecorderEnd(directory, Integer.parseInt(args[1]), Integer.parseInt(args[2]));
             } finally {
                 display.release();
             }
         } finally {
             frames.quitSafely();
+            if (room && published) {
+                new File(directory, "display-id").delete();
+                if (new File(directory, "lease").exists()) cleanRoomFiles(directory);
+            }
         }
+    }
+
+    private static void awaitRoomEnd(File directory) throws InterruptedException {
+        File lease = new File(directory, "lease");
+        File stop = new File(directory, "display-stop");
+        long updated = lease.lastModified();
+        long deadline = SystemClock.elapsedRealtime() + ROOM_LEASE_MS;
+        while (updated != 0 && !stop.exists() && SystemClock.elapsedRealtime() < deadline) {
+            Thread.sleep(500);
+            long current = lease.lastModified();
+            if (current != updated) {
+                updated = current;
+                deadline = SystemClock.elapsedRealtime() + ROOM_LEASE_MS;
+            }
+        }
+    }
+
+    private static void awaitRecorderEnd(File directory, int lifetime, int ownerPid) throws InterruptedException {
+        if (lifetime < 1 || lifetime > MAX_LIFETIME_SECONDS || ownerPid < 2) {
+            throw new IllegalArgumentException("Invalid display lifetime or recorder PID.");
+        }
+        File recorder = new File("/proc/" + ownerPid);
+        File stop = new File(directory, "display-stop");
+        long deadline = SystemClock.elapsedRealtime() + 1_000L * lifetime;
+        while (recorder.isDirectory() && directory.isDirectory() && !stop.exists()
+                && SystemClock.elapsedRealtime() < deadline) {
+            Thread.sleep(250);
+        }
+    }
+
+    private static void cleanRoomFiles(File directory) {
+        new File(directory, "display-id.pending").delete();
+        new File(directory, "display-stop").delete();
+        new File(directory, "helper-pid").delete();
+        new File(directory, "display-helper.log").delete();
+        new File(directory, "lease").delete();
+        directory.delete();
     }
 
     private static DisplayManager shellDisplayManager() throws ReflectiveOperationException {

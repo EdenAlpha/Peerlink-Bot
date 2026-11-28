@@ -73,6 +73,10 @@
     public static void main(java.lang.String[]);
 }
 
+-keep class com.peerlink.app.godmode.PeerLinkOffscreenDisplay {
+    public static void main(java.lang.String[]);
+}
+
 # Fallback entry point on PrimeServer itself — also called by app_process
 # in some code paths. Keep the full class and main() method.
 -keep class com.peerlink.app.godmode.PrimeServer {

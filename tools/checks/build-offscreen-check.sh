@@ -15,7 +15,7 @@ build=$(mktemp -d)
 trap 'rm -rf "$build"' EXIT
 mkdir "$build/classes"
 "$jdk/bin/javac" --release 11 -classpath "$android_jar" -d "$build/classes" \
-  "$checks/PeerLinkOffscreenDisplay.java" \
+  "$checks/../../app/src/main/java/com/peerlink/app/godmode/PeerLinkOffscreenDisplay.java" \
   "$checks/../../app/src/main/java/com/peerlink/app/bot/BotRenderSurface.java"
 "$jdk/bin/jar" cf "$build/input.jar" -C "$build/classes" .
 "$jdk/bin/java" -cp "$d8" com.android.tools.r8.D8 --min-api 34 --lib "$android_jar" \

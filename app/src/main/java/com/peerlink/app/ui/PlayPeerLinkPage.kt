@@ -1,8 +1,11 @@
 package com.peerlink.app.ui
 
+import android.app.Activity
+import android.app.ActivityOptions
 import android.content.Context
 import android.os.Build
 import android.os.SystemClock
+import android.view.Display
 import android.widget.Toast
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
@@ -39,10 +42,13 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.peerlink.app.BuildConfig
 import com.peerlink.app.bot.BotPacketCounts
 import com.peerlink.app.bot.GameDatabaseUpdate
+import com.peerlink.app.godmode.OffscreenRoomProtection
 import com.peerlink.app.play.PlayRoomController
 import com.peerlink.app.play.RoomState
 import java.text.NumberFormat
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 /** The bot hosts; the player joins the displayed room in their own game. */
 @Composable
@@ -88,14 +94,47 @@ internal fun PlayPeerLinkContent(
     onReplaceRoom: (String) -> Unit = PlayRoomController::replaceRoom,
 ) {
     var confirmEnd by rememberSaveable { mutableStateOf(false) }
+    val roomNumber = (room as? RoomState.Ready)?.number
+    var openingGame by remember(roomNumber) { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
     val copyRoom = { number: String ->
         PlayRoomController.copyNumber(ctx, number)
         if (Build.VERSION.SDK_INT < 33) Toast.makeText(ctx, "Room number copied", Toast.LENGTH_SHORT).show()
     }
-    val openGame = {
+    val openGame: () -> Unit = open@{
+        if (openingGame) return@open
         val launch = ctx.packageManager.getLaunchIntentForPackage("jp.konami.pesam")
-        if (launch == null || runCatching { ctx.startActivity(launch) }.isFailure) {
+        if (launch == null) {
             Toast.makeText(ctx, "Open eFootball from your home screen", Toast.LENGTH_SHORT).show()
+            return@open
+        }
+        val activity = ctx as? Activity
+        if (!primeActive || activity == null || roomNumber == null) {
+            if (runCatching { ctx.startActivity(launch) }.isFailure) {
+                Toast.makeText(ctx, "Open eFootball from your home screen", Toast.LENGTH_SHORT).show()
+            }
+            return@open
+        }
+        openingGame = true
+        scope.launch {
+            try {
+                val prepared = try {
+                    OffscreenRoomProtection.prepare(activity, roomNumber, activity.taskId)
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    false
+                }
+                if (activity.isFinishing || activity.isDestroyed || !OffscreenRoomProtection.roomReady(roomNumber)) return@launch
+                if (!prepared) Toast.makeText(ctx, "Off-screen protection unavailable", Toast.LENGTH_SHORT).show()
+                val options = ActivityOptions.makeBasic().setLaunchDisplayId(Display.DEFAULT_DISPLAY).toBundle()
+                if (runCatching { activity.startActivity(launch, options) }.isFailure &&
+                    runCatching { activity.startActivity(launch) }.isFailure) {
+                    Toast.makeText(ctx, "Open eFootball from your home screen", Toast.LENGTH_SHORT).show()
+                }
+            } finally {
+                openingGame = false
+            }
         }
     }
 
@@ -116,7 +155,7 @@ internal fun PlayPeerLinkContent(
             MatchRoomCard(room, onCopyRoom = copyRoom, onOpenGame = openGame, onExportLogs = onExportLogs,
                 onEnd = { confirmEnd = true }, canCreate = data.canCreateRoom, onCreateRoom = onCreateRoom,
                 onReplaceRoom = onReplaceRoom,
-                primeSetup = if (primeActive) null else onOpenPrime)
+                primeSetup = if (primeActive) null else onOpenPrime, openingGame = openingGame)
         }
         if (BuildConfig.DEBUG && room.canEditGameData) {
             item(key = "game-data") {
@@ -196,6 +235,7 @@ private fun MatchRoomCard(
     onCreateRoom: (Boolean) -> Unit,
     onReplaceRoom: (String) -> Unit,
     primeSetup: (() -> Unit)?,
+    openingGame: Boolean,
 ) {
     val shape = RoundedCornerShape(28.dp)
     Column(
@@ -267,7 +307,8 @@ private fun MatchRoomCard(
                         Text(it, color = PL.inkSoft, fontSize = 12.sp, lineHeight = 17.sp,
                             modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
                     }
-                    MatchPrimaryButton("Copy and open eFootball", Icons.Rounded.NorthEast, Modifier.testTag("bot-open-game")) {
+                    MatchPrimaryButton(if (openingGame) "Opening eFootball…" else "Copy and open eFootball",
+                        Icons.Rounded.NorthEast, Modifier.testTag("bot-open-game"), enabled = !openingGame) {
                         onCopyRoom(room.number)
                         onOpenGame()
                     }

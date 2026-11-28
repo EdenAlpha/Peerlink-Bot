@@ -162,7 +162,8 @@ start_offscreen() {
   [ "${checksum%% *}" = "$offscreen_sha256" ] || stop_check 'The display helper failed its checksum.'
   chmod 0444 "$work/display-helper.jar" || stop_check 'Could not protect the display helper.'
   (
-    CLASSPATH="$work/display-helper.jar" exec app_process /system/bin PeerLinkOffscreenDisplay "$work" "$lifetime" "$$"
+    CLASSPATH="$work/display-helper.jar" exec app_process /system/bin \
+      com.peerlink.app.godmode.PeerLinkOffscreenDisplay "$work" "$lifetime" "$$"
   ) </dev/null > "$work/display-helper.log" 2>&1 &
   for attempt in 1 2 3 4 5 6 7 8; do
     [ ! -f "$work/cancel" ] || stop_check 'Check cancelled.'
