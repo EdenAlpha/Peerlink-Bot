@@ -1,6 +1,8 @@
 #!/system/bin/sh
-# Run in PeerLink Prime Shell with a waiting room open, before joining a match.
-# The visible second display is temporary. The report contains no game traffic.
+# Run in PeerLink Prime Shell with a waiting room open.
+# With no argument, compare priority before, during and after the second display.
+# With match, hold the display through gameplay and record priority and memory.
+# With restore, stop the running check and restore its temporary display setting.
 umask 077
 package=com.peerlink.app
 engine=com.peerlink.app:botengine
@@ -271,13 +273,68 @@ check_phase() {
   stop_check "The \"$label\" phase did not get three stable readings with eFootball in front and the expected PeerLink windows."
 }
 
+record_exit() {
+  local package_name="$1" pid="$2" delay history
+  for delay in 0 2 4; do
+    [ "$delay" -eq 0 ] || sleep "$delay"
+    history=$(dumpsys -t 4 activity exit-info "$package_name" 2>&1) || continue
+    if printf '%s\n' "$history" | awk -v key="pid=$pid" '
+      /^[[:space:]]*ApplicationExitInfo #[0-9]+:/ { show=0 }
+      {
+        for (i=1; i<=NF; i++) if ($i == key) { show=1; found=1 }
+        if (show) print
+      }
+      END { if (!found) exit 1 }
+    '; then
+      return 0
+    fi
+  done
+  printf 'Android returned no exit record for %s PID %s during this check.\n' "$package_name" "$pid"
+}
+
+record_match() {
+  local display="$1" sample=0 current_bot current_game bot_adj game_adj memory timestamp
+  local uptime ignored deadline
+  read -r uptime ignored < /proc/uptime || stop_check 'Android did not expose its uptime.'
+  deadline=$(( ${uptime%%.*} + 900 ))
+  printf '\nWindow ready. Join the room and play one match. Recording for up to 15 minutes.\n'
+  while read -r uptime ignored < /proc/uptime && [ "${uptime%%.*}" -lt "$deadline" ]; do
+    if [ -f "$work/cancel" ]; then
+      echo 'Recording stopped from Prime Shell.'
+      return 0
+    fi
+    timestamp=$(date '+%H:%M:%S')
+    current_bot=$(process_pid "$engine")
+    current_game=$(process_pid "$game")
+    if [ "$current_bot" != "$bot_pid" ] || [ "$current_game" != "$game_pid" ]; then
+      printf '%s Process changed   bot initial=%s current=%s   game initial=%s current=%s\n' \
+        "$timestamp" "$bot_pid" "${current_bot:-unavailable}" "$game_pid" "${current_game:-unavailable}"
+      check_windows "$display" || :
+      [ "$current_bot" = "$bot_pid" ] || record_exit "$package" "$bot_pid"
+      [ "$current_game" = "$game_pid" ] || record_exit "$game" "$game_pid"
+      return 0
+    fi
+    bot_adj=$(score "$bot_pid" "$engine") || bot_adj=unavailable
+    game_adj=$(score "$game_pid" "$game") || game_adj=unavailable
+    memory=$(awk '/^(MemAvailable|SwapFree):/ { printf "%s%.0fMiB ", $1, $2/1024 }' /proc/meminfo)
+    printf '%s   bot PID %s score %s   eFootball PID %s score %s   %s\n' \
+      "$timestamp" "$bot_pid" "$bot_adj" "$game_pid" "$game_adj" "$memory"
+    if [ $((sample % 3)) -eq 0 ]; then
+      check_windows "$display" || :
+    fi
+    sample=$((sample + 1))
+    sleep 10
+  done
+  echo 'Recording reached its time limit.'
+}
+
 measure() {
   trap 'release_check' EXIT
   trap 'exit 1' INT TERM
   echo "$$" > "$work/pid"
   local previous initial_display_setting ids display attempt settle grace base_low base_high panel_low panel_high
-  local android_user="$1" bot_pid="$2" game_pid='' low high phase_input baseline_input panel_input
-  printf 'PeerLink priority check v4. Android user %s, bot PID %s. Lower scores receive stronger protection against low-memory kills.\n' "$android_user" "$bot_pid"
+  local android_user="$1" bot_pid="$2" mode="$3" game_pid='' low high phase_input baseline_input panel_input
+  printf 'PeerLink priority check v5. Android user %s, bot PID %s. Lower scores receive stronger protection against low-memory kills.\n' "$android_user" "$bot_pid"
   local initial_score
   if initial_score=$(score "$bot_pid" "$engine"); then
     printf 'At script start, before verifying the game screen: bot score %s (outside the comparison).\n' "$initial_score"
@@ -323,6 +380,18 @@ measure() {
     -c android.intent.category.LAUNCHER -n "$package/.ui.MainActivity" || stop_check 'Android could not open PeerLink on the simulated display.'
   sleep 2
   open_game
+  if [ "$mode" = match ]; then
+    for attempt in 1 2 3 4 5; do
+      [ ! -f "$work/cancel" ] || stop_check 'Check cancelled.'
+      if check_windows "$display"; then
+        printf 'Baseline bot score %s..%s before the window.\n' "$base_low" "$base_high"
+        record_match "$display"
+        return $?
+      fi
+      [ "$attempt" -eq 5 ] || sleep 2
+    done
+    stop_check 'The window could not be verified on the second display.'
+  fi
   check_phase 'With PeerLink visible' "$display"
   panel_low=$low; panel_high=$high; panel_input=$phase_input
 
@@ -353,7 +422,7 @@ measure() {
 }
 
 case "${1-}" in
-  --measure) [ "$0" = "$work/run.sh" ] || exit 1; measure "$2" "$3"; exit $? ;;
+  --measure) [ "$0" = "$work/run.sh" ] || exit 1; measure "$2" "$3" "$4"; exit $? ;;
   restore)
     [ -d "$work" ] || { echo 'No test display to restore.'; exit 0; }
     worker=$(cat "$work/pid" 2>/dev/null)
@@ -361,8 +430,9 @@ case "${1-}" in
       touch "$work/cancel"; echo 'Cancellation requested. The running check will restore the display.'; exit 0
     fi
     release_check; exit $? ;;
-  '') ;;
-  *) echo 'Run without arguments to check, or use restore after an interruption.'; exit 1 ;;
+  '') mode=compare ;;
+  match) mode=match ;;
+  *) echo 'Run without arguments for the priority check, with match to record one match, or with restore to stop.'; exit 1 ;;
 esac
 
 android_user=$(timeout 3 am get-current-user) || stop_check 'Prime could not read the current Android user.'
@@ -376,5 +446,10 @@ if ! mkdir -p "$downloads" || ! : > "$report" || ! cp "$0" "$work/run.sh"; then
 fi
 # Android services receive copies of the shell command's descriptors. Only cat
 # should open the Downloads file. Give the worker a pipe for stdout AND stderr.
-(trap '' HUP; sh "$work/run.sh" --measure "$android_user" "$bot_pid" 2>&1 | cat >> "$report") </dev/null >/dev/null 2>&1 &
-printf 'Check started. If eFootball stays in the background, open it from Home or Recents. Leave the title screen visible until the report finishes.\nDownloads/%s\n' "${report##*/}"
+(trap '' HUP; sh "$work/run.sh" --measure "$android_user" "$bot_pid" "$mode" 2>&1 | cat >> "$report") </dev/null >/dev/null 2>&1 &
+if [ "$mode" = match ]; then
+  printf 'Recording started. When the small PeerLink window appears in eFootball, join your room and play one match.\n'
+else
+  printf 'Check started. If eFootball stays in the background, open it from Home or Recents. Leave the title screen visible until the report finishes.\n'
+fi
+printf 'Downloads/%s\n' "${report##*/}"
