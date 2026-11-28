@@ -15,6 +15,12 @@ if [ "$action" = cmd ] && [ "$1" = settings ]; then
 fi
 case "$action" in
 sleep)
+  case "$CASE" in
+    offscreen_*)
+      read -r tick ignored < "$FIX/uptime"
+      printf '%s.00 0.00\n' "$((${tick%%.*} + $1))" > "$FIX/uptime"
+      /bin/sleep 0.025 ;;
+  esac
   if [ "$CASE:$1" = manual_open:3 ] && [ -f "$FIX/launch_failed" ]; then touch "$FIX/game_front"; fi
   case "$CASE:$1" in
     match_bot_exit:10|match_game_exit:10) touch "$FIX/exit" ;;
@@ -36,6 +42,10 @@ am)
   case "$*" in
     'task focus 76') touch "$FIX/game_front"; exit 0 ;;
     'task focus '*) exit 1 ;;
+    *--display\ 52*)
+      [ -f "$FIX/virtual-display" ] || exit 1
+      echo 'virtual' > "$FIX/phase"
+      exit 0 ;;
     *--display\ 37*) [ "$CASE" != launch_denied ] || exit 1
       if [ "$CASE" = resume_task ]; then rm -f "$FIX/game_front"; fi; exit 0 ;;
     *'-p jp.konami.pesam'*)
@@ -72,11 +82,13 @@ settings)
       old=$(cat "$FIX/setting")
       if [ "$old" != null ]; then printf 'overlay_display_devices=%s\n' "$old"; fi ;;
     put)
+      touch "$FIX/setting-writes"
       if [ "$CASE" = put_denied ]; then echo 'vendor refused write' >&2; exit 12; fi
       if [ -z "$4" ]; then echo after > "$FIX/phase"
       else echo panel > "$FIX/phase"; fi
       printf '%s\n' "$4" > "$FIX/setting";;
     delete)
+      touch "$FIX/setting-writes"
       if [ "$CASE" = restore_denied ]; then echo 'vendor refused restore'; exit 1; fi
       echo after > "$FIX/phase"; echo null > "$FIX/setting";;
   esac ;;
@@ -95,7 +107,23 @@ cmd)
   echo 'Display id 5: DisplayInfo{"Projector", displayId 5, type EXTERNAL, uniqueId "local:5"}, isValid=true'
   if [ "$phase" = panel ] && [ "$CASE" != no_display ]; then
     echo 'Display id 37: DisplayInfo{"Écran simulé", displayId 37, type OVERLAY, uniqueId "overlay:1"}, isValid=true'
+  fi
+  if [ -f "$FIX/virtual-display" ]; then
+    echo 'Display id 52: DisplayInfo{"PeerLink off-screen", displayId 52, type VIRTUAL, uniqueId "virtual:test"}, isValid=true'
   fi ;;
+app_process)
+  [ "$1" = /system/bin ] && [ "$2" = PeerLinkOffscreenDisplay ] || exit 1
+  [ "$(stat -c %a "$CLASSPATH")" = 444 ] || exit 1
+  if [ "$CASE" = offscreen_denied ]; then
+    echo 'SecurityException: Requires ADD_TRUSTED_DISPLAY permission to create a trusted virtual display.'
+    exit 1
+  fi
+  directory=$3
+  touch "$FIX/virtual-display"
+  echo 52 > "$directory/display-id"
+  while [ -d "$directory" ] && [ ! -f "$directory/display-stop" ]; do /bin/sleep 0.01; done
+  rm -f "$FIX/virtual-display"
+  echo after > "$FIX/phase" ;;
 ps)
   if [ "$1" = -p ]; then exec /bin/ps -p "$2" -o args=; fi
   [ "$1" = -A ] || exit 0
@@ -141,6 +169,9 @@ dumpsys)
           if [ "$phase" = panel ]; then
             case "$CASE" in unchanged) ;; weaker) score=300 ;; *) score=100 ;; esac
           elif [ "$phase:$CASE" = after:no_reversal ]; then score=100; fi
+          if [ "$CASE" = offscreen_ready ]; then
+            case "$phase" in before) score=100 ;; virtual) score=50 ;; esac
+          fi
           echo '  *APP* UID 10541 ProcessRecord{34b1 800001:com.peerlink.app/u0a541}'
           echo '    oom adj: max=1001 curRaw=35 setRaw=35 cur=35 set=35'
           echo '  *APP* UID 10541 ProcessRecord{4ca 800002:com.peerlink.app:botengine/u0a541}'
@@ -200,6 +231,11 @@ dumpsys)
         else echo '  Window #1 Window{1 u0 com.peerlink.app/com.peerlink.app.ui.MainActivity}:'; fi
         if [ "$CASE" = wrong_display ]; then echo '    mDisplayId=0 rootTaskId=56'
         else echo '    mDisplayId=37 rootTaskId=56'; fi
+        echo '    mActivityRecord=ActivityRecord{18 u0 com.peerlink.app/.ui.MainActivity t56}'
+      fi
+      if [ "$phase" = virtual ] && [ -f "$FIX/virtual-display" ]; then
+        echo '  Window #1 Window{1 u0 com.peerlink.app/com.peerlink.app.ui.MainActivity}:'
+        echo '    mDisplayId=52 rootTaskId=56'
         echo '    mActivityRecord=ActivityRecord{18 u0 com.peerlink.app/.ui.MainActivity t56}'
       fi
       if [ "$phase:$CASE" = panel:wrong_focus ]; then echo '  mTopFocusedDisplayId=37'; else echo '  mTopFocusedDisplayId=0'; fi

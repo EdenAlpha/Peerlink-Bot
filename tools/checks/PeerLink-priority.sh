@@ -2,6 +2,7 @@
 # Run in PeerLink Prime Shell with a waiting room open.
 # With no argument, compare priority before, during and after the second display.
 # With match, hold the display through gameplay and record priority and memory.
+# With offscreen, compare a room with and without a display that has no on-screen window.
 # With restore, stop the running check and restore its temporary display setting.
 umask 077
 package=com.peerlink.app
@@ -10,6 +11,8 @@ game=jp.konami.pesam
 key=overlay_display_devices
 panel='320x480/160,own_content_only'
 work=/data/local/tmp/peerlink-bot-priority
+offscreen_payload=''
+offscreen_sha256=''
 
 stop_check() { printf 'INCONCLUSIVE. %s\n' "$*"; exit 1; }
 
@@ -142,6 +145,64 @@ overlay_ids() {
     END { if (!main) exit 1 }'
 }
 
+offscreen_registered() {
+  timeout 4 cmd display get-displays | awk -v display="$1:" '
+    $1=="Display" && $2=="id" && $3=="0:" { main=1 }
+    $1=="Display" && $2=="id" && $3==display && /type VIRTUAL/ && /"PeerLink off-screen"/ { found=1 }
+    END { if (!main) exit 2; if (!found) exit 1 }'
+}
+
+start_offscreen() {
+  local checksum attempt
+  [ -n "$offscreen_payload" ] || stop_check 'Use the packaged off-screen priority check.'
+  printf '%s' "$offscreen_payload" | base64 -d > "$work/display-helper.jar" ||
+    stop_check 'Could not unpack the off-screen display helper.'
+  checksum=$(sha256sum "$work/display-helper.jar") || stop_check 'Could not verify the display helper.'
+  [ "${checksum%% *}" = "$offscreen_sha256" ] || stop_check 'The display helper failed its checksum.'
+  chmod 0444 "$work/display-helper.jar" || stop_check 'Could not protect the display helper.'
+  (
+    CLASSPATH="$work/display-helper.jar" exec app_process /system/bin PeerLinkOffscreenDisplay "$work"
+  ) </dev/null > "$work/display-helper.log" 2>&1 &
+  for attempt in 1 2 3 4 5 6 7 8; do
+    [ ! -f "$work/cancel" ] || stop_check 'Check cancelled.'
+    display=$(cat "$work/display-id" 2>/dev/null)
+    case "$display" in
+      ''|0|*[!0-9]*) ;;
+      *) if offscreen_registered "$display"; then
+           printf 'Android registered off-screen display %s.\n' "$display"
+           return 0
+         fi ;;
+    esac
+    sleep 1
+  done
+  tail -n 12 "$work/display-helper.log"
+  stop_check 'Android did not register the off-screen display.'
+}
+
+release_offscreen() {
+  [ -f "$work/display-helper.jar" ] || return 0
+  local id attempt status
+  : > "$work/display-stop" || return 1
+  id=$(cat "$work/display-id" 2>/dev/null)
+  if [ -n "$id" ]; then
+    for attempt in 1 2 3 4; do
+      offscreen_registered "$id"
+      status=$?
+      if [ "$status" -eq 1 ]; then
+        echo 'Off-screen display closed.'
+        break
+      fi
+      sleep 1
+    done
+    if [ "$status" -ne 1 ]; then
+      echo 'Display close requested. The helper will also close it at its time limit.'
+      return 1
+    fi
+  fi
+  rm -f "$work/display-helper.jar" "$work/display-helper.log" "$work/display-id" \
+    "$work/display-id.pending" "$work/display-stop"
+}
+
 restore_display() {
   [ -f "$work/previous" ] || return 0
   local current previous
@@ -163,11 +224,14 @@ restore_display() {
 }
 
 release_check() {
-  if restore_display; then
+  if release_offscreen && restore_display; then
     rm -f "$work/run.sh" "$work/pid" "$work/cancel"
     rmdir "$work"
   else
-    echo 'Display restore needs attention. In Developer options, set Simulate secondary displays to None. Then run this script with restore.'
+    echo 'Display restore needs attention. Run this script again with restore.'
+    if [ -f "$work/previous" ]; then
+      echo 'You can also set Simulate secondary displays to None in Developer options.'
+    fi
     return 1
   fi
 }
@@ -292,16 +356,15 @@ record_exit() {
   printf 'Android returned no exit record for %s PID %s during this check.\n' "$package_name" "$pid"
 }
 
-record_match() {
-  local display="$1" sample=0 current_bot current_game bot_adj game_adj memory timestamp
+record_priorities() {
+  local display="$1" duration="$2" sample=0 current_bot current_game bot_adj game_adj memory timestamp
   local uptime ignored deadline
   read -r uptime ignored < /proc/uptime || stop_check 'Android did not expose its uptime.'
-  deadline=$(( ${uptime%%.*} + 900 ))
-  printf '\nWindow ready. Join the room and play one match. Recording for up to 15 minutes.\n'
+  deadline=$(( ${uptime%%.*} + duration ))
   while read -r uptime ignored < /proc/uptime && [ "${uptime%%.*}" -lt "$deadline" ]; do
     if [ -f "$work/cancel" ]; then
       echo 'Recording stopped from Prime Shell.'
-      return 0
+      return 1
     fi
     timestamp=$(date '+%H:%M:%S')
     current_bot=$(process_pid "$engine")
@@ -312,20 +375,20 @@ record_match() {
       check_windows "$display" || :
       [ "$current_bot" = "$bot_pid" ] || record_exit "$package" "$bot_pid"
       [ "$current_game" = "$game_pid" ] || record_exit "$game" "$game_pid"
-      return 0
+      return 1
     fi
     bot_adj=$(score "$bot_pid" "$engine") || bot_adj=unavailable
     game_adj=$(score "$game_pid" "$game") || game_adj=unavailable
     memory=$(awk '/^(MemAvailable|SwapFree):/ { printf "%s%.0fMiB ", $1, $2/1024 }' /proc/meminfo)
     printf '%s   bot PID %s score %s   eFootball PID %s score %s   %s\n' \
       "$timestamp" "$bot_pid" "$bot_adj" "$game_pid" "$game_adj" "$memory"
-    if [ $((sample % 3)) -eq 0 ]; then
+    if [ "$duration" -lt 900 ] || [ $((sample % 3)) -eq 0 ]; then
       check_windows "$display" || :
     fi
     sample=$((sample + 1))
     sleep 10
   done
-  echo 'Recording reached its time limit.'
+  return 0
 }
 
 measure() {
@@ -334,7 +397,7 @@ measure() {
   echo "$$" > "$work/pid"
   local previous initial_display_setting ids display attempt settle grace base_low base_high panel_low panel_high
   local android_user="$1" bot_pid="$2" mode="$3" game_pid='' low high phase_input baseline_input panel_input
-  printf 'PeerLink priority check v6 (%s). Android user %s, bot PID %s. Lower scores receive stronger protection against low-memory kills.\n' "$mode" "$android_user" "$bot_pid"
+  printf 'PeerLink priority check v7 (%s). Android user %s, bot PID %s. Lower scores receive stronger protection against low-memory kills.\n' "$mode" "$android_user" "$bot_pid"
   local initial_score
   if initial_score=$(score "$bot_pid" "$engine"); then
     printf 'At script start, before verifying the game screen: bot score %s (outside the comparison).\n' "$initial_score"
@@ -355,7 +418,7 @@ measure() {
     *) echo 'A simulated display is already configured at startup.' ;;
   esac
   open_game
-  if [ "$mode" = match ]; then
+  if [ "$mode" != compare ]; then
     # Opening the window for a live match only requires the two game processes.
     # A foreground comparison is already available from the separate check.
     for attempt in 1 2 3 4 5; do
@@ -382,27 +445,53 @@ measure() {
   case "$previous" in ''|null) ;; *) stop_check 'A simulated display is already configured.' ;; esac
   ids=$(overlay_ids) || stop_check 'Android did not list its displays.'
   [ -z "$ids" ] || stop_check 'A simulated display is already active.'
+  if [ "$mode" = offscreen ]; then
+    printf '\nWithout a second display. Recording 60 seconds with eFootball on the main screen.\n'
+    record_priorities none 60 || return 1
+    open_game
+    ids=$(overlay_ids) || stop_check 'Android did not list its displays after the baseline.'
+    [ -z "$ids" ] || stop_check 'A simulated display appeared during the baseline.'
+  fi
   [ ! -f "$work/cancel" ] || stop_check 'Check cancelled.'
   local current
   current=$(display_setting) || stop_check 'Android could not recheck the display setting.'
   [ "$current" = "$previous" ] || stop_check 'The display setting changed before the test.'
-  printf '%s\n' "$previous" > "$work/previous" || stop_check 'Could not save the display setting.'
-  write_display_setting put global "$key" "$panel" || stop_check 'Android could not enable the simulated display.'
-  display=''
-  for attempt in 1 2 3 4 5; do
-    ids=$(overlay_ids) || stop_check 'Android stopped reporting its displays.'
-    case "$ids" in '') sleep 1 ;; *[!0-9]*) stop_check 'The new display could not be identified uniquely.' ;; *) display=$ids; break ;; esac
-  done
-  [ -n "$display" ] || stop_check 'Android did not create the simulated display.'
+  if [ "$mode" = offscreen ]; then
+    start_offscreen
+  else
+    printf '%s\n' "$previous" > "$work/previous" || stop_check 'Could not save the display setting.'
+    write_display_setting put global "$key" "$panel" || stop_check 'Android could not enable the simulated display.'
+    display=''
+    for attempt in 1 2 3 4 5; do
+      ids=$(overlay_ids) || stop_check 'Android stopped reporting its displays.'
+      case "$ids" in '') sleep 1 ;; *[!0-9]*) stop_check 'The new display could not be identified uniquely.' ;; *) display=$ids; break ;; esac
+    done
+    [ -n "$display" ] || stop_check 'Android did not create the simulated display.'
+  fi
   timeout 8 am start --user "$android_user" --display "$display" -a android.intent.action.MAIN \
-    -c android.intent.category.LAUNCHER -n "$package/.ui.MainActivity" || stop_check 'Android could not open PeerLink on the simulated display.'
+    -c android.intent.category.LAUNCHER -n "$package/.ui.MainActivity" || stop_check 'Android could not open PeerLink on the second display.'
   sleep 2
   open_game
-  if [ "$mode" = match ]; then
+  if [ "$mode" != compare ]; then
     for attempt in 1 2 3 4 5; do
       [ ! -f "$work/cancel" ] || stop_check 'Check cancelled.'
       if check_windows "$display"; then
-        record_match "$display"
+        if [ "$mode" = offscreen ]; then
+          printf '\nOn the off-screen display. Recording for about 75 seconds. Leave eFootball at the title screen.\n'
+          record_priorities "$display" 75 || return 1
+          local foreground_task=''
+          if check_windows game >/dev/null; then foreground_task=$(game_task); fi
+          release_offscreen || return 1
+          if [ -n "$foreground_task" ] && [ "$(process_pid "$game")" = "$game_pid" ] &&
+             ! check_windows game >/dev/null; then
+            timeout 5 am task focus "$foreground_task" || :
+          fi
+          echo 'Off-screen priority check finished.'
+        else
+          printf '\nWindow ready. Join the room and play one match. Recording for up to 15 minutes.\n'
+          record_priorities "$display" 900 || return 1
+          echo 'Recording reached its time limit.'
+        fi
         return $?
       fi
       [ "$attempt" -eq 5 ] || sleep 2
@@ -449,7 +538,10 @@ case "${1-}" in
     release_check; exit $? ;;
   '') mode=compare ;;
   match) mode=match ;;
-  *) echo 'Run without arguments for the priority check, with match to record one match, or with restore to stop.'; exit 1 ;;
+  offscreen)
+    [ -n "$offscreen_payload" ] || stop_check 'Use the packaged off-screen priority check.'
+    mode=offscreen ;;
+  *) echo 'Run without arguments to compare priority, with match to record a match, with offscreen to check an off-screen display, or with restore to stop.'; exit 1 ;;
 esac
 
 android_user=$(timeout 3 am get-current-user) || stop_check 'Prime could not read the current Android user.'
@@ -470,6 +562,8 @@ fi
 ) </dev/null >/dev/null 2>&1 &
 if [ "$mode" = match ]; then
   printf 'Recording started. When the small PeerLink window appears in eFootball, join your room and play one match.\n'
+elif [ "$mode" = offscreen ]; then
+  printf 'Off-screen check started. Leave eFootball on its title screen for about two and a half minutes.\n'
 else
   printf 'Check started. If eFootball stays in the background, open it from Home or Recents. Leave the title screen visible until the report finishes.\n'
 fi

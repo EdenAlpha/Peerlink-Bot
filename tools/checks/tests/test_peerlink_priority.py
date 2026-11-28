@@ -2,6 +2,8 @@
 
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+import base64
+import hashlib
 import os
 import subprocess
 import tempfile
@@ -53,6 +55,8 @@ cases = {
     "match_game_exit": "process=jp.konami.pesam reason=3 (LOW_MEMORY)",
     "match_cancel": "Recording stopped from Prime Shell",
     "match_no_window": "The window could not be verified on the second display",
+    "offscreen_ready": "Off-screen priority check finished.",
+    "offscreen_denied": "Requires ADD_TRUSTED_DISPLAY permission",
 }
 
 def run(case):
@@ -65,26 +69,35 @@ def run(case):
         fixture = base / 'android-command'
         fixture.write_bytes((here / 'priority-android.sh').read_bytes())
         fixture.chmod(0o700)
-        for command in ('ps', 'am', 'settings', 'dumpsys', 'cmd', 'sleep'):
+        for command in ('ps', 'am', 'settings', 'dumpsys', 'cmd', 'sleep', 'app_process'):
             (exe / command).symlink_to(fixture)
         lock = base / 'lock'
         download = base / 'emulated/0/Download'
         downloaded = base / 'PeerLink-priority.sh'
-        downloaded.write_text(source.replace('/data/local/tmp/peerlink-bot-priority', str(lock))
-                              .replace('/storage/emulated/', str(base / 'emulated') + '/'))
+        script = source.replace('/data/local/tmp/peerlink-bot-priority', str(lock))
+        script = script.replace('/storage/emulated/', str(base / 'emulated') + '/')
+        offscreen = case.startswith("offscreen_")
+        if offscreen:
+            helper = b"fixture helper"
+            script = script.replace("offscreen_payload=''", f"offscreen_payload='{base64.b64encode(helper).decode()}'")
+            script = script.replace("offscreen_sha256=''", f"offscreen_sha256='{hashlib.sha256(helper).hexdigest()}'")
+            (base / "uptime").write_text("100.00 0.00\n")
+            script = script.replace("/proc/uptime", str(base / "uptime"))
+        downloaded.write_text(script)
         initial = {'already_set':'640x480/160','list_has_value':'640x480/160','list_empty_value':'','original_empty':''}.get(case,'null')
         (base / 'setting').write_text(initial + '\n')
         env = dict(os.environ, PATH=str(exe) + ':' + os.environ['PATH'], FIX=temp, CASE=case)
         live = case.startswith("match_")
         command = ["sh", str(downloaded)]
+        mode = ["offscreen"] if offscreen else ["match"] if live else []
         start = subprocess.run(
-            command + (["match"] if live else []),
+            command + mode,
             text=True, capture_output=True, env=env, timeout=4,
         )
         if case == 'no_bot':
             assert start.returncode != 0 and cases[case] in start.stdout and not lock.exists(), start
             return
-        expected_start = "Recording started" if live else "Check started"
+        expected_start = "Off-screen check started" if offscreen else "Recording started" if live else "Check started"
         assert start.returncode == 0 and expected_start in start.stdout, start
         report = next(download.glob('PeerLink-priority-*.txt'))
         stop_requested = False
@@ -114,6 +127,16 @@ def run(case):
             assert "Restored the original simulated-display setting" in result, result
         if case in ("match_bot_exit", "match_game_exit"):
             assert "Process changed" in result and "pid=17099" not in result, result
+        if offscreen:
+            assert not (base / "setting-writes").exists() and not (base / "virtual-display").exists(), result
+            assert "Without a second display." in result, result
+        if case == "offscreen_ready":
+            assert "--display 52" in calls and "Off-screen display closed." in result, (calls, result)
+            baseline, projected = result.split("On the off-screen display.", 1)
+            assert "bot PID 800002 score 100" in baseline, baseline
+            assert "bot PID 800002 score 50" in projected and "PeerLink displays= 52" in projected, projected
+        if case == "offscreen_denied":
+            assert "--display 52" not in calls, calls
         if case in ('stock_launcher', 'resolver_other', 'resolver_stale'):
             assert calls.count('-n jp.konami.pesam/com.epicgames.ue4.SplashActivity') == 1, (case,calls)
         if case == 'resolver_other':
