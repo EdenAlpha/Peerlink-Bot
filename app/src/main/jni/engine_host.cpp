@@ -1169,7 +1169,7 @@ JNIEXPORT jintArray JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativePlaySt
         JNIEnv *env, jobject, jlong base) {
     if (!valid(base) || !g_match_stage || !g_settings_sync_complete) return nullptr;
     constexpr unsigned kPlayers = 22;
-    constexpr unsigned kHeaderSize = 11;
+    constexpr unsigned kHeaderSize = 12;
     jint state[kHeaderSize + 2 * kPlayers]{};
     {
         TaskLock lock;
@@ -1262,6 +1262,15 @@ JNIEXPORT jintArray JNICALL Java_com_peerlink_app_bot_EngineRuntime_nativePlaySt
         state[8] = static_cast<jint>(position[1] * 1000);
         state[9] = static_cast<jint>(velocity[0] * 1000);
         state[10] = static_cast<jint>(velocity[2] * 1000);
+        // The original input selector at 0x6fa40f8 distinguishes the
+        // defending side of a free kick from ordinary open-play control.
+        const uintptr_t world = *reinterpret_cast<const uintptr_t *>(sim + 0x4d0);
+        if (world && *reinterpret_cast<const uint32_t *>(world + 0x3314) == 3 &&
+            *reinterpret_cast<const uint32_t *>(world + 0x34ac) == 5) {
+            const unsigned restart_side = *reinterpret_cast<const uint32_t *>(world + 0x34b0);
+            state[11] = restart_side == 1 - side &&
+                velocity[0] * velocity[0] + velocity[1] * velocity[1] + velocity[2] * velocity[2] <= 0.45f * 0.45f;
+        }
         for (unsigned player = 0; player < kPlayers; ++player) {
             const unsigned slot = kHeaderSize + 2 * player;
             state[slot] = INT32_MIN;

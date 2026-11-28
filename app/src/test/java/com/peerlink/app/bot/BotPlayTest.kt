@@ -88,17 +88,19 @@ class BotPlayTest {
     }
 
     @Test fun rejectsInvalidSelectionAndAcceptsVersionedNativeLayout() {
-        val words = IntArray(55).apply {
+        val words = IntArray(56).apply {
             this[0] = 99; this[1] = 1; this[2] = 17; this[3] = -1
             this[4] = 11; this[5] = 0
             this[7] = -3000; this[8] = 108
-            this[11 + 2 * 17] = 1200
+            this[12 + 2 * 17] = 1200
         }
         val state = requireNotNull(BotPlayState.decode(words))
         assertEquals(17, state.selected)
         assertEquals(PitchPoint(0f, -3f), state.ball)
         assertEquals(PitchPoint(1.2f, 0f), state.players[17])
-        assertNull(BotPlayState.decode(words.copyOf(54)))
+        assertFalse(state.defendingFreeKick)
+        assertTrue(requireNotNull(BotPlayState.decode(words.copyOf().apply { this[11] = 1 })).defendingFreeKick)
+        assertNull(BotPlayState.decode(words.copyOf(55)))
         assertNull(BotPlayState.decode(words.copyOf().apply { this[2] = 0 }))
         assertNull(BotPlayState.decode(words.copyOf().apply { this[0] = 0 }))
     }

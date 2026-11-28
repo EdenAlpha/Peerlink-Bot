@@ -29,6 +29,7 @@ internal data class BotPlayState(
     val velocity: PitchPoint,
     val players: List<PitchPoint?>,
     val estimatedSelection: Boolean = false,
+    val defendingFreeKick: Boolean = false,
 ) {
     val ownPlayers get() = side * 11 until (side + 1) * 11
     val opponents get() = (1 - side) * 11 until (2 - side) * 11
@@ -86,7 +87,7 @@ internal data class BotPlayState(
 
     companion object {
         fun decode(values: IntArray?): BotPlayState? {
-            if (values == null || values.size != 55) return null
+            if (values == null || values.size != 56) return null
             val side = values[1]
             val selected = values[2]
             if (values[0] <= 0 || side !in 0..1 || selected !in -1..21 ||
@@ -98,10 +99,11 @@ internal data class BotPlayState(
                 PitchPoint(values[6] / 1000f, values[7] / 1000f), values[8] / 1000f,
                 PitchPoint(values[9] / 1000f, values[10] / 1000f),
                 List(22) { player ->
-                    val offset = 11 + player * 2
+                    val offset = 12 + player * 2
                     if (values[offset] == Int.MIN_VALUE || values[offset + 1] == Int.MIN_VALUE) null
                     else PitchPoint(values[offset] / 1000f, values[offset + 1] / 1000f)
                 },
+                defendingFreeKick = values[11] == 1,
             )
         }
     }

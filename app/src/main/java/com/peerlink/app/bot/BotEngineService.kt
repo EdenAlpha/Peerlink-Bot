@@ -513,6 +513,14 @@ class BotEngineService : Service() {
             val now = SystemClock.elapsedRealtime()
             val state = EngineRuntime.playState()
             observeHostStall("play_state", now)
+            if (state?.defendingFreeKick == true) {
+                // A held open-play input otherwise carries into the engine's
+                // free-kick controller, which can act on a different player.
+                if (heldButton != null) releaseButton()
+                setStick(BotStick())
+                controlTracker.reset()
+                return
+            }
             if (state == null || state.frame == lastPlayFrame) {
                 if (lastPlayAt?.let { now - it >= 250 } != false) setStick(BotStick())
                 if (now >= nextPlaySample) {
